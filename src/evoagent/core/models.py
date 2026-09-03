@@ -1,4 +1,4 @@
-"""Validated data contracts shared by runtime components."""
+"""运行时各组件共享的、经过校验的数据契约。"""
 
 from datetime import datetime
 from enum import StrEnum
@@ -11,7 +11,7 @@ TOOL_NAME_PATTERN = r"^[A-Za-z][A-Za-z0-9_-]{0,63}$"
 
 
 class ContractModel(BaseModel):
-    """Strict base whose top-level fields cannot be reassigned."""
+    """不允许额外字段且顶层字段不可重新赋值的严格基类。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -76,7 +76,7 @@ class EventType(StrEnum):
 
 
 class ToolDefinition(ContractModel):
-    """Tool metadata and JSON Schema exposed to the model."""
+    """提供给模型的工具元数据和 JSON Schema。"""
 
     name: str = Field(pattern=TOOL_NAME_PATTERN)
     description: str = Field(min_length=1, max_length=1_024)
@@ -84,7 +84,7 @@ class ToolDefinition(ContractModel):
 
 
 class ToolCall(ContractModel):
-    """A fully assembled tool request produced by a model."""
+    """由模型生成并已完成组装的工具调用请求。"""
 
     call_id: str = Field(min_length=1, max_length=256)
     name: str = Field(pattern=TOOL_NAME_PATTERN)
@@ -92,7 +92,7 @@ class ToolCall(ContractModel):
 
 
 class ToolResult(ContractModel):
-    """The one result that must correspond to one ToolCall."""
+    """与某一次 ToolCall 一一对应的工具结果。"""
 
     tool_call_id: str = Field(min_length=1, max_length=256)
     name: str = Field(pattern=TOOL_NAME_PATTERN)
@@ -110,7 +110,7 @@ class ToolResult(ContractModel):
 
 
 class Message(ContractModel):
-    """A provider-neutral chat message."""
+    """与具体模型服务无关的聊天消息。"""
 
     role: MessageRole
     content: str | None = None
@@ -185,7 +185,7 @@ class ModelResponse(ContractModel):
 
 
 class ProviderEvent(ContractModel):
-    """One normalized item in the provider's asynchronous event stream."""
+    """模型服务异步事件流中经过标准化的一项事件。"""
 
     type: ProviderEventType
     text_delta: str | None = None
@@ -255,7 +255,7 @@ class ProviderEvent(ContractModel):
 
 
 class RuntimeEvent(ContractModel):
-    """An observable event emitted during one Run."""
+    """一次 Run 执行过程中发出的可观测事件。"""
 
     run_id: UUID
     sequence: int = Field(ge=1)
@@ -272,7 +272,7 @@ class RuntimeEvent(ContractModel):
 
 
 class RunResult(ContractModel):
-    """The terminal summary returned by AgentRunner."""
+    """AgentRunner 返回的最终运行摘要。"""
 
     run_id: UUID
     status: RunStatus

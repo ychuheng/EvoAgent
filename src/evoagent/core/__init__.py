@@ -1,1 +1,1 @@
-"""Core runtime contracts and orchestration."""
+"""核心运行时契约与编排。"""

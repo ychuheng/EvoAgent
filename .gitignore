@@ -1,29 +1,29 @@
-# Python caches and build output
+# Python 缓存和构建产物
 __pycache__/
 *.py[cod]
 *.egg-info/
 build/
 dist/
 
-# Local environments and tool caches
+# 本地虚拟环境和工具缓存
 .venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 
-# Local configuration and secrets
+# 本地配置和敏感信息
 .env
 .env.*
 !.env.example
 
-# Runtime workspace
+# 运行时工作目录
 workspace/
 
-# Local reference material; never publish the user's resume or cloned upstream trees
+# 本地参考资料；禁止公开用户简历或克隆的上游项目目录
 tmp/
 个人简历-*.pdf
 
-# Editors and operating systems
+# 编辑器和操作系统生成的文件
 .idea/
 .vscode/
 .DS_Store

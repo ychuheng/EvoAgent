@@ -1,4 +1,4 @@
-"""Deterministic registration and discovery of available tools."""
+"""以确定性顺序注册和发现可用工具。"""
 
 from collections.abc import Iterable
 
@@ -7,23 +7,23 @@ from evoagent.tools.base import BaseTool, ToolInstance
 
 
 class ToolRegistryError(Exception):
-    """Base class for registry failures."""
+    """工具注册表错误的基类。"""
 
 
 class DuplicateToolError(ToolRegistryError):
-    """Raised when a name is registered more than once."""
+    """同一个工具名称被重复注册时抛出。"""
 
 
 class ToolNotFoundError(ToolRegistryError):
-    """Raised when a caller requests a tool that is not registered."""
+    """调用方请求了未注册的工具时抛出。"""
 
 
 class InvalidToolError(ToolRegistryError):
-    """Raised when an object does not implement the BaseTool contract."""
+    """对象没有实现 BaseTool 契约时抛出。"""
 
 
 class ToolRegistry:
-    """Store tools by unique name and expose stable model definitions."""
+    """按唯一名称存储工具，并公开顺序稳定的模型工具定义。"""
 
     def __init__(self, tools: Iterable[ToolInstance] = ()) -> None:
         self._tools: dict[str, ToolInstance] = {}
@@ -31,7 +31,7 @@ class ToolRegistry:
             self.register(tool)
 
     def register(self, tool: ToolInstance) -> None:
-        """Register one valid tool, rejecting ambiguous duplicate names."""
+        """注册一个有效工具，并拒绝含义不明确的重名工具。"""
 
         if not isinstance(tool, BaseTool):
             raise InvalidToolError("registered objects must inherit from BaseTool")
@@ -41,7 +41,7 @@ class ToolRegistry:
         self._tools[definition.name] = tool
 
     def get(self, name: str) -> ToolInstance:
-        """Look up a tool by its exact public name."""
+        """根据工具公开的准确名称查找工具。"""
 
         try:
             return self._tools[name]
@@ -53,12 +53,12 @@ class ToolRegistry:
 
     @property
     def names(self) -> tuple[str, ...]:
-        """Return names in a deterministic order."""
+        """以确定性顺序返回工具名称。"""
 
         return tuple(sorted(self._tools))
 
     def definitions(self) -> tuple[ToolDefinition, ...]:
-        """Return model-facing definitions in the same deterministic order."""
+        """以相同的确定性顺序返回面向模型的工具定义。"""
 
         return tuple(self._tools[name].definition() for name in self.names)
 

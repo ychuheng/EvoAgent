@@ -1,1 +1,1 @@
-"""Model provider adapters."""
+"""模型服务适配器。"""

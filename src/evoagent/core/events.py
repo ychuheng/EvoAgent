@@ -1,4 +1,4 @@
-"""Runtime event collection with ordering and payload redaction."""
+"""支持顺序编号和载荷脱敏的运行事件收集功能。"""
 
 import asyncio
 import math
@@ -27,7 +27,7 @@ _SENSITIVE_KEY_PARTS = (
 
 
 class RuntimeEventSink(Protocol):
-    """Destination for ordered events belonging to one Run."""
+    """接收同一次 Run 有序事件的目标接口。"""
 
     @property
     def events(self) -> tuple[RuntimeEvent, ...]: ...
@@ -38,7 +38,7 @@ class RuntimeEventSink(Protocol):
 
 
 def sanitize_payload(value: Any, *, max_string_chars: int) -> JsonValue:
-    """Return a JSON-compatible value with secrets removed and large strings shortened."""
+    """移除敏感信息并截断过长字符串，返回与 JSON 兼容的值。"""
 
     if isinstance(value, Mapping):
         sanitized: dict[str, JsonValue] = {}
@@ -65,7 +65,7 @@ def sanitize_payload(value: Any, *, max_string_chars: int) -> JsonValue:
 
 
 class InMemoryEventSink:
-    """Collect events in memory and assign a single sequence under concurrency."""
+    """在内存中收集事件，并在并发情况下统一分配事件序号。"""
 
     def __init__(self, run_id: UUID, *, max_string_chars: int = 2_000) -> None:
         if max_string_chars < 1:
@@ -83,7 +83,7 @@ class InMemoryEventSink:
         self, event_type: EventType, payload: Mapping[str, Any] | None = None
     ) -> RuntimeEvent:
         clean_payload = sanitize_payload(payload or {}, max_string_chars=self._max_string_chars)
-        if not isinstance(clean_payload, dict):  # Defensive: emit accepts only a mapping root.
+        if not isinstance(clean_payload, dict):  # 防御性检查：emit 只接受映射类型的根节点。
             raise TypeError("event payload root must be a mapping")
 
         async with self._lock:

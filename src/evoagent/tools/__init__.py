@@ -1,1 +1,1 @@
-"""Tool abstractions, registration, and built-in tools."""
+"""工具抽象、工具注册和内置工具。"""

@@ -1,4 +1,4 @@
-"""Typed runtime configuration loaded from ``EVOAGENT_*`` environment variables."""
+"""从 ``EVOAGENT_*`` 环境变量加载的类型化运行配置。"""
 
 from enum import StrEnum
 from pathlib import Path
@@ -9,14 +9,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProviderName(StrEnum):
-    """Provider implementations selectable through configuration."""
+    """可以通过配置选择的模型服务实现。"""
 
     MOCK = "mock"
     OPENAI_COMPATIBLE = "openai_compatible"
 
 
 class LogLevel(StrEnum):
-    """Supported application log levels."""
+    """应用程序支持的日志级别。"""
 
     DEBUG = "DEBUG"
     INFO = "INFO"
@@ -25,11 +25,10 @@ class LogLevel(StrEnum):
 
 
 class Settings(BaseSettings):
-    """Validated settings for one EvoAgent process.
+    """单个 EvoAgent 进程经过校验的配置。
 
-    Mock mode deliberately has no secret requirements so that tests and the first
-    local run are deterministic. Real-provider fields are checked together only
-    when the OpenAI-compatible adapter is selected.
+    Mock 模式特意不要求任何密钥，以保证测试和首次本地运行是确定的。
+    只有选择 OpenAI 兼容适配器时，才会统一检查真实模型服务所需的字段。
     """
 
     model_config = SettingsConfigDict(
@@ -57,7 +56,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_provider_requirements(self) -> Self:
-        """Require connection details only for the real provider."""
+        """仅在使用真实模型服务时要求提供连接信息。"""
 
         if self.provider is ProviderName.OPENAI_COMPATIBLE:
             missing: list[str] = []

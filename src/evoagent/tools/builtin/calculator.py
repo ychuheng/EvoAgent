@@ -1,4 +1,4 @@
-"""A small arithmetic tool that never evaluates arbitrary Python code."""
+"""一个不会执行任意 Python 代码的小型算术工具。"""
 
 import ast
 import math
@@ -29,7 +29,7 @@ class CalculatorArguments(ContractModel):
 
 
 class CalculatorTool(BaseTool[CalculatorArguments]):
-    """Evaluate a deliberately limited arithmetic expression through ``ast``."""
+    """通过 ``ast`` 计算受到严格限制的算术表达式。"""
 
     name = "calculator"
     description = "Calculate an arithmetic expression using numbers and safe operators."
