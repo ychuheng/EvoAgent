@@ -1,0 +1,30 @@
+# Python caches and build output
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Local environments and tool caches
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime workspace
+workspace/
+
+# Local reference material; never publish the user's resume or cloned upstream trees
+tmp/
+个人简历-*.pdf
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
