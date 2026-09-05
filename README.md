@@ -2,7 +2,7 @@
 
 EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目标是在可靠任务执行的基础上，建立可验证、可版本化、可回滚的 Skill 生命周期。
 
-当前实现进度：阶段一的模块 0～6，包括工程配置、核心数据契约、运行事件、工具系统、MockProvider、ContextBuilder 和 AgentLoop；下一步实现 AgentRunner。
+当前实现进度：阶段一的模块 0～9 已完成。项目已经具备完整 Run 生命周期、OpenAI-compatible 流式 Provider、CLI、安全只读工具、重复调用保护和安全并发，可以运行一个最小但完整的 Agent。
 
 ## 环境要求
 
@@ -32,7 +32,27 @@ ruff format --check .
 pytest
 ```
 
-默认配置使用 `mock` Provider，不需要 API Key。复制 `.env.example` 为 `.env` 后，可以修改本地配置；真实 Provider 会在后续模块实现。
+## 运行
+
+先用不需要 API Key 的演示模式验证完整链路：
+
+```powershell
+.\.venv\Scripts\evoagent --demo --show-events
+```
+
+默认配置使用 `mock` Provider。也可以直接提交一个任务：
+
+```powershell
+.\.venv\Scripts\evoagent "介绍一下当前项目"
+```
+
+若要连接真实模型服务，复制 `.env.example` 为 `.env`，将 Provider 改为 `openai_compatible`，并填写 API Key、Base URL 和模型名。当前适配的是 OpenAI-compatible `/chat/completions` 流式接口，不自动重试。
+
+内置工具包括：
+
+- `calculator`：受限算术表达式计算；
+- `file_read`：只允许读取 Workspace 内的 UTF-8 普通文件；
+- `web_fetch`：只读取公开 HTTP/HTTPS 文本资源，并限制重定向、超时和响应大小。
 
 详细设计见：
 

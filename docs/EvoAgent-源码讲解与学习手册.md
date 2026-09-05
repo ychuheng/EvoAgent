@@ -17,14 +17,17 @@
 11. 模块 4：ModelProvider 与 MockProvider
 12. 模块 5：ContextBuilder
 13. 模块 6：AgentLoop
-14. 当前代码如何协作
-15. 测试体系
-16. 当前不能完成的功能
-17. 后续模块路线
-18. 推荐阅读源码的顺序
-19. 当前阶段应掌握的核心思想
-20. 文档后续维护规则
-21. 本阶段总结
+14. 模块 7：AgentRunner
+15. 模块 8：OpenAICompatibleProvider 与 CLI
+16. 模块 9：安全只读工具与阶段一收尾
+17. 当前代码如何协作
+18. 测试体系
+19. 当前不能完成的功能
+20. 后续阶段路线
+21. 推荐阅读源码的顺序
+22. 当前阶段应掌握的核心思想
+23. 文档后续维护规则
+24. 本阶段总结
 
 ## 1. 阅读说明
 
@@ -47,12 +50,11 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 - 模块 4：ModelProvider 与 MockProvider
 - 模块 5：ContextBuilder
 - 模块 6：AgentLoop
-
-下一模块：
-
 - 模块 7：AgentRunner
+- 模块 8：OpenAICompatibleProvider 与 CLI
+- 模块 9：安全只读工具、重复调用保护与安全并发
 
-当前已经可以使用 MockProvider 确定性运行“模型决定—工具执行—模型继续”的核心循环，但还没有负责总超时、取消和最终 RunResult 汇总的 AgentRunner，也没有 CLI 和真实模型接口，因此还不能作为完整应用直接使用。
+阶段一已经闭环。现在既可以使用 MockProvider 确定性运行和测试，也可以通过 CLI 连接 OpenAI-compatible 模型服务，调用计算、文件读取和网页读取工具，最后得到包含完整事件的 RunResult。
 
 ### 1.2 相关文档的职责
 
@@ -165,21 +167,19 @@ AgentLoop 控制模型—工具循环
 当前代码实际形成的是：
 
 ```text
-ContextBuilder ──→ 初始 Message
-                       ↓
-                  AgentLoop
-                  ├── ToolRegistry.definitions()
-                  ├── MockProvider.stream(ModelRequest)
-                  ├── assistant ToolCall 写入消息历史
-                  ├── ToolExecutor.execute_many()
-                  │       └── ToolRegistry.get() → CalculatorTool
-                  ├── ToolResult 转成 tool Message
-                  └── 再次请求 MockProvider，直到完成或达到限制
-
-AgentLoop 与 ToolExecutor ──→ InMemoryEventSink ──→ RuntimeEvent
+CLI ──→ Settings ──→ AgentRunner
+                       ├── ContextBuilder
+                       ├── AgentLoop
+                       │   ├── MockProvider / OpenAICompatibleProvider
+                       │   └── ToolExecutor
+                       │       └── ToolRegistry
+                       │           ├── CalculatorTool
+                       │           ├── FileReadTool → WorkspaceGuard
+                       │           └── WebFetchTool → URLGuard
+                       └── InMemoryEventSink ──→ RunResult
 ```
 
-这条内核链路已经可以通过确定性测试运行。`AgentRunner`、真实 Provider 和 CLI 尚未实现，所以项目还缺少任务级生命周期管理和用户入口。
+这条链路既有单元测试，也有不访问真实模型和公网的完整集成测试。真实服务的行为仍受具体厂商兼容程度影响，所以 Provider 会严格检查协议并返回明确错误。
 
 ### 3.3 关键职责边界
 
@@ -212,28 +212,36 @@ EvoAgent/
 │   ├── EvoAgent-项目设计与分阶段实现计划.md
 │   ├── 阶段一-可测试Agent内核架构与实现指南.md
 │   ├── 开发进度与决策记录.md
+│   ├── ADR-001-阶段一运行时边界与安全策略.md
 │   └── EvoAgent-源码讲解与学习手册.md
 │
 ├── src/
 │   └── evoagent/
 │       ├── config.py
+│       ├── cli.py
 │       ├── core/
 │       │   ├── models.py
 │       │   ├── events.py
 │       │   ├── context.py
-│       │   └── loop.py
+│       │   ├── loop.py
+│       │   └── runner.py
 │       ├── providers/
 │       │   ├── base.py
-│       │   └── mock.py
+│       │   ├── mock.py
+│       │   └── openai_compatible.py
 │       └── tools/
 │           ├── base.py
 │           ├── registry.py
 │           ├── executor.py
+│           ├── guards.py
 │           └── builtin/
-│               └── calculator.py
+│               ├── calculator.py
+│               ├── file_read.py
+│               └── web_fetch.py
 │
 └── tests/
-    └── unit/
+    ├── unit/
+    └── integration/
 ```
 
 ### 4.1 为什么使用 `src` 布局
@@ -612,7 +620,7 @@ schema_version
 - 所有事件必须属于同一个 run_id；
 - 事件序号必须从 1 开始连续排列。
 
-`RunResult` 已经定义，但 AgentRunner 尚未实现，因此现在还没有真实任务返回它。
+`RunResult` 在模块 1 先定义为跨模块契约，并在模块 7 由 AgentRunner 正式生成。先固定数据形状，使后续 Runner 不需要反过来修改 Loop、事件和 CLI 的接口。
 
 ---
 
@@ -1032,6 +1040,41 @@ tool.invoke(arguments)
 - 取消传播；
 - 非法超时和长度配置。
 
+### 10.9 推荐阅读顺序
+
+阅读模块 3 时，建议沿着一次 ToolCall 的数据流前进：
+
+```text
+1. 回顾 core/models.py 中的 ToolCall 和 ToolResult
+2. 回顾 tools/base.py 中的 validate_arguments() 和 invoke()
+3. 阅读 executor.py 的构造函数
+4. 阅读 execute() 的正常路径
+5. 阅读四类可恢复错误的转换分支
+6. 阅读非预期异常和 CancelledError 的传播分支
+7. 阅读 _truncate() 和 execute_many()
+8. 对照 test_tool_executor.py 验证每条分支
+```
+
+阅读完成后，应能独立回答：一条模型生成的 ToolCall 怎样变成 ToolResult，以及哪些错误可以交还模型继续处理。
+
+### 10.10 面试与复习要点
+
+**问题一：为什么模型不能直接调用工具？**
+
+模型输出属于不可信输入，必须经过工具白名单、参数校验、超时和结果限制。ToolExecutor 正是统一执行边界。
+
+**问题二：为什么 ToolRegistry 和 ToolExecutor 要分开？**
+
+Registry 负责发现和索引，Executor 负责执行策略。分离后可以单独测试，并且方便以后在 Executor 前后增加权限、Sandbox 和幂等控制。
+
+**问题三：为什么 ToolExecutionError 会转成 ToolResult，而 RuntimeError 会继续抛出？**
+
+前者是工具声明的预期业务失败，模型可能修正；后者通常表示实现缺陷，系统不应假装可以安全恢复。
+
+**问题四：为什么取消不能转换成普通失败？**
+
+取消是上层控制流信号。如果中间层吞掉 CancelledError，Agent 可能在用户取消后继续运行。
+
 ---
 
 ## 11. 模块 4：ModelProvider 与 MockProvider
@@ -1133,6 +1176,77 @@ MockProvider 保存收到的全部 ModelRequest。测试可以检查第二次模
 
 因此，AgentLoop 的正确性由 MockProvider 验证；真实模型只负责通过同一 Provider 契约接入。
 
+### 11.9 输入、输出和正常链路
+
+MockProvider 的输入是完整 ModelRequest，输出是异步 ProviderEvent 流：
+
+```text
+ModelRequest
+  → 保存到 requests 历史
+  → 从脚本队列取出下一个 MockStep
+  → 如果是 ModelResponse，则展开成标准事件
+  → 如果是显式事件序列，则按原顺序回放
+  → 如果是 ProviderError，则在迭代事件流时抛出
+```
+
+`remaining_steps` 可以帮助测试确认 AgentLoop 是否多调用或少调用了模型。
+
+### 11.10 错误与模块边界
+
+MockProvider 会明确报告脚本耗尽，而不会擅自生成默认回答。ProviderTimeoutError 用于模拟单次模型请求超时；ProviderProtocolError 表示事件流不符合约定。
+
+ModelProvider 和 MockProvider 不负责：
+
+- 构造初始上下文；
+- 决定什么时候调用工具；
+- 执行 ToolCall；
+- 生成 RuntimeEvent；
+- 自动重试模型请求；
+- 管理任务总超时。
+
+其中 ProviderEvent 到 RuntimeEvent 的转换属于 AgentLoop，任务总超时和重试策略属于更高层。
+
+### 11.11 本模块的测试重点
+
+`test_mock_provider.py` 覆盖：
+
+- 文本响应展开为 text_delta、usage 和 completed；
+- ToolCall 展开为 tool_call_delta；
+- 显式事件序列按顺序回放；
+- 预设 ProviderError 原样抛出；
+- 脚本耗尽返回明确错误；
+- 已接收的 ModelRequest 被完整记录。
+
+### 11.12 推荐阅读顺序
+
+```text
+1. 回顾 core/models.py 中的 ModelRequest、ModelResponse 和 ProviderEvent
+2. 阅读 providers/base.py 的 ModelProvider Protocol
+3. 阅读 ProviderError 错误层次
+4. 阅读 mock.py 的 MockStep 类型
+5. 阅读 MockProvider.stream()
+6. 阅读 _events_from_response()
+7. 对照 test_mock_provider.py 查看各类脚本如何使用
+```
+
+### 11.13 面试与复习要点
+
+**问题一：为什么使用 Provider 适配层？**
+
+它隔离具体模型厂商的 HTTP 和流式协议，让 AgentLoop 只依赖统一接口，更换模型实现时无需修改核心循环。
+
+**问题二：ProviderEvent 和 RuntimeEvent 有什么区别？**
+
+ProviderEvent 是模型流式传输协议；RuntimeEvent 是整个 Agent Run 的可观测记录。二者生命周期和消费者不同。
+
+**问题三：为什么不能用真实模型完成全部单元测试？**
+
+真实模型存在随机性、费用、网络波动和限流，无法稳定复现精确边界。MockProvider 可以提供确定性脚本。
+
+**问题四：为什么 v0.1 不自动重试？**
+
+重试必须区分错误类型，并考虑预算、副作用和幂等语义。在这些规则尚未建立时盲目重试可能造成重复操作。
+
 ---
 
 ## 12. 模块 5：ContextBuilder
@@ -1197,6 +1311,71 @@ system prompt
 ContextBuilder 拒绝空 system prompt、空用户任务和空上下文块。字符串两侧空白会被清理。
 
 它不在对象内部保存消息历史。每次 `build()` 都返回新快照，避免两个 Run 意外共享或污染上下文。
+
+### 12.6 输入、输出和正常链路
+
+ContextBuilder 的输入是：
+
+```text
+system_prompt       构造器传入，可使用默认值
+user_input          本次用户任务
+external_context    零个或多个外部资料块
+```
+
+输出是：
+
+```text
+tuple[Message, ...]
+```
+
+正常链路为：
+
+```text
+清理并校验 system prompt
+  → 创建 system Message
+  → 逐块清理并包装外部上下文
+  → 创建最终 user Message
+  → 返回不可变消息元组
+```
+
+### 12.7 本模块的测试重点
+
+`test_context.py` 覆盖：
+
+- 默认 system prompt 位于第一条；
+- 自定义 system prompt 会清理两侧空白；
+- 多个外部上下文保持原始顺序；
+- 用户任务始终位于最后；
+- 空 system prompt、用户任务或上下文块被拒绝；
+- 多次 build 返回互不共享的新快照。
+
+### 12.8 推荐阅读顺序
+
+```text
+1. 回顾 Message 和 MessageRole 的校验规则
+2. 阅读 DEFAULT_SYSTEM_PROMPT
+3. 阅读 ContextBuilder.__init__() 的系统提示校验
+4. 阅读 build() 的消息追加顺序
+5. 对照 test_context.py 观察输出消息
+```
+
+### 12.9 面试与复习要点
+
+**问题一：ContextBuilder 为什么不维护整轮消息历史？**
+
+它只负责初始上下文，后续 assistant 和 tool 消息由 AgentLoop 独占管理，避免多个模块同时修改同一状态。
+
+**问题二：为什么外部上下文不用 system 角色？**
+
+外部资料可能不可信，使用 system 角色会错误提升其指令优先级。它应保持为低信任资料。
+
+**问题三：system prompt 能否作为真正安全边界？**
+
+不能。提示词只能引导模型，参数、路径、网络、权限和超时必须由代码强制执行。
+
+**问题四：为什么返回 tuple 而不是内部 list？**
+
+tuple 表达初始快照不应被原地修改，有助于减少跨 Run 状态污染。
 
 ---
 
@@ -1326,75 +1505,478 @@ Token 是软预算：当前模型响应已经发生，AgentLoop只能阻止下�
 
 ### 13.9 取消与 Run 终态事件
 
-AgentLoop 显式传播 `asyncio.CancelledError`，不把取消转换成普通失败。任务总超时、用户取消以及 `run.completed`、`run.failed` 等唯一终态事件属于下一模块 AgentRunner。
+AgentLoop 显式传播 `asyncio.CancelledError`，不把取消转换成普通失败。任务总超时、用户取消以及 `run.completed`、`run.failed` 等唯一终态事件属于 AgentRunner。
 
 这种边界可以避免 Runner、Loop 和 Executor 同时产生终态事件，导致一次 Run 被重复记账。
 
-### 13.10 当前尚未加入的循环能力
+### 13.10 后续收尾加入的循环保护
 
-模块 6 暂未实现：
+模块 9 在 AgentLoop 中补入重复调用检测。它对一批工具的名称、参数和执行结果生成稳定指纹；只有连续多轮完全相同并达到 `max_repeated_tool_calls` 阈值才停止。这样既阻止无进展死循环，也不会误伤参数或结果已经变化的正常重试。
 
-- 重复 ToolCall 和相同结果检测；
-- 只读并行工具执行；
-- 任务总超时；
-- Provider 自动重试；
-- 上下文压缩和长期记忆。
+任务总超时已经由 AgentRunner 实现；只读安全并发属于 ToolExecutor。Provider 自动重试、上下文压缩和长期记忆仍属于后续阶段。
 
-这些能力按照计划由模块 7、模块 9或后续阶段实现。
+### 13.11 本模块的测试重点
+
+`test_agent_loop.py` 覆盖：
+
+- 模型不调用工具而直接回答；
+- 调用 Calculator 后进入下一轮并回答；
+- assistant 同时包含文本和 ToolCall 时仍先执行工具；
+- 未知工具错误反馈模型后继续；
+- 工具执行失败反馈模型后继续；
+- length 等非正常结束不能伪装成成功；
+- ProviderError 转换成循环失败；
+- Provider 流提前结束；
+- 达到最大迭代次数；
+- 达到 Token 软预算后不再请求模型；
+- Usage 缺失时明确返回 None；
+- CancelledError 继续向上传播；
+- 连续重复相同工具调用和结果时达到限制；
+- 非法循环配置在构造时被拒绝。
+
+### 13.12 推荐阅读顺序
+
+AgentLoop 依赖前面多个模块，建议按执行顺序阅读：
+
+```text
+1. 阅读 AgentLoopResult 的字段和校验器
+2. 阅读 AgentLoop.__init__() 的依赖与限制
+3. 阅读 run() 中 ModelRequest 的构造
+4. 阅读 _consume_response() 的 Provider 流检查
+5. 回到 run() 阅读 assistant 消息追加
+6. 阅读 ToolExecutor 调用和 tool 消息回填
+7. 阅读正常完成、失败和限制三个出口
+8. 阅读 _tool_message() 与 _failure()
+9. 对照 test_agent_loop.py 逐个运行场景
+```
+
+不要第一次就逐行追踪所有异常分支。先掌握正常的两轮计算流程，再阅读错误和限制处理。
+
+### 13.13 面试与复习要点
+
+**问题一：AgentLoop 的本质是什么？**
+
+它是一个带终止条件的状态循环：模型产生下一步动作，Runtime 执行动作并把观察结果反馈模型，直到得到最终答案或达到限制。
+
+**问题二：为什么 assistant ToolCall 必须先写入消息历史？**
+
+下一条 tool 消息需要引用前面的调用 ID。缺少 assistant 调用消息会破坏 OpenAI-compatible 工具调用协议。
+
+**问题三：为什么带有文本的 ToolCall 不能直接作为最终答案？**
+
+只要响应包含 ToolCall，就表示模型仍要求外部执行。那段文本只是伴随说明，不代表任务已经完成。
+
+**问题四：为什么 Token 预算是软限制？**
+
+只有一次模型请求完成后才能获得 Usage，因此系统只能阻止下一次请求，无法撤销已经发生的 Token 消耗。
+
+**问题五：为什么 Usage 缺失时使用 None？**
+
+零表示确认没有消耗，None 表示无法得知。混淆两者会让预算和评测数据失真。
+
+**问题六：AgentLoop 和 AgentRunner 的区别是什么？**
+
+AgentLoop 管模型—工具迭代；AgentRunner 管整个 Run 的 run_id、总超时、取消、唯一终态事件和结果汇总。
 
 ---
 
-## 14. 当前代码如何协作
+## 14. 模块 7：AgentRunner
 
-以测试中的请求“计算 12 × 3”为例，当前内核可以实际执行：
+### 14.1 模块目标
+
+AgentLoop 只知道怎样循环，却不知道“一次任务”从哪里开始、怎样超时以及最后应返回什么。AgentRunner 是最外层运行控制器，它把已有组件组装成一次完整 Run。
+
+主要文件：
 
 ```text
-1. 用户输入“计算 12 * 3”
+src/evoagent/core/runner.py
+tests/unit/test_runner.py
+```
 
-2. AgentLoop 构造 ModelRequest
+### 14.2 它在架构中的位置
+
+```text
+CLI
+  ↓
+AgentRunner
+  ├── 创建 run_id 与 EventSink
+  ├── ContextBuilder.build()
+  ├── 创建 ToolExecutor 和 AgentLoop
+  ├── 施加任务总超时
+  └── 汇总 RunResult
+```
+
+Runner 依赖抽象的 ModelProvider 和 ToolRegistry，因此它既能使用 MockProvider，也能使用真实 Provider。
+
+### 14.3 构造函数和 run()
+
+构造函数接收四个长期依赖：Settings、ContextBuilder、ModelProvider 和 ToolRegistry。`run()` 接收本次用户任务与可选外部上下文，并返回 RunResult。
+
+每次调用 `run()` 都重新创建：
+
+- 唯一 UUID 类型的 run_id；
+- 只属于本次运行的 InMemoryEventSink；
+- 使用本次 EventSink 的 ToolExecutor；
+- 使用同一 EventSink 和 Executor 的 AgentLoop。
+
+因此连续运行两个任务时，它们不会共享事件序号或消息历史。
+
+### 14.4 正常执行链路
+
+```text
+1. 生成 run_id
+2. 写入 run.started
+3. ContextBuilder 构造初始消息
+4. 在 task_timeout_seconds 内运行 AgentLoop
+5. 将 AgentLoopResult 转换为 RunResult
+6. 写入唯一终态事件 run.completed
+7. 返回答案、Usage 和完整事件快照
+```
+
+如果循环返回 `limit_reached`，Runner 会写 `run.limit_reached`；普通循环失败则写 `run.failed`。
+
+### 14.5 总超时和取消的区别
+
+工具超时只限制一个工具，模型超时只限制一次模型请求。任务总超时包住完整 AgentLoop，防止多轮模型和工具调用累计运行过久。
+
+取消不是普通异常。用户或上层任务取消协程时，Runner 生成 `cancelled` RunResult 和 `run.cancelled`；任务总超时则生成 `timeout` RunResult 和 `run.timeout`。两者语义不同，后续持久化和界面展示不能混为一谈。
+
+### 14.6 唯一终态事件
+
+一次 Run 的终态只能是：
+
+```text
+completed / failed / limit_reached / timeout / cancelled
+```
+
+Loop 只返回 AgentLoopResult，Executor 只写工具级事件，最终由 Runner 统一选择一个 Run 终态。集中所有权比在多个模块中“见错就写终态”更容易保证一致性。
+
+### 14.7 错误边界
+
+- 用户输入不合法：`invalid_input`；
+- 循环正常失败：保留循环给出的错误码；
+- 达到轮次、Token 或重复调用限制：`limit_reached`；
+- 超过任务总时间：`run_timeout`；
+- 协程被取消：`run_cancelled`；
+- 未预料的运行时异常：`internal_runtime_error`，不把异常详情和敏感数据直接暴露出去。
+
+### 14.8 测试和阅读顺序
+
+`test_runner.py` 覆盖成功、输入错误、循环失败、限制、任务超时与取消，并检查每种情况只有一个终态事件。
+
+推荐顺序：先读构造函数，接着读正常完成分支，再对照 RunStatus 阅读限制、超时和取消分支，最后运行测试观察 events。
+
+### 14.9 面试与复习要点
+
+**为什么还需要 Runner，不能直接调用 Loop？**
+
+Loop 是可复用的迭代算法；Runner 才是一次业务任务的生命周期边界。run_id、总超时、取消和最终结果都属于后者。
+
+**为什么每次 Run 新建 EventSink？**
+
+这样事件序号从 1 开始、run_id 完全一致，也不会把两个任务的轨迹混在一起。
+
+---
+
+## 15. 模块 8：OpenAICompatibleProvider 与 CLI
+
+### 15.1 模块目标
+
+MockProvider 适合测试，但不会访问模型服务。模块 8 增加真实 HTTP 适配器和命令行入口，让用户可以启动一个完整 Agent。
+
+主要文件：
+
+```text
+src/evoagent/providers/openai_compatible.py
+src/evoagent/cli.py
+tests/unit/test_openai_compatible_provider.py
+tests/unit/test_cli.py
+```
+
+`pyproject.toml` 同时增加 HTTPX、RESPX 开发测试依赖，以及 `evoagent` 命令入口。
+
+### 15.2 为什么 Provider 是适配器
+
+AgentLoop 只认识 ModelRequest 和 ProviderEvent，真实服务却认识 HTTP JSON 与 SSE。OpenAICompatibleProvider 负责翻译：
+
+```text
+ModelRequest
+  → HTTP POST /chat/completions
+  → SSE data 分片
+  → ProviderEvent
+  → AgentLoop
+```
+
+这样将来接入其他厂商时，不需要修改 AgentLoop 和工具系统。
+
+### 15.3 请求转换
+
+Provider 会把统一消息转换成兼容接口需要的 `messages`。assistant 消息中的 ToolCall 会转换为 function 调用；tool 消息携带 `tool_call_id`，让模型知道它对应哪个调用。
+
+请求固定启用流式输出和 Usage：
+
+```text
+stream = true
+stream_options.include_usage = true
+```
+
+模型名、温度、最大输出 Token 和工具 Schema 都来自 ModelRequest，不从全局变量偷偷读取。
+
+### 15.4 SSE 和 ToolCall 分片
+
+SSE 可以把一个 ToolCall 拆成多段，甚至交错发送多个调用。例如：
+
+```text
+index 0: name="calcu", arguments="{...前半段"
+index 1: name="file_", arguments="{...前半段"
+index 0: name="lator", arguments="后半段...}"
+index 1: name="read", arguments="后半段...}"
+```
+
+Provider 使用 index 为每个调用建立缓冲区，分别拼接 ID、函数名和参数字符串。收到 `[DONE]` 后，它按 index 排序，解析完整 JSON，并构造 ToolCall。缺 ID、名称、连续 index 或合法 JSON 中任意一项都会变成协议错误。
+
+### 15.5 ProviderEvent 输出
+
+适配器可能依次产生：
+
+- `text_delta`：一小段回答文本；
+- `tool_call_delta`：一段工具调用；
+- `usage`：本次请求的 Token 统计；
+- `completed`：已经重组并校验的 ModelResponse。
+
+流必须出现完成原因和 `[DONE]`。不能因为网络连接正常关闭，就假定模型已经完整回答。
+
+### 15.6 错误分类和资源管理
+
+HTTP 401/403、429、5xx、其他 HTTP 错误、网络错误、超时和协议错误都有不同错误码。v0.1 不自动重试，因为重试还需要同时考虑幂等性、预算和退避策略。
+
+Provider 可以接收外部 AsyncClient，便于测试和复用连接；只有它自己创建 Client 时，`aclose()` 才负责关闭，避免误关调用方拥有的资源。
+
+### 15.7 CLI 怎样组装应用
+
+CLI 负责应用最外层装配，而不是实现业务规则：
+
+```text
+解析参数与 Settings
+  → 选择 Mock 或真实 Provider
+  → 注册 calculator、file_read、web_fetch
+  → 创建 ContextBuilder 和 AgentRunner
+  → 执行任务
+  → 输出最终答案或错误
+  → 关闭网络资源
+```
+
+常用命令：
+
+```powershell
+# 无需 API Key，演示完整工具循环
+.\.venv\Scripts\evoagent --demo --show-events
+
+# 使用当前配置运行任务
+.\.venv\Scripts\evoagent "请计算 12 * (3 + 4)"
+
+# 补充一段不可信外部上下文
+.\.venv\Scripts\evoagent "总结资料" --context "资料正文"
+```
+
+`--demo` 使用确定性的 MockProvider，不是在假装访问真实模型；它的作用是验证本地安装、Runner、循环、工具和输出链路。
+
+### 15.8 测试和阅读顺序
+
+Provider 测试使用 RESPX 模拟 HTTP，不访问公网，覆盖文本、Usage、单个与多个交错 ToolCall、HTTP 错误、超时、非法 JSON 和缺少 `[DONE]`。CLI 测试覆盖参数解析、Mock 任务和演示模式。
+
+推荐先读 `_build_payload()` 看请求，再读 `stream()` 的 SSE 主流程，然后读 ToolCall 缓冲与错误分类，最后读 CLI 如何装配组件。
+
+### 15.9 当前兼容边界
+
+这里的“OpenAI-compatible”指项目实际使用的 Chat Completions 流式子集，不代表兼容所有厂商扩展。Responses API、多模态输入、音频、结构化输出和厂商私有字段尚未实现。
+
+---
+
+## 16. 模块 9：安全只读工具与阶段一收尾
+
+### 16.1 模块目标
+
+模块 9 让 Agent 获得受限文件与网页读取能力，同时补齐权限结果、安全并发和防重复循环。目标不是宣称“绝对安全”，而是建立清晰、可测试的最低边界。
+
+主要文件：
+
+```text
+src/evoagent/tools/guards.py
+src/evoagent/tools/builtin/file_read.py
+src/evoagent/tools/builtin/web_fetch.py
+src/evoagent/tools/executor.py
+src/evoagent/core/loop.py
+tests/unit/test_tool_guards.py
+tests/unit/test_readonly_tools.py
+tests/integration/test_agent_run.py
+docs/ADR-001-阶段一运行时边界与安全策略.md
+```
+
+### 16.2 WorkspaceGuard 与 file_read
+
+file_read 的输入只有 path，但它不能直接调用 `Path.read_text()`。WorkspaceGuard 会：
+
+```text
+用户路径
+  → 相对路径拼到 Workspace
+  → 解析普通路径
+  → 检查仍在 Workspace
+  → 解析现有目标和符号链接
+  → 再次检查仍在 Workspace
+  → 确认是普通文件
+```
+
+两次检查分别防止 `../` 路径穿越和符号链接逃逸。通过后，FileReadTool 仍限制读取字节数，只接受 UTF-8，避免一个文件耗尽上下文或返回不可解释的二进制数据。
+
+### 16.3 URLGuard 与 web_fetch
+
+web_fetch 面临 SSRF：模型可能请求云元数据、路由器后台或本机服务。URLGuard 因此只允许 HTTP/HTTPS，拒绝 URL 凭据、localhost，以及解析到回环、私网、链路本地等非公网 IP 的地址。
+
+重定向也属于新请求，必须逐跳重新校验：
+
+```text
+公网 URL
+  → 302 Location: http://127.0.0.1/admin
+  → URLGuard 再校验
+  → permission_denied
+```
+
+WebFetchTool 还限制超时、重定向次数、Content-Type、Content-Length 和实际流式读取字节数。只检查响应头不够，因为服务端可能不提供或伪造 Content-Length。
+
+### 16.4 已知网络安全限制
+
+当前实现先用 DNS 解析并校验 IP，再让 HTTP 客户端自行连接。两者之间存在时间差，恶意 DNS 可能改变结果，这称为 DNS 重绑定竞态。
+
+因此这里应准确描述为“最低 SSRF 防护”，不能描述为完整网络沙箱。后续要用受控解析、固定连接目标、代理或网络出口策略把已校验地址与真实连接绑定起来。
+
+### 16.5 permission_denied
+
+ToolPermissionError 表示“调用在技术上可以执行，但策略不允许”。ToolExecutor 将它转换为：
+
+```text
+ToolResult.status = permission_denied
+error_code = permission_denied
+```
+
+这与参数错误、普通执行失败和内部缺陷不同。模型可以根据这个稳定结果换一种合法方法，上层也能审计被拒绝的访问。
+
+### 16.6 安全并发
+
+多个只读工具可以同时等待文件或网络 I/O，但有副作用的工具必须保持顺序。`execute_many()` 只有确认整批工具都满足：
+
+```text
+has_side_effects == false
+parallel_safe == true
+```
+
+才使用并发。只要有一个不满足，整批就顺序执行。即使并发，返回结果仍按输入顺序排列，因为后续 tool 消息必须与原 ToolCall 一一对应。
+
+### 16.7 重复 ToolCall 保护
+
+只比较调用参数仍然不够：同一请求第一次可能失败、第二次可能成功。AgentLoop 会把工具名、参数和结果状态、内容、错误码一起组成指纹。
+
+只有连续多轮指纹完全相同并达到阈值时，才返回：
+
+```text
+status = limit_reached
+error_code = repeated_tool_calls
+```
+
+参数变化、结果变化或中间出现其他调用都会重置连续计数。
+
+### 16.8 完整集成测试
+
+`test_agent_run.py` 不访问真实模型和公网，但会从 AgentRunner 出发，依次经过 ContextBuilder、AgentLoop、MockProvider、ToolExecutor 和三个内置工具，再得到最终 RunResult。它还检查多个工具结果回填模型时保持 calculate、read、fetch 的原始顺序。
+
+这个测试证明模块能协作，不代表真实模型服务和任意网站都一定兼容；外部系统仍需单独的端到端验证。
+
+### 16.9 推荐阅读顺序
+
+```text
+1. guards.py 的 WorkspaceGuard
+2. file_read.py
+3. guards.py 的 URLGuard
+4. web_fetch.py 的重定向循环
+5. executor.py 的权限转换与 execute_many()
+6. loop.py 的重复调用指纹
+7. test_agent_run.py 的完整链路
+8. ADR-001 的设计取舍和已知限制
+```
+
+### 16.10 面试与复习要点
+
+**为什么只读工具也需要安全策略？**
+
+读取源码外的密钥文件或访问内网接口同样可能泄露数据。“不写入”不等于“无风险”。
+
+**为什么并发后仍按原顺序返回？**
+
+并发只优化等待时间，不能改变 ToolCall 与 ToolResult 的协议关联。
+
+**为什么要把安全限制写入 ADR？**
+
+安全边界不仅是代码细节，也是系统承诺。明确记录已做和未做的部分，能避免后续把最低保护误当成完整沙箱。
+
+---
+
+## 17. 当前代码如何协作
+
+以 CLI 演示中的请求“计算 12 × (3 + 4)”为例，当前项目可以实际执行：
+
+```text
+1. CLI 读取配置并注册三个内置工具
+
+2. AgentRunner 创建 run_id、EventSink 和初始消息
+
+3. AgentLoop 构造 ModelRequest
    - messages：用户问题
    - tool_definitions：registry.definitions()
 
-3. MockProvider 返回预设模型响应
+4. MockProvider 返回预设模型响应
 
-4. 模型返回 ToolCall
+5. 模型返回 ToolCall
    - call_id：call_001
    - name：calculator
-   - arguments：{"expression": "12 * 3"}
+   - arguments：{"expression": "12 * (3 + 4)"}
 
-5. ToolExecutor 调用 registry.get("calculator")
+6. ToolExecutor 调用 registry.get("calculator")
 
-6. ToolExecutor 调用 tool.validate_arguments(...)
+7. ToolExecutor 调用 tool.validate_arguments(...)
    得到 CalculatorArguments
 
-7. ToolExecutor 在超时控制下调用 tool.invoke(...)
+8. ToolExecutor 在超时控制下调用 tool.invoke(...)
 
-8. CalculatorTool 返回字符串 "36"
+9. CalculatorTool 返回字符串 "84"
 
-9. ToolExecutor 生成 ToolResult
+10. ToolExecutor 生成 ToolResult
    - status：success
-   - content："36"
+   - content："84"
 
-10. AgentLoop 把 ToolResult 转成 tool 消息交还模型
+11. AgentLoop 把 ToolResult 转成 tool 消息交还模型
 
-11. 模型回答“12 × 3 = 36”
+12. 模型回答“计算结果是 84。”
 
-12. AgentLoop 返回 AgentLoopResult
+13. AgentLoop 返回 AgentLoopResult
+
+14. AgentRunner 写入 run.completed 并返回 RunResult
+
+15. CLI 输出最终答案，可选输出事件列表
 ```
 
-这条流程已经由 MockProvider 和单元测试完整打通。MockProvider 不是真实大模型，它按测试脚本返回确定性响应；当前还没有 AgentRunner 和 CLI，所以普通用户尚不能从命令行输入自然语言启动一次正式 Run。
+这条流程已经由单元测试和集成测试完整打通。Mock 演示的意义是确定性验证框架；把配置切换到 `openai_compatible` 后，步骤 4 会由真实 HTTP 流式请求替代，其余 Runtime 结构保持不变。
 
 ---
 
-## 15. 测试体系
+## 18. 测试体系
 
-### 15.1 为什么测试和模块同时编写
+### 18.1 为什么测试和模块同时编写
 
 Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工运行真实模型，很难复现同一个错误。
 
 本项目要求每完成一个模块，同时完成对应确定性测试。测试的作用不仅是判断当前代码是否正确，也是在后续重构时保护已经固定的接口行为。
 
-### 15.2 当前测试文件
+### 18.2 当前测试文件
 
 | 文件 | 主要覆盖内容 |
 |---|---|
@@ -1406,15 +1988,23 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 | `test_tool_executor.py` | 参数校验、超时、截断、错误转换、顺序和取消 |
 | `test_mock_provider.py` | 标准事件流、工具增量、预设错误和脚本耗尽 |
 | `test_context.py` | 初始消息顺序、输入校验和无状态性 |
-| `test_agent_loop.py` | 模型—工具循环、终止条件、Usage 和协议错误 |
+| `test_agent_loop.py` | 模型—工具循环、终止条件、Usage、协议错误和重复调用 |
+| `test_runner.py` | Run 生命周期、唯一终态、总超时和取消 |
+| `test_openai_compatible_provider.py` | SSE、ToolCall 重组、Usage 和 Provider 错误分类 |
+| `test_cli.py` | CLI 参数、Mock 任务和演示模式 |
+| `test_tool_guards.py` | Workspace 边界、符号链接和公网 URL 判断 |
+| `test_readonly_tools.py` | 文件/网页读取、重定向、超时、类型与大小限制 |
+| `test_agent_run.py` | 从 Runner 到三个内置工具再到最终答案的集成链路 |
 
 当前测试结果：
 
 ```text
-88 passed
+129 passed, 1 skipped
 ```
 
-### 15.3 常用检查命令
+跳过项是当前 Windows 账户没有创建符号链接的权限。测试本身没有被删除，在支持符号链接的 CI 环境会正常执行。
+
+### 18.3 常用检查命令
 
 在项目根目录运行：
 
@@ -1432,57 +2022,49 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 
 ---
 
-## 16. 当前不能完成的功能
+## 19. 当前不能完成的功能
 
-截至模块 6，项目不能：
+截至阶段一，项目仍不能：
 
-- 通过 CLI 接收自然语言任务；
-- 调用真实大模型；
-- 由 AgentRunner 管理一次正式 Run；
-- 执行文件读取或网页请求；
-- 实施完整工具权限策略；
-- 处理任务级超时和用户取消；
 - 将 Trace 持久化到数据库；
+- 在进程重启后恢复未完成任务；
+- 自动重试模型请求或在多个 Provider 间切换；
+- 提供操作系统级工具沙箱和完整权限审批；
+- 完全防御 DNS 重绑定；
+- 压缩长期上下文或维护长期记忆；
+- 编排多个 Agent；
 - 生成、评测或发布 Skill。
 
 这些能力属于后续模块和阶段，不能因为对应数据模型已经定义就描述成“已经完成”。
 
 ---
 
-## 17. 后续模块路线
+## 20. 后续阶段路线
 
-### 17.1 第一阶段剩余模块
-
-```text
-模块 7  AgentRunner
-模块 8  OpenAICompatibleProvider 与 CLI
-模块 9  安全只读工具与第一阶段收尾
-```
-
-### 17.2 下一模块：AgentRunner
-
-AgentRunner 将把初始上下文和 AgentLoop 包装成一次具有完整生命周期的 Run：
+### 20.1 第一阶段已经完成
 
 ```text
-用户任务
-  → 创建 run_id 和 EventSink
-  → ContextBuilder 构造初始消息
-  → 在任务总超时下启动 AgentLoop
-  → 处理完成、失败、限制、超时和取消
-  → 生成唯一 Run 终态事件
-  → 汇总 RunResult
+模块 0～6  基础契约与核心循环
+模块 7    AgentRunner
+模块 8    OpenAICompatibleProvider 与 CLI
+模块 9    安全只读工具与第一阶段收尾
 ```
 
-模块 7 的边界是：
+### 20.2 下一阶段：持久化与可恢复执行
 
-- 管理任务总超时和用户取消；
-- 将 AgentLoopResult 转换成 RunResult；
-- 保证每个 Run 只有一个终态事件；
-- 不实现真实模型 HTTP、CLI、数据库、重试或 Sandbox。
+下一阶段会把当前内存中的事件和任务状态保存到数据库：
+
+```text
+RuntimeEvent → 持久化 RunEvent
+Run 状态 → 检查点
+进程重启 → 读取状态 → 从合法边界继续
+```
+
+在进入下一阶段前，应把 v0.1 的现有测试当成契约基线，不为追求持久化而把 Runner、Loop、Provider 和 Executor 再次混成一个类。
 
 ---
 
-## 18. 推荐阅读源码的顺序
+## 21. 推荐阅读源码的顺序
 
 第一次阅读当前代码时，建议按下面顺序：
 
@@ -1511,7 +2093,21 @@ AgentRunner 将把初始上下文和 AgentLoop 包装成一次具有完整生命
    ↓
 12. src/evoagent/core/loop.py
    ↓
-13. 对应 tests/unit 测试
+13. src/evoagent/core/runner.py
+   ↓
+14. src/evoagent/tools/guards.py
+   ↓
+15. src/evoagent/tools/builtin/file_read.py
+   ↓
+16. src/evoagent/tools/builtin/web_fetch.py
+   ↓
+17. src/evoagent/providers/openai_compatible.py
+   ↓
+18. src/evoagent/cli.py
+   ↓
+19. 对应 tests/unit 测试
+   ↓
+20. tests/integration/test_agent_run.py
 ```
 
 阅读每个文件时依次回答四个问题：
@@ -1525,39 +2121,39 @@ AgentRunner 将把初始上下文和 AgentLoop 包装成一次具有完整生命
 
 ---
 
-## 19. 当前阶段应掌握的核心思想
+## 22. 当前阶段应掌握的核心思想
 
-### 19.1 先定义契约，再连接模块
+### 22.1 先定义契约，再连接模块
 
 Model、Tool 和 Runtime 先使用统一数据结构沟通，后续模块才不需要相互猜测字段含义。
 
-### 19.2 模型输出是不可信输入
+### 22.2 模型输出是不可信输入
 
 Tool Call 必须经过工具查找、参数校验、权限检查和执行控制，不能直接调用函数。
 
-### 19.3 Registry 和 Executor 分离
+### 22.3 Registry 和 Executor 分离
 
 Registry 管“有什么”，Executor 管“怎样执行”。职责拆分使测试、权限和沙箱更容易扩展。
 
-### 19.4 使用抽象隔离外部实现
+### 22.4 使用抽象隔离外部实现
 
 AgentLoop 依赖 Provider 和 EventSink 的抽象，而不是绑定某个模型厂商或数据库。
 
-### 19.5 可观测性应从第一天开始设计
+### 22.5 可观测性应从第一天开始设计
 
 事件不是最后才添加的日志，而是长任务恢复、Trace、评测和 Skill 进化的基础数据。
 
-### 19.6 安全采用白名单和最小权限
+### 22.6 安全采用白名单和最小权限
 
-计算器只解释允许的 AST 节点；未来文件和网络工具也必须限制工作目录、目标地址和结果大小。
+计算器只解释允许的 AST 节点；文件和网络工具限制工作目录、目标地址和结果大小。安全边界必须同时说明已知限制。
 
-### 19.7 测试必须确定
+### 22.7 测试必须确定
 
 核心逻辑使用 MockProvider 和 Mock Tool 测试，避免把随机模型行为和外部网络引入基础测试。
 
 ---
 
-## 20. 文档后续维护规则
+## 23. 文档后续维护规则
 
 本手册将持续保存后续模块讲解。每完成一个模块，应按以下结构追加，而不是重写前面已经稳定的内容：
 
@@ -1588,7 +2184,7 @@ AgentLoop 依赖 Provider 和 EventSink 的抽象，而不是绑定某个模型�
 
 ---
 
-## 21. 本阶段总结
+## 24. 本阶段总结
 
 当前 EvoAgent 已经完成了 Agent Runtime 的基础骨架：
 
@@ -1603,16 +2199,22 @@ AgentLoop 依赖 Provider 和 EventSink 的抽象，而不是绑定某个模型�
   + ModelProvider 抽象与 MockProvider
   + ContextBuilder
   + AgentLoop
+  + AgentRunner
+  + OpenAICompatibleProvider
+  + CLI
+  + WorkspaceGuard 与 URLGuard
+  + FileReadTool 与 WebFetchTool
+  + 重复调用保护与安全并发
 ```
 
 当前已经具备可确定性测试的核心循环：
 
 ```text
-初始消息 → Mock 模型决策 → 工具执行 → 结果回填 → Mock 模型最终回答
+CLI → AgentRunner → 模型决策 → 工具执行 → 结果回填 → 最终 RunResult
 ```
 
-下一步加入 AgentRunner 后，核心循环才会获得 run_id、任务总超时、用户取消、唯一终态事件和最终 RunResult。再实现真实 Provider 与 CLI，普通用户才能从命令行启动完整任务：
+现在可以选择 MockProvider 做确定性学习和测试，也可以选择 OpenAICompatibleProvider 连接真实服务。第一阶段提供的是最小完整 Runtime，不是生产级长任务平台；下一步重点是持久化、状态恢复和更强隔离：
 
 ```text
-用户输入 → 模型决策 → 工具执行 → 模型继续决策 → 最终回答
+内存 Run → 持久化状态机 → 可恢复长任务 → 可验证 Skill 生命周期
 ```

@@ -11,7 +11,7 @@ from evoagent.core.models import (
     ToolResultStatus,
     ToolRisk,
 )
-from evoagent.tools.base import BaseTool
+from evoagent.tools.base import BaseTool, ToolPermissionError
 from evoagent.tools.builtin.calculator import CalculatorTool
 from evoagent.tools.executor import ToolExecutor
 from evoagent.tools.registry import ToolRegistry
@@ -56,6 +56,59 @@ class BrokenTool(BaseTool[EmptyArguments]):
 
     async def invoke(self, arguments: EmptyArguments) -> str:
         raise RuntimeError("implementation bug")
+
+
+class PermissionDeniedTool(BaseTool[EmptyArguments]):
+    name = "denied"
+    description = "Always reject the requested operation."
+    arguments_model = EmptyArguments
+    risk = ToolRisk.R0
+    has_side_effects = False
+    parallel_safe = True
+
+    async def invoke(self, arguments: EmptyArguments) -> str:
+        raise ToolPermissionError("operation is not allowed")
+
+
+class CoordinatedTool(BaseTool[EmptyArguments]):
+    description = "Wait until both test calls have started."
+    arguments_model = EmptyArguments
+    risk = ToolRisk.R0
+    has_side_effects = False
+    parallel_safe = True
+
+    def __init__(self, name: str, started: list[str], ready: asyncio.Event) -> None:
+        self.name = name
+        self._started = started
+        self._ready = ready
+
+    async def invoke(self, arguments: EmptyArguments) -> str:
+        self._started.append(self.name)
+        if len(self._started) == 2:
+            self._ready.set()
+        await self._ready.wait()
+        return self.name
+
+
+class OrderedSideEffectTool(BaseTool[EmptyArguments]):
+    name = "ordered"
+    description = "Record whether side-effect calls remain sequential."
+    arguments_model = EmptyArguments
+    risk = ToolRisk.R1
+    has_side_effects = True
+    parallel_safe = True
+
+    def __init__(self, history: list[str]) -> None:
+        self._history = history
+        self._call_number = 0
+
+    async def invoke(self, arguments: EmptyArguments) -> str:
+        self._call_number += 1
+        number = self._call_number
+        self._history.append(f"start-{number}")
+        await asyncio.sleep(0)
+        self._history.append(f"end-{number}")
+        return str(number)
 
 
 def make_executor(
@@ -130,6 +183,16 @@ async def test_executor_converts_timeout_to_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_executor_preserves_permission_denied_status() -> None:
+    executor, _ = make_executor(PermissionDeniedTool())
+
+    result = await executor.execute(ToolCall(call_id="denied-1", name="denied"))
+
+    assert result.status is ToolResultStatus.PERMISSION_DENIED
+    assert result.error_code == "permission_denied"
+
+
+@pytest.mark.asyncio
 async def test_executor_limits_result_length_and_marks_event() -> None:
     executor, sink = make_executor(LongResultTool(), max_result_chars=10)
 
@@ -151,6 +214,40 @@ async def test_execute_many_preserves_original_order() -> None:
 
     assert [result.tool_call_id for result in results] == ["call-2", "call-1"]
     assert [result.content for result in results] == ["4", "2"]
+
+
+@pytest.mark.asyncio
+async def test_execute_many_runs_safe_tools_concurrently_but_returns_original_order() -> None:
+    started: list[str] = []
+    ready = asyncio.Event()
+    first = CoordinatedTool("first", started, ready)
+    second = CoordinatedTool("second", started, ready)
+    executor, _ = make_executor(first, second, timeout_seconds=0.5)
+
+    results = await executor.execute_many(
+        (
+            ToolCall(call_id="call-1", name="first"),
+            ToolCall(call_id="call-2", name="second"),
+        )
+    )
+
+    assert set(started) == {"first", "second"}
+    assert [result.tool_call_id for result in results] == ["call-1", "call-2"]
+
+
+@pytest.mark.asyncio
+async def test_execute_many_keeps_side_effect_tools_sequential() -> None:
+    history: list[str] = []
+    executor, _ = make_executor(OrderedSideEffectTool(history))
+
+    await executor.execute_many(
+        (
+            ToolCall(call_id="call-1", name="ordered"),
+            ToolCall(call_id="call-2", name="ordered"),
+        )
+    )
+
+    assert history == ["start-1", "end-1", "start-2", "end-2"]
 
 
 @pytest.mark.asyncio

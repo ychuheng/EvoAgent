@@ -196,16 +196,18 @@ flowchart TD
 
 ### 6.1 v0.1：可测试的 Agent 内核
 
-- [ ] OpenAI-compatible Provider
-- [ ] 流式 Agent Loop
-- [ ] AgentLoop、AgentRunner、ContextBuilder 职责拆分
-- [ ] Tool Schema、Tool Registry 与 ToolExecutor
-- [ ] calculator、file_read、web_fetch 等少量原子工具
-- [ ] file_read 的 Workspace Guard 与 web_fetch 的最低 SSRF Guard
-- [ ] 最大轮次、模型超时、任务总超时、取消、Token 统计与软预算
-- [ ] 统一运行事件结构
-- [ ] Mock LLM 与 Mock Tool 确定性测试
-- [ ] CLI 演示入口
+- [x] OpenAI-compatible Provider
+- [x] 流式 Agent Loop
+- [x] AgentLoop、AgentRunner、ContextBuilder 职责拆分
+- [x] Tool Schema、Tool Registry 与 ToolExecutor
+- [x] calculator、file_read、web_fetch 等少量原子工具
+- [x] file_read 的 Workspace Guard 与 web_fetch 的最低 SSRF Guard
+- [x] 最大轮次、模型超时、任务总超时、取消、Token 统计与软预算
+- [x] 统一运行事件结构
+- [x] Mock LLM 与 Mock Tool 确定性测试
+- [x] CLI 演示入口
+
+v0.1 功能清单于 2026-09-06 完成；实现证据与已知限制见开发进度记录、学习手册和 ADR-001。
 
 ### 6.2 v0.2：可靠、可追踪的任务执行
 

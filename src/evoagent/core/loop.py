@@ -1,6 +1,7 @@
 """控制模型请求和工具执行之间的多轮循环。"""
 
 import asyncio
+import json
 
 from evoagent.core.events import RuntimeEventSink
 from evoagent.core.models import (
@@ -14,6 +15,7 @@ from evoagent.core.models import (
     ModelResponse,
     ProviderEventType,
     TokenUsage,
+    ToolCall,
     ToolResult,
     ToolResultStatus,
 )
@@ -35,6 +37,7 @@ class AgentLoop:
         model: str,
         max_iterations: int,
         max_total_tokens: int,
+        max_repeated_tool_calls: int = 3,
         temperature: float | None = None,
         max_output_tokens: int | None = None,
     ) -> None:
@@ -45,6 +48,8 @@ class AgentLoop:
             raise ValueError("max_iterations must be positive")
         if max_total_tokens < 1:
             raise ValueError("max_total_tokens must be positive")
+        if max_repeated_tool_calls < 1:
+            raise ValueError("max_repeated_tool_calls must be positive")
 
         self._provider = provider
         self._registry = registry
@@ -53,6 +58,7 @@ class AgentLoop:
         self._model = normalized_model
         self._max_iterations = max_iterations
         self._max_total_tokens = max_total_tokens
+        self._max_repeated_tool_calls = max_repeated_tool_calls
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
 
@@ -65,6 +71,8 @@ class AgentLoop:
         messages = list(initial_messages)
         known_usage = TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
         usage_is_complete = True
+        previous_tool_fingerprint: str | None = None
+        repeated_tool_calls = 0
 
         for iteration in range(1, self._max_iterations + 1):
             request = ModelRequest(
@@ -134,6 +142,25 @@ class AgentLoop:
             if response.message.tool_calls:
                 results = await self._executor.execute_many(response.message.tool_calls)
                 messages.extend(self._tool_message(result) for result in results)
+
+                fingerprint = self._tool_fingerprint(response.message.tool_calls, results)
+                if fingerprint == previous_tool_fingerprint:
+                    repeated_tool_calls += 1
+                else:
+                    previous_tool_fingerprint = fingerprint
+                    repeated_tool_calls = 1
+                if repeated_tool_calls >= self._max_repeated_tool_calls:
+                    return AgentLoopResult(
+                        status=AgentLoopStatus.LIMIT_REACHED,
+                        messages=tuple(messages),
+                        iterations=iteration,
+                        usage=known_usage if usage_is_complete else None,
+                        error_code="repeated_tool_calls",
+                        error_message=(
+                            "identical tool calls produced identical results "
+                            f"{repeated_tool_calls} times"
+                        ),
+                    )
 
                 if usage_is_complete and known_usage.total_tokens >= self._max_total_tokens:
                     return AgentLoopResult(
@@ -244,6 +271,20 @@ class AgentLoop:
             content=content,
             tool_call_id=result.tool_call_id,
         )
+
+    @staticmethod
+    def _tool_fingerprint(calls: tuple[ToolCall, ...], results: tuple[ToolResult, ...]) -> str:
+        normalized = [
+            {
+                "name": call.name,
+                "arguments": call.arguments,
+                "status": result.status.value,
+                "content": result.content,
+                "error_code": result.error_code,
+            }
+            for call, result in zip(calls, results, strict=True)
+        ]
+        return json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
     @staticmethod
     def _failure(

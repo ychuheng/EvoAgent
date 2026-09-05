@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from evoagent.core.events import RuntimeEventSink
 from evoagent.core.models import EventType, ToolCall, ToolResult, ToolResultStatus
-from evoagent.tools.base import ToolExecutionError
+from evoagent.tools.base import ToolExecutionError, ToolPermissionError
 from evoagent.tools.registry import ToolNotFoundError, ToolRegistry
 
 
@@ -60,6 +60,13 @@ class ToolExecutor:
         except TimeoutError:
             message = f"tool execution exceeded {self._timeout_seconds:g} seconds"
             return await self._failed_result(call, "tool_timeout", message)
+        except ToolPermissionError as error:
+            return await self._failed_result(
+                call,
+                "permission_denied",
+                str(error),
+                status=ToolResultStatus.PERMISSION_DENIED,
+            )
         except ToolExecutionError as error:
             return await self._failed_result(call, "tool_execution_error", str(error))
         except Exception as error:
@@ -106,19 +113,29 @@ class ToolExecutor:
         return result
 
     async def execute_many(self, calls: Iterable[ToolCall]) -> tuple[ToolResult, ...]:
-        """按模型给出的原始顺序执行并返回一批工具调用。"""
+        """安全调用可以并发执行，其他调用按原始顺序执行。"""
 
+        call_batch = tuple(calls)
+        if self._can_run_in_parallel(call_batch):
+            return tuple(await asyncio.gather(*(self.execute(call) for call in call_batch)))
         results: list[ToolResult] = []
-        for call in calls:
+        for call in call_batch:
             results.append(await self.execute(call))
         return tuple(results)
 
-    async def _failed_result(self, call: ToolCall, error_code: str, message: str) -> ToolResult:
+    async def _failed_result(
+        self,
+        call: ToolCall,
+        error_code: str,
+        message: str,
+        *,
+        status: ToolResultStatus = ToolResultStatus.ERROR,
+    ) -> ToolResult:
         content, truncated = self._truncate(message)
         result = ToolResult(
             tool_call_id=call.call_id,
             name=call.name,
-            status=ToolResultStatus.ERROR,
+            status=status,
             content=content,
             error_code=error_code,
         )
@@ -143,3 +160,12 @@ class ToolExecutor:
             return content[: self._max_result_chars], True
         keep_chars = self._max_result_chars - len(marker)
         return f"{content[:keep_chars]}{marker}", True
+
+    def _can_run_in_parallel(self, calls: tuple[ToolCall, ...]) -> bool:
+        if len(calls) < 2:
+            return False
+        try:
+            tools = tuple(self._registry.get(call.name) for call in calls)
+        except ToolNotFoundError:
+            return False
+        return all(not tool.has_side_effects and tool.parallel_safe for tool in tools)

@@ -62,6 +62,7 @@ def make_loop(
     *,
     max_iterations: int = 8,
     max_total_tokens: int = 32_000,
+    max_repeated_tool_calls: int = 3,
 ) -> tuple[AgentLoop, InMemoryEventSink]:
     sink = InMemoryEventSink(uuid4())
     registry = ToolRegistry([CalculatorTool()])
@@ -79,6 +80,7 @@ def make_loop(
         model="mock-model",
         max_iterations=max_iterations,
         max_total_tokens=max_total_tokens,
+        max_repeated_tool_calls=max_repeated_tool_calls,
     )
     return loop, sink
 
@@ -237,6 +239,30 @@ async def test_loop_stops_before_next_request_when_token_budget_is_reached() -> 
 
 
 @pytest.mark.asyncio
+async def test_loop_stops_repeated_tool_calls_with_identical_results() -> None:
+    responses = [
+        tool_response(
+            ToolCall(
+                call_id=f"call-{index}",
+                name="calculator",
+                arguments={"expression": "1 + 1"},
+            )
+        )
+        for index in range(4)
+    ]
+    provider = MockProvider(responses)
+    loop, _ = make_loop(provider, max_repeated_tool_calls=3)
+
+    result = await loop.run(initial_messages())
+
+    assert result.status is AgentLoopStatus.LIMIT_REACHED
+    assert result.error_code == "repeated_tool_calls"
+    assert result.iterations == 3
+    assert len(provider.requests) == 3
+    assert provider.remaining_steps == 1
+
+
+@pytest.mark.asyncio
 async def test_loop_marks_usage_unknown_when_provider_omits_it() -> None:
     loop, _ = make_loop(MockProvider([text_response("done")]))
 
@@ -264,6 +290,7 @@ async def test_loop_propagates_cancellation() -> None:
         ({"model": " "}, "model"),
         ({"max_iterations": 0}, "max_iterations"),
         ({"max_total_tokens": 0}, "max_total_tokens"),
+        ({"max_repeated_tool_calls": 0}, "max_repeated_tool_calls"),
     ],
 )
 def test_loop_rejects_invalid_settings(kwargs: dict[str, object], message: str) -> None:

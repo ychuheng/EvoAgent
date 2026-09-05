@@ -50,4 +50,8 @@ class ToolExecutionError(ToolError):
     """工具选择正确，但无法产生有效结果。"""
 
 
+class ToolPermissionError(ToolError):
+    """工具调用违反了运行时的最低安全边界。"""
+
+
 ToolInstance = BaseTool[Any]
