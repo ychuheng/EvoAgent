@@ -59,6 +59,12 @@ class RunStatus(StrEnum):
     LIMIT_REACHED = "limit_reached"
 
 
+class AgentLoopStatus(StrEnum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+    LIMIT_REACHED = "limit_reached"
+
+
 class EventType(StrEnum):
     RUN_STARTED = "run.started"
     MODEL_REQUESTED = "model.requested"
@@ -271,13 +277,39 @@ class RuntimeEvent(ContractModel):
         return self
 
 
+class AgentLoopResult(ContractModel):
+    """AgentLoop 返回给未来 AgentRunner 的循环结果。"""
+
+    status: AgentLoopStatus
+    messages: tuple[Message, ...] = Field(min_length=1)
+    iterations: int = Field(ge=1)
+    usage: TokenUsage | None = None
+    final_answer: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> Self:
+        if self.status is AgentLoopStatus.COMPLETED:
+            if self.final_answer is None or not self.final_answer.strip():
+                raise ValueError("completed loops require a non-blank final_answer")
+            if self.error_code is not None or self.error_message is not None:
+                raise ValueError("completed loops cannot contain an error")
+        else:
+            if not self.error_code:
+                raise ValueError("non-completed loops require error_code")
+            if self.final_answer is not None:
+                raise ValueError("non-completed loops cannot contain final_answer")
+        return self
+
+
 class RunResult(ContractModel):
     """AgentRunner 返回的最终运行摘要。"""
 
     run_id: UUID
     status: RunStatus
     final_answer: str | None = None
-    usage: TokenUsage
+    usage: TokenUsage | None
     events: tuple[RuntimeEvent, ...] = Field(min_length=1)
     error_code: str | None = None
     error_message: str | None = None

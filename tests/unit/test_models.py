@@ -146,3 +146,23 @@ def test_completed_run_requires_answer_and_forbids_error() -> None:
             usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
             events=(event,),
         )
+
+
+def test_run_result_preserves_unknown_usage() -> None:
+    run_id = uuid4()
+    event = RuntimeEvent(
+        run_id=run_id,
+        sequence=1,
+        type=EventType.RUN_COMPLETED,
+        timestamp=datetime.now(UTC),
+    )
+
+    result = RunResult(
+        run_id=run_id,
+        status=RunStatus.COMPLETED,
+        final_answer="done",
+        usage=None,
+        events=(event,),
+    )
+
+    assert result.usage is None

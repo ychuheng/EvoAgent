@@ -2,7 +2,7 @@
 
 EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目标是在可靠任务执行的基础上，建立可验证、可版本化、可回滚的 Skill 生命周期。
 
-当前实现进度：阶段一的模块 0～2，包括工程配置、核心数据契约、运行事件、Tool Registry 和安全计算器；尚未实现 Provider、ToolExecutor 和 AgentLoop。
+当前实现进度：阶段一的模块 0～6，包括工程配置、核心数据契约、运行事件、工具系统、MockProvider、ContextBuilder 和 AgentLoop；下一步实现 AgentRunner。
 
 ## 环境要求
 
@@ -39,3 +39,4 @@ pytest
 - `docs/EvoAgent-项目设计与分阶段实现计划.md`
 - `docs/阶段一-可测试Agent内核架构与实现指南.md`
 - `docs/开发进度与决策记录.md`
+- `docs/EvoAgent-源码讲解与学习手册.md`
