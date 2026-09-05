@@ -4,7 +4,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Self
 
-from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,6 +54,29 @@ class Settings(BaseSettings):
     workspace: Path = Path("./workspace")
     log_level: LogLevel = LogLevel.INFO
 
+    database_url: SecretStr = SecretStr(
+        "postgresql+asyncpg://evoagent:evoagent@127.0.0.1:5432/evoagent"
+    )
+    api_host: str = "127.0.0.1"
+    api_port: int = Field(default=8_000, ge=1, le=65_535)
+    worker_id: str = Field(default="worker-local", min_length=1, max_length=128)
+    worker_poll_seconds: float = Field(default=1.0, gt=0, le=60)
+    lease_seconds: float = Field(default=30.0, gt=0, le=3_600)
+    heartbeat_seconds: float = Field(default=10.0, gt=0, le=1_200)
+    artifact_root: Path = Path("./workspace/artifacts")
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def validate_database_url(cls, value: object) -> str:
+        """只接受阶段二支持的异步数据库连接格式。"""
+
+        raw_value = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
+        normalized = raw_value.strip()
+        allowed = ("postgresql+asyncpg://", "sqlite+aiosqlite://")
+        if not normalized.startswith(allowed):
+            raise ValueError("database_url must use postgresql+asyncpg or sqlite+aiosqlite")
+        return normalized
+
     @model_validator(mode="after")
     def validate_provider_requirements(self) -> Self:
         """仅在使用真实模型服务时要求提供连接信息。"""
@@ -71,4 +94,14 @@ class Settings(BaseSettings):
                 raise ValueError(f"openai_compatible provider requires: {fields}")
 
         self.workspace = self.workspace.expanduser().resolve(strict=False)
+        if "artifact_root" not in self.model_fields_set:
+            self.artifact_root = self.workspace / "artifacts"
+        else:
+            self.artifact_root = self.artifact_root.expanduser().resolve(strict=False)
+        if self.artifact_root == self.workspace or not self.artifact_root.is_relative_to(
+            self.workspace
+        ):
+            raise ValueError("artifact_root must be a child directory of workspace")
+        if self.heartbeat_seconds * 3 > self.lease_seconds:
+            raise ValueError("heartbeat_seconds must not exceed one third of lease_seconds")
         return self

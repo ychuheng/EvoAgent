@@ -28,6 +28,10 @@
 22. 当前阶段应掌握的核心思想
 23. 文档后续维护规则
 24. 本阶段总结
+25. 阶段二模块 0：工程配置
+26. 阶段二模块 1：数据库与 Alembic
+27. 阶段二模块 2：持久化模型与状态机
+28. 阶段二模块 3：Repository、Unit of Work 与 Trace
 
 ## 1. 阅读说明
 
@@ -41,7 +45,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-当前处于 `v0.1：可测试的 Agent 内核` 阶段。
+当前处于 `v0.2：可靠、可追踪的任务执行` 阶段。
 
 已经完成：
 
@@ -56,6 +60,8 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 阶段一已经闭环。现在既可以使用 MockProvider 确定性运行和测试，也可以通过 CLI 连接 OpenAI-compatible 模型服务，调用计算、文件读取和网页读取工具，最后得到包含完整事件的 RunResult。
 
+阶段二已经完成模块 0～3：数据库工程配置、异步 SQLAlchemy/Alembic、持久化模型与状态机、Repository/Unit of Work、PersistentEventSink 和基础 Trace 查询。FastAPI、Worker、任务领取和恢复尚未实现。
+
 ### 1.2 相关文档的职责
 
 项目中的文档各有不同用途：
@@ -64,6 +70,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 |---|---|
 | `EvoAgent-项目设计与分阶段实现计划.md` | 说明项目最终要做什么以及五个阶段如何演进 |
 | `阶段一-可测试Agent内核架构与实现指南.md` | 说明第一阶段的目标架构、实现顺序和完成标准 |
+| `阶段二-可靠可追踪任务执行架构与实现指南.md` | 说明第二阶段的持久化、Worker、恢复、安全和分模块路线 |
 | `开发进度与决策记录.md` | 记录当前真正完成到哪里，以及已经固定的接口决策 |
 | `EvoAgent-源码讲解与学习手册.md` | 解释已经写出的代码及其原理，也就是本手册 |
 
@@ -1995,14 +2002,18 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 | `test_tool_guards.py` | Workspace 边界、符号链接和公网 URL 判断 |
 | `test_readonly_tools.py` | 文件/网页读取、重定向、超时、类型与大小限制 |
 | `test_agent_run.py` | 从 Runner 到三个内置工具再到最终答案的集成链路 |
+| `test_state_machine.py` | Task/Run 合法迁移和终态保护 |
+| `test_persistence.py` | UnitOfWork、乐观锁、持久化事件和 Trace |
+| `test_migrations.py` | Alembic upgrade、downgrade 和 PostgreSQL Schema 检查 |
+| `test_postgres_persistence.py` | PostgreSQL 跨连接事件序号 |
 
 当前测试结果：
 
 ```text
-129 passed, 1 skipped
+142 passed, 3 skipped
 ```
 
-跳过项是当前 Windows 账户没有创建符号链接的权限。测试本身没有被删除，在支持符号链接的 CI 环境会正常执行。
+本机跳过真实 PostgreSQL 的两个用例和一个无符号链接权限的用例；CI 提供 PostgreSQL Service 和 Linux 符号链接环境继续执行它们。
 
 ### 18.3 常用检查命令
 
@@ -2024,9 +2035,10 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 
 ## 19. 当前不能完成的功能
 
-截至阶段一，项目仍不能：
+截至阶段二模块 3，项目仍不能：
 
-- 将 Trace 持久化到数据库；
+- 通过 API 创建和管理持久化任务；
+- 由独立 Worker 领取并执行 Task；
 - 在进程重启后恢复未完成任务；
 - 自动重试模型请求或在多个 Provider 间切换；
 - 提供操作系统级工具沙箱和完整权限审批；
@@ -2050,17 +2062,17 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 模块 9    安全只读工具与第一阶段收尾
 ```
 
-### 20.2 下一阶段：持久化与可恢复执行
+### 20.2 当前阶段：持久化与可恢复执行
 
-下一阶段会把当前内存中的事件和任务状态保存到数据库：
+模块 0～3 已经建立数据库、状态机和事件持久化底座：
 
 ```text
-RuntimeEvent → 持久化 RunEvent
-Run 状态 → 检查点
-进程重启 → 读取状态 → 从合法边界继续
+RuntimeEvent → PersistentEventSink → RunEvent
+Task/Run → Repository + UnitOfWork
+run_id → TraceService → 有序事件
 ```
 
-在进入下一阶段前，应把 v0.1 的现有测试当成契约基线，不为追求持久化而把 Runner、Loop、Provider 和 Executor 再次混成一个类。
+下一模块实现 Task Service 与最小 FastAPI；Worker、检查点内容和恢复仍在后续模块。阶段一测试继续作为契约基线。
 
 ---
 
@@ -2205,6 +2217,10 @@ AgentLoop 依赖 Provider 和 EventSink 的抽象，而不是绑定某个模型�
   + WorkspaceGuard 与 URLGuard
   + FileReadTool 与 WebFetchTool
   + 重复调用保护与安全并发
+  + 异步数据库与 Alembic
+  + Task/Run 持久化模型和状态机
+  + Repository 与 UnitOfWork
+  + PersistentEventSink 与基础 Trace
 ```
 
 当前已经具备可确定性测试的核心循环：
@@ -2213,8 +2229,210 @@ AgentLoop 依赖 Provider 和 EventSink 的抽象，而不是绑定某个模型�
 CLI → AgentRunner → 模型决策 → 工具执行 → 结果回填 → 最终 RunResult
 ```
 
-现在可以选择 MockProvider 做确定性学习和测试，也可以选择 OpenAICompatibleProvider 连接真实服务。第一阶段提供的是最小完整 Runtime，不是生产级长任务平台；下一步重点是持久化、状态恢复和更强隔离：
+当前已经有可测试 Agent 内核和持久化底座，但还没有 API、Worker 与恢复执行。后续链路是：
 
 ```text
-内存 Run → 持久化状态机 → 可恢复长任务 → 可验证 Skill 生命周期
+持久化 Task → Worker 租约 → 合法检查点恢复 → 可验证 Skill 生命周期
 ```
+
+---
+
+## 25. 阶段二模块 0：工程配置
+
+### 25.1 模块目标
+
+模块 0 只建立阶段二运行环境，不执行持久化任务。项目版本进入 `0.2.0.dev0`，新增 FastAPI、Uvicorn、SQLAlchemy asyncio、Alembic 和 asyncpg；aiosqlite 只服务于本地快速测试。
+
+新增或修改：
+
+```text
+pyproject.toml
+src/evoagent/config.py
+.env.example
+docker-compose.yml
+.github/workflows/ci.yml
+```
+
+### 25.2 为什么同时需要 asyncpg 和 aiosqlite
+
+asyncpg 连接正式 PostgreSQL，能够验证事务、行锁和数据库并发。aiosqlite 让没有 Docker 的开发环境快速测试 ORM 和 Repository，但不能证明 PostgreSQL 的 `SKIP LOCKED` 等语义。
+
+因此测试通过必须准确区分：SQLite 通过表示接口和基础 SQL 可运行；PostgreSQL CI 通过才表示 PostgreSQL 特性成立。
+
+### 25.3 新配置的边界
+
+数据库 URL 使用 SecretStr，配置对象被打印时不会直接显示密码。Artifact 必须位于 Workspace 的子目录。heartbeat 的三倍不能大于 lease，确保 Worker 有足够时间续租。
+
+Docker Compose 当前只提供绑定到本机回环地址的 PostgreSQL，不包含 API 和 Worker，因为它们属于后续模块。
+
+### 25.4 阅读与测试重点
+
+先读 Settings 新字段和交叉校验，再读 Compose 的端口、健康检查和 volume，最后读 CI 怎样注入独立测试数据库。对应测试覆盖异步 URL、SecretStr、Artifact 边界和租约参数关系。
+
+---
+
+## 26. 阶段二模块 1：数据库与 Alembic
+
+### 26.1 模块目标
+
+模块 1 解决三个问题：怎样建立异步连接、怎样为每个操作创建独立 Session、怎样让数据库结构可升级和回退。
+
+主要文件：
+
+```text
+src/evoagent/db/base.py
+src/evoagent/db/session.py
+alembic.ini
+migrations/env.py
+migrations/versions/20260906_0001_initial_persistence.py
+```
+
+### 26.2 Engine、Session 和事务
+
+```text
+AsyncEngine：管理连接池
+async_sessionmaker：生产 AsyncSession
+AsyncSession：一次工作单元使用的数据库会话
+Transaction：决定一组写入一起提交或一起回滚
+```
+
+Database 对象拥有 Engine；调用方每次从 session_factory 创建新 Session。一个 AsyncSession 不能同时给多个并发协程共享。
+
+### 26.3 Alembic 为什么不能由 create_all 代替
+
+`create_all()` 适合测试中从零建表，却不会记录 Schema 如何从旧版本演进。Alembic revision 是可审查的数据库版本：upgrade 正向创建结构，downgrade 按外键反序回退。
+
+正式应用只执行 Alembic migration，不能在启动时根据当前 ORM 静默修改数据库。
+
+### 26.4 异步迁移链路
+
+```text
+alembic 命令
+→ migrations/env.py
+→ AsyncEngine 建立连接
+→ connection.run_sync()
+→ Alembic 同步迁移上下文
+→ upgrade/downgrade
+```
+
+迁移测试会在 SQLite 验证完整建表和回退，在 CI 的真实 PostgreSQL 中额外执行 `alembic check`，检查 ORM metadata 与 migration 是否发生漂移。
+
+---
+
+## 27. 阶段二模块 2：持久化模型与状态机
+
+### 27.1 模块目标
+
+Pydantic 模型规定 Runtime 数据契约，SQLAlchemy Record 规定数据库中的表、外键和约束。两者名称可能相似，但不能混用。
+
+主要文件：
+
+```text
+src/evoagent/db/models.py
+src/evoagent/tasks/state_machine.py
+tests/unit/test_state_machine.py
+```
+
+### 27.2 当前记录的三组职责
+
+| 分组 | 记录 | 作用 |
+|---|---|---|
+| 任务 | Session、Message、Task、Run | 保存用户目标和执行尝试 |
+| Trace | Turn、ToolCall、RunEvent、RunSnapshot、Artifact | 保存过程、恢复点和大内容引用 |
+| 安全 | ToolEffect、ToolApproval | 保存副作用事实与人工决定 |
+
+这些表在模块 2 先固定结构，不代表 Snapshot 恢复、审批和副作用执行已经实现。
+
+### 27.3 数据库约束是最后防线
+
+模型加入 `(run_id, sequence)`、`(effect_scope, semantic_key)` 等唯一约束，非负数检查、外键和领取索引。即使应用代码存在竞争，数据库也不能接受重复事件序号或重复语义副作用记录。
+
+时间使用带时区 UTC；Task 和 Run 保存 lock_version，为后续乐观锁更新提供依据。
+
+### 27.4 状态机为什么独立于 ORM
+
+`ensure_task_transition()` 和 `ensure_run_transition()` 是纯 Python 规则，可以不启动数据库直接测试。Repository 在更新前调用状态机，数据库只保存结果。
+
+终态没有任何后继状态。例如 completed 不能重新 queued；需要再次执行时应创建新的 Run，而不是篡改旧 Run 历史。
+
+---
+
+## 28. 阶段二模块 3：Repository、Unit of Work 与 Trace
+
+### 28.1 模块目标
+
+模块 3 在 ORM 与应用层之间建立稳定访问入口：Repository 管“怎样查询某类记录”，UnitOfWork 管“哪些操作属于同一事务”，PersistentEventSink 把阶段一事件协议接到数据库。
+
+主要文件：
+
+```text
+src/evoagent/db/repositories/
+src/evoagent/db/unit_of_work.py
+src/evoagent/trace/persistent_sink.py
+src/evoagent/trace/service.py
+tests/integration/test_persistence.py
+tests/integration/test_postgres_persistence.py
+```
+
+### 28.2 Repository 与 UnitOfWork
+
+Repository 不是简单隐藏所有 SQL。它集中表达聚合相关操作，例如 `TaskRepository.transition()` 同时执行状态机判断和带 lock_version 的原子更新。
+
+UnitOfWork 让 Task、Run、Event、Snapshot 和 Effect Repository 共享同一个 AsyncSession：
+
+```text
+进入 UnitOfWork
+→ 创建一个 AsyncSession
+→ 通过多个 Repository 读写
+→ 调用方显式 commit()
+→ 异常时 rollback()
+→ 关闭 Session
+```
+
+没有自动提交是有意设计：调用方必须清楚指出事务真正生效的位置。
+
+### 28.3 乐观锁
+
+更新 Task/Run 时，SQL 的条件同时包含 id 和调用方看到的 expected_version。成功后 lock_version 加一；如果更新不到记录，说明另一个事务已经先修改，抛出 ConcurrentUpdateError，不能用旧数据覆盖新状态。
+
+### 28.4 PersistentEventSink
+
+它实现与 InMemoryEventSink 相同的 `emit()` 形状，因此 Agent 核心不需要认识 SQLAlchemy。
+
+```text
+emit(EventType, payload)
+→ 复用阶段一 sanitize_payload
+→ 原子增加 Run.next_event_sequence
+→ 得到本事件 sequence
+→ 插入 RunEvent
+→ 提交短事务
+→ 返回 RuntimeEvent
+```
+
+数据库唯一约束是第二层保护。单个 Sink 还用 asyncio.Lock 保证本进程事件列表顺序。
+
+### 28.5 TraceService
+
+TraceService 当前按 run_id 返回 Run 状态和排序后的事件。它是基础投影，还没有聚合 Turn、ToolCall、Snapshot 和 Artifact；这些会随阶段二后续模块扩展。
+
+### 28.6 当前边界与测试
+
+本阶段已经证明：工作单元提交/回滚、状态机与乐观锁、事件脱敏、事件有序落库、Trace 查询和 migration 可运行。真实 PostgreSQL CI 还会用两个 PersistentEventSink 并发追加 20 个事件，验证数据库原子序号没有重复。
+
+当前仍没有 Task Service、FastAPI、Worker、Job Lease 和恢复执行。下一模块只把 Session/Task/首个 Run 的创建与查询暴露为应用服务和最小 API。
+
+### 28.7 推荐阅读顺序
+
+```text
+1. tasks/state_machine.py
+2. db/models.py
+3. db/session.py
+4. db/repositories/tasks.py
+5. db/repositories/events.py
+6. db/unit_of_work.py
+7. trace/persistent_sink.py
+8. trace/service.py
+9. 对应 integration 测试
+```
+
+复习时重点回答：为什么 AgentLoop 不依赖 ORM、为什么 UnitOfWork 显式提交、为什么 ToolCall ID 不能代替语义幂等键，以及 SQLite 测试为什么不能证明 PostgreSQL 并发语义。

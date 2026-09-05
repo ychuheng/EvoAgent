@@ -66,3 +66,36 @@ def test_openai_compatible_provider_accepts_complete_configuration() -> None:
 def test_runtime_limits_must_be_positive(field: str, value: int) -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **{field: value})
+
+
+def test_stage_two_database_and_worker_defaults(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        workspace=tmp_path,
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    assert settings.database_url.get_secret_value().startswith("postgresql+asyncpg://")
+    assert settings.api_host == "127.0.0.1"
+    assert settings.api_port == 8_000
+    assert settings.heartbeat_seconds * 3 <= settings.lease_seconds
+    assert settings.artifact_root == (tmp_path / "artifacts").resolve()
+
+
+def test_database_url_requires_supported_async_driver() -> None:
+    with pytest.raises(ValidationError, match=r"postgresql\+asyncpg"):
+        Settings(_env_file=None, database_url="postgresql://localhost/evoagent")
+
+
+def test_heartbeat_must_fit_inside_lease() -> None:
+    with pytest.raises(ValidationError, match="one third"):
+        Settings(_env_file=None, lease_seconds=30, heartbeat_seconds=11)
+
+
+def test_artifact_root_must_be_below_workspace(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="child directory"):
+        Settings(
+            _env_file=None,
+            workspace=tmp_path / "workspace",
+            artifact_root=tmp_path / "outside",
+        )

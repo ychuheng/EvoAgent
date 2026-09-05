@@ -1,0 +1,4 @@
+这是 EvoAgent 的 Alembic 数据库迁移目录。
+
+升级：alembic upgrade head
+回退一个版本：alembic downgrade -1
