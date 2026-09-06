@@ -15,6 +15,13 @@ def test_task_state_machine_accepts_normal_execution_path() -> None:
     ensure_task_transition(TaskStatus.RUNNING, TaskStatus.COMPLETED)
 
 
+def test_queued_task_and_run_can_pause_then_resume() -> None:
+    ensure_task_transition(TaskStatus.QUEUED, TaskStatus.PAUSED)
+    ensure_task_transition(TaskStatus.PAUSED, TaskStatus.QUEUED)
+    ensure_run_transition(PersistentRunStatus.QUEUED, PersistentRunStatus.PAUSED)
+    ensure_run_transition(PersistentRunStatus.PAUSED, PersistentRunStatus.QUEUED)
+
+
 def test_task_terminal_state_rejects_further_transition() -> None:
     with pytest.raises(InvalidStateTransitionError, match="completed to queued"):
         ensure_task_transition(TaskStatus.COMPLETED, TaskStatus.QUEUED)

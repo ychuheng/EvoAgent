@@ -33,6 +33,7 @@ dev = [
 
 [project.scripts]
 evoagent = "evoagent.cli:main"
+evoagent-api = "evoagent.api.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/evoagent"]

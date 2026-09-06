@@ -79,6 +79,9 @@ def test_stage_two_database_and_worker_defaults(tmp_path: Path) -> None:
     assert settings.api_host == "127.0.0.1"
     assert settings.api_port == 8_000
     assert settings.heartbeat_seconds * 3 <= settings.lease_seconds
+    assert settings.snapshot_schema_version == 1
+    assert settings.max_retry_attempts == 3
+    assert settings.retry_base_seconds <= settings.retry_max_seconds
     assert settings.artifact_root == (tmp_path / "artifacts").resolve()
 
 
@@ -90,6 +93,11 @@ def test_database_url_requires_supported_async_driver() -> None:
 def test_heartbeat_must_fit_inside_lease() -> None:
     with pytest.raises(ValidationError, match="one third"):
         Settings(_env_file=None, lease_seconds=30, heartbeat_seconds=11)
+
+
+def test_retry_base_must_not_exceed_maximum() -> None:
+    with pytest.raises(ValidationError, match="retry_base_seconds"):
+        Settings(_env_file=None, retry_base_seconds=31, retry_max_seconds=30)
 
 
 def test_artifact_root_must_be_below_workspace(tmp_path: Path) -> None:

@@ -1,7 +1,9 @@
 """控制模型请求和工具执行之间的多轮循环。"""
 
 import asyncio
+import hashlib
 import json
+from typing import Protocol
 
 from evoagent.core.events import RuntimeEventSink
 from evoagent.core.models import (
@@ -9,6 +11,7 @@ from evoagent.core.models import (
     AgentLoopStatus,
     EventType,
     FinishReason,
+    LoopState,
     Message,
     MessageRole,
     ModelRequest,
@@ -22,6 +25,12 @@ from evoagent.core.models import (
 from evoagent.providers.base import ModelProvider, ProviderError, ProviderProtocolError
 from evoagent.tools.executor import ToolExecutor
 from evoagent.tools.registry import ToolRegistry
+
+
+class LoopCheckpointWriter(Protocol):
+    """AgentLoop 在合法边界交出的快照写入接口。"""
+
+    async def save(self, state: LoopState) -> None: ...
 
 
 class AgentLoop:
@@ -40,6 +49,7 @@ class AgentLoop:
         max_repeated_tool_calls: int = 3,
         temperature: float | None = None,
         max_output_tokens: int | None = None,
+        checkpoint_writer: LoopCheckpointWriter | None = None,
     ) -> None:
         normalized_model = model.strip()
         if not normalized_model:
@@ -61,20 +71,40 @@ class AgentLoop:
         self._max_repeated_tool_calls = max_repeated_tool_calls
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
+        self._checkpoint_writer = checkpoint_writer
+        self._config_hash = self._make_config_hash()
 
-    async def run(self, initial_messages: tuple[Message, ...]) -> AgentLoopResult:
+    async def run(
+        self,
+        initial_messages: tuple[Message, ...],
+        *,
+        resume_state: LoopState | None = None,
+    ) -> AgentLoopResult:
         """执行一次模型—工具循环；任务级生命周期由 AgentRunner 管理。"""
 
         if not initial_messages:
             raise ValueError("initial_messages cannot be empty")
 
-        messages = list(initial_messages)
-        known_usage = TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
-        usage_is_complete = True
-        previous_tool_fingerprint: str | None = None
-        repeated_tool_calls = 0
+        if resume_state is not None:
+            if resume_state.config_hash != self._config_hash:
+                raise ValueError("snapshot config hash does not match current AgentLoop")
+            messages = list(resume_state.messages)
+            known_usage = resume_state.usage or TokenUsage(
+                input_tokens=0, output_tokens=0, total_tokens=0
+            )
+            usage_is_complete = resume_state.usage_is_complete
+            previous_tool_fingerprint = resume_state.previous_tool_fingerprint
+            repeated_tool_calls = resume_state.repeated_tool_calls
+            first_iteration = resume_state.completed_iterations + 1
+        else:
+            messages = list(initial_messages)
+            known_usage = TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
+            usage_is_complete = True
+            previous_tool_fingerprint = None
+            repeated_tool_calls = 0
+            first_iteration = 1
 
-        for iteration in range(1, self._max_iterations + 1):
+        for iteration in range(first_iteration, self._max_iterations + 1):
             request = ModelRequest(
                 messages=tuple(messages),
                 tool_definitions=self._registry.definitions(),
@@ -149,6 +179,14 @@ class AgentLoop:
                 else:
                     previous_tool_fingerprint = fingerprint
                     repeated_tool_calls = 1
+                await self._save_checkpoint(
+                    messages=messages,
+                    completed_iterations=iteration,
+                    usage=known_usage if usage_is_complete else None,
+                    usage_is_complete=usage_is_complete,
+                    previous_tool_fingerprint=previous_tool_fingerprint,
+                    repeated_tool_calls=repeated_tool_calls,
+                )
                 if repeated_tool_calls >= self._max_repeated_tool_calls:
                     return AgentLoopResult(
                         status=AgentLoopStatus.LIMIT_REACHED,
@@ -210,6 +248,49 @@ class AgentLoop:
             error_code="max_iterations_reached",
             error_message=f"maximum iterations reached: {self._max_iterations}",
         )
+
+    async def _save_checkpoint(
+        self,
+        *,
+        messages: list[Message],
+        completed_iterations: int,
+        usage: TokenUsage | None,
+        usage_is_complete: bool,
+        previous_tool_fingerprint: str | None,
+        repeated_tool_calls: int,
+    ) -> None:
+        if self._checkpoint_writer is None:
+            return
+        await self._checkpoint_writer.save(
+            LoopState(
+                messages=tuple(messages),
+                completed_iterations=completed_iterations,
+                usage=usage,
+                usage_is_complete=usage_is_complete,
+                previous_tool_fingerprint=previous_tool_fingerprint,
+                repeated_tool_calls=repeated_tool_calls,
+                config_hash=self._config_hash,
+            )
+        )
+
+    def _make_config_hash(self) -> str:
+        """只哈希会改变循环语义的公开配置，不包含密钥。"""
+
+        serialized = json.dumps(
+            {
+                "model": self._model,
+                "max_iterations": self._max_iterations,
+                "max_total_tokens": self._max_total_tokens,
+                "max_repeated_tool_calls": self._max_repeated_tool_calls,
+                "temperature": self._temperature,
+                "max_output_tokens": self._max_output_tokens,
+                "tools": [item.model_dump(mode="json") for item in self._registry.definitions()],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     async def _consume_response(
         self, request: ModelRequest, iteration: int

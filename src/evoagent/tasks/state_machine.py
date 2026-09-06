@@ -37,7 +37,7 @@ class InvalidStateTransitionError(ValueError):
 
 _TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
     TaskStatus.CREATED: frozenset({TaskStatus.QUEUED, TaskStatus.CANCELLED}),
-    TaskStatus.QUEUED: frozenset({TaskStatus.RUNNING, TaskStatus.CANCELLED}),
+    TaskStatus.QUEUED: frozenset({TaskStatus.RUNNING, TaskStatus.PAUSED, TaskStatus.CANCELLED}),
     TaskStatus.RUNNING: frozenset(
         {
             TaskStatus.WAITING_TOOL,
@@ -64,7 +64,11 @@ _TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
 
 _RUN_TRANSITIONS: dict[PersistentRunStatus, frozenset[PersistentRunStatus]] = {
     PersistentRunStatus.QUEUED: frozenset(
-        {PersistentRunStatus.RUNNING, PersistentRunStatus.CANCELLED}
+        {
+            PersistentRunStatus.RUNNING,
+            PersistentRunStatus.PAUSED,
+            PersistentRunStatus.CANCELLED,
+        }
     ),
     PersistentRunStatus.RUNNING: frozenset(
         {

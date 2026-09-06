@@ -9,6 +9,8 @@ from evoagent.db.base import Base
 from evoagent.db.models import RunEventRecord, RunRecord, SessionRecord, TaskRecord
 from evoagent.db.session import Database
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.tasks.lease import JobLeaseManager
+from evoagent.tasks.service import TaskService
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 from evoagent.trace.persistent_sink import PersistentEventSink
 
@@ -79,3 +81,27 @@ async def test_two_persistent_sinks_allocate_unique_sequences(postgres_database:
     assert [record.sequence for record in records] == list(range(1, 21))
     assert stored_run is not None
     assert stored_run.next_event_sequence == 21
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_two_workers_cannot_claim_the_same_task(postgres_database: Database) -> None:
+    service = TaskService(postgres_database.session_factory)
+    session = await service.create_session("租约竞争")
+    aggregate = await service.create_task(
+        session_id=session.id,
+        goal="只能被一个 Worker 领取",
+        provider="mock",
+        model="mock-model",
+    )
+    first = JobLeaseManager(postgres_database.session_factory, lease_seconds=30)
+    second = JobLeaseManager(postgres_database.session_factory, lease_seconds=30)
+
+    claims = await asyncio.gather(
+        first.claim_next("worker-a"),
+        second.claim_next("worker-b"),
+    )
+
+    leases = [lease for lease in claims if lease is not None]
+    assert len(leases) == 1
+    assert leases[0].task_id == aggregate.task.id

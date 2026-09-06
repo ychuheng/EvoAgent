@@ -32,6 +32,11 @@
 26. 阶段二模块 1：数据库与 Alembic
 27. 阶段二模块 2：持久化模型与状态机
 28. 阶段二模块 3：Repository、Unit of Work 与 Trace
+29. 阶段二模块 4：Task Service 与最小 FastAPI
+30. 阶段二模块 5：Job Lease 与单 Worker
+31. 阶段二模块 6：Artifact、Snapshot 与 LoopState
+32. 阶段二模块 7：PersistentAgentRunner 与恢复
+33. 阶段二模块 8：分类重试与预算
 
 ## 1. 阅读说明
 
@@ -60,7 +65,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 阶段一已经闭环。现在既可以使用 MockProvider 确定性运行和测试，也可以通过 CLI 连接 OpenAI-compatible 模型服务，调用计算、文件读取和网页读取工具，最后得到包含完整事件的 RunResult。
 
-阶段二已经完成模块 0～3：数据库工程配置、异步 SQLAlchemy/Alembic、持久化模型与状态机、Repository/Unit of Work、PersistentEventSink 和基础 Trace 查询。FastAPI、Worker、任务领取和恢复尚未实现。
+阶段二已经完成模块 0～8：除了持久化底座，现在还具备 Task API、Job Lease、单 Worker、版本化 LoopState、Artifact、本地快照恢复、PersistentAgentRunner，以及受预算约束的分类重试。SSE、权限审批、副作用恢复和新增高风险工具仍未实现。
 
 ### 1.2 相关文档的职责
 
@@ -2229,10 +2234,10 @@ AgentLoop 依赖 Provider 和 EventSink 的抽象，而不是绑定某个模型�
 CLI → AgentRunner → 模型决策 → 工具执行 → 结果回填 → 最终 RunResult
 ```
 
-当前已经有可测试 Agent 内核和持久化底座，但还没有 API、Worker 与恢复执行。后续链路是：
+当前已经打通从 API 提交到 Worker 持久化执行、恢复和重试的后端主链路。后续链路是：
 
 ```text
-持久化 Task → Worker 租约 → 合法检查点恢复 → 可验证 Skill 生命周期
+SSE 观察 → 权限审批与副作用事实 → 受控工具 → 可验证 Skill 生命周期
 ```
 
 ---
@@ -2436,3 +2441,204 @@ TraceService 当前按 run_id 返回 Run 状态和排序后的事件。它是基
 ```
 
 复习时重点回答：为什么 AgentLoop 不依赖 ORM、为什么 UnitOfWork 显式提交、为什么 ToolCall ID 不能代替语义幂等键，以及 SQLite 测试为什么不能证明 PostgreSQL 并发语义。
+
+---
+
+## 29. 阶段二模块 4：Task Service 与最小 FastAPI
+
+### 29.1 模块目标
+
+模块 4 给持久化底座增加应用入口。调用者可以创建 Session、提交 Task、查询状态，以及取消、暂停和恢复任务。提交 Task 返回 HTTP 202，表示请求已经被系统接受，但任务尚未执行完成。
+
+主要文件：
+
+```text
+src/evoagent/tasks/service.py
+src/evoagent/api/app.py
+src/evoagent/api/dependencies.py
+src/evoagent/api/schemas.py
+src/evoagent/api/routes/sessions.py
+src/evoagent/api/routes/tasks.py
+tests/integration/test_task_api.py
+```
+
+### 29.2 一次任务提交发生了什么
+
+```text
+POST /api/v1/tasks
+→ Pydantic 校验 TaskCreateRequest
+→ FastAPI 注入 TaskService
+→ 打开 UnitOfWork
+→ 检查 Session 存在
+→ 创建 QUEUED Task
+→ 创建首个 QUEUED Run
+→ 追加 task.queued 事件
+→ 同一事务 commit
+→ 返回 202 TaskResponse
+```
+
+三个数据库记录必须一起成功或一起失败。如果只写入 Task 就崩溃，Worker 会看到一个没有 Run 的残缺任务；因此事务边界不能拆开。
+
+### 29.3 DTO 为什么不能直接返回 ORM
+
+ORM Record 代表数据库中的可变对象，API Schema 代表对外承诺。`TaskResponse` 主动选择公开哪些字段，并把最新 Run 组装为嵌套响应。这样以后增加数据库内部列时，不会意外把租约所有者等内部信息暴露出去。
+
+### 29.4 暂停、恢复和取消
+
+QUEUED Task 可以直接暂停、恢复或取消。运行中的取消不同：API 只写入 `cancel_requested=True` 和事件，真正持有租约的 Worker 观察请求后提交 CANCELLED 终态。这样 API 不会越过租约所有者与执行协程竞争。
+
+### 29.5 应用生命周期与错误格式
+
+`create_app()` 允许测试注入 Database；正式启动时由应用创建并在 lifespan 结束时释放连接池。`/health/live` 只证明进程存活，`/health/ready` 执行 `SELECT 1` 证明数据库可用。业务冲突、找不到资源和请求校验都返回统一的 `{"error": ...}` 结构。
+
+本模块仍不在 HTTP 请求中运行 Agent，也没有 SSE。可执行入口是 `evoagent-api`。
+
+---
+
+## 30. 阶段二模块 5：Job Lease 与单 Worker
+
+### 30.1 锁与租约不是一回事
+
+数据库行锁只在领取任务的短事务中存在。如果在模型调用的几分钟内一直占用事务，会长期占用连接和锁。Job Lease 是写在 Task 上的有期限所有权：
+
+```text
+短事务：SELECT ... FOR UPDATE SKIP LOCKED
+→ 写 lease_owner、lease_expires_at、heartbeat_at
+→ Task/Run 进入 RUNNING
+→ commit 并释放行锁
+
+执行期间：定期 heartbeat 延长 lease_expires_at
+```
+
+### 30.2 为什么使用 SKIP LOCKED
+
+两个 Worker 同时查找队首任务时，第一个事务锁住该行，第二个事务跳过已锁行，而不是等待后又重复领取。应用层仍检查 lease_owner；最终提交还要求数据库中的所有者相同且租约未过期。
+
+### 30.3 心跳、取消和崩溃
+
+`LeaseHeartbeat` 定时续租并检查 `cancel_requested`。取消请求会中止 Handler，再由 Worker 提交 CANCELLED。Worker 崩溃时不会主动释放租约；到期后 `recover_expired()` 把 Task 和 Run 变为 RECOVERING，并记录原 Worker。
+
+这是一种 at-least-once 执行基础：任务可能被再次处理，所以后续副作用不能只依赖“这次应该不会重复”。模块 9 将用 ToolEffect 处理副作用事实。
+
+### 30.4 Worker 边界
+
+`JobWorker` 依赖 `TaskHandler` 协议，不依赖具体 Agent。模块 5 可以放入 Fake Handler 测试领取与收尾；模块 7 再把 PersistentAgentRunner 作为真实 Handler 注入。单 Worker 版本仍测试两个领取者竞争，因为将来扩容不能改变正确性。
+
+真实 PostgreSQL CI 负责证明 `SKIP LOCKED` 竞争结果；SQLite 测试只证明领取接口、续租、错误所有者拒绝和状态变化。
+
+---
+
+## 31. 阶段二模块 6：Artifact、Snapshot 与 LoopState
+
+### 31.1 Event、Snapshot 与 Artifact 的区别
+
+| 概念 | 回答的问题 | 内容 |
+|---|---|---|
+| Event | 发生过什么 | 小型、追加式审计事实 |
+| Snapshot | 从哪里继续 | 某个合法边界的完整 LoopState |
+| Artifact | 大内容在哪里 | 文件 URI、哈希、大小和元数据 |
+
+事件不应塞入完整上下文，快照也不取代审计历史。Artifact 数据保存在受控存储中，数据库只保存可验证引用。
+
+### 31.2 LoopState 显式保存什么
+
+`LoopState` 包含消息历史、已经完整结束的 iteration、累计 Usage 是否完整、重复工具调用指纹与计数，以及运行配置哈希。恢复时不能只保存 messages，否则 Token 预算和重复调用保护会被重置。
+
+AgentLoop 只在模型响应完整、全部 ToolResult 已经回填消息之后调用 `LoopCheckpointWriter.save()`。它不保存半段模型流，也不保存正在执行一半的工具。
+
+### 31.3 版本和配置哈希
+
+Snapshot 有数据库 `schema_version`；加载器只接受当前支持版本。LoopState 还保存不含密钥的配置哈希，其中包括模型、循环上限和工具定义。改变这些运行语义后直接续跑旧快照可能得到不可解释结果，因此默认拒绝。
+
+### 31.4 Artifact 安全边界
+
+`LocalArtifactStore` 只接受普通文件名，在 `artifact_root/<run_id>/` 下原子替换文件，拒绝 `../` 路径穿越，并记录 `sha256:` 哈希与字节数。读取时再次解析并检查路径仍位于根目录内。
+
+---
+
+## 32. 阶段二模块 7：PersistentAgentRunner 与恢复
+
+### 32.1 如何复用阶段一内核
+
+```text
+JobWorker 领取 JobLease
+→ PersistentAgentRunner 检查租约记录
+→ 加载最新 LoopState（若存在）
+→ 组装 PersistentEventSink
+→ 组装 PersistentCheckpointStore
+→ 组装 ToolExecutor 与 AgentLoop
+→ 从初始消息或快照运行
+→ 返回 TaskExecutionResult
+→ JobLeaseManager 检查所有权并提交终态
+```
+
+SQLAlchemy 只存在于 runtime 适配层。AgentLoop 依赖 `RuntimeEventSink` 和 `LoopCheckpointWriter` 协议，因此阶段一内存测试仍然成立。
+
+### 32.2 RecoveryService 怎样决策
+
+租约到期只是发现崩溃，不能直接假设“重新跑就行”。RecoveryService 先检查未决 ToolEffect，再检查 Snapshot：
+
+```text
+存在 PREPARED / EXECUTING / UNKNOWN 副作用
+→ FAIL_UNSAFE，等待未来人工处理机制
+
+快照版本不兼容
+→ FAIL_INCOMPATIBLE
+
+存在合法快照
+→ RESUME，从快照后的下一 iteration 继续
+
+没有快照且没有不安全副作用
+→ RESTART，从初始上下文开始
+```
+
+`recovery.started`、`recovery.decided`、`recovery.completed` 或 `recovery.failed` 都进入事件时间线。快照后的不完整模型事件不会伪装成已完成状态；恢复从上一个合法边界重试该步骤。
+
+### 32.3 当前恢复边界
+
+当前自动恢复面向无副作用或可安全重复的任务。ToolEffect 的完整 COMMITTED 结果复用、UNKNOWN 人工确认和审批流属于模块 9。当前实现宁可明确失败，也不会对未知副作用做乐观猜测。
+
+---
+
+## 33. 阶段二模块 8：分类重试与预算
+
+### 33.1 为什么不能遇错就重试
+
+`RetryPolicy` 先把错误分成瞬时错误、限流、永久错误、需要用户、不确定副作用和预算耗尽。只有已知瞬时错误及限流可以自动重试。协议错误、参数错误和未知错误默认是永久错误；不确定副作用必须等待人工判断。
+
+### 33.2 退避和抖动
+
+普通瞬时错误使用：
+
+```text
+delay = min(base × 2^(attempt-1), max)
+实际等待 = delay × 0.5～1.5 的随机抖动
+```
+
+指数退避减少服务故障时的请求风暴，抖动避免大量 Worker 同时醒来。服务明确给出 Retry-After 时尊重该等待值，并受最大延迟上限保护。
+
+### 33.3 三种预算
+
+- 次数预算：`attempt_count` 达到上限后停止。
+- 累计时间预算：从 Task 创建时间计算，下一次延迟不能越过上限。
+- Token 预算：LoopState 保留累计 Usage，达到上限后不再请求模型。
+
+重试结果由租约所有者在同一事务写为 RETRYING、设置 `next_attempt_at` 并追加 `retry.scheduled`。退避到期后 `promote_due_retries()` 写入 `retry.ready`，再把 Task/Run 放回 QUEUED。重试不是在原调用栈里 `sleep` 后死循环，因此不会长期占住 Worker。
+
+### 33.4 推荐阅读顺序
+
+```text
+1. api/schemas.py 与 api/routes/tasks.py
+2. tasks/service.py
+3. tasks/lease.py
+4. workers/heartbeat.py 与 workers/main.py
+5. core/models.py 中的 LoopState
+6. core/loop.py 的 resume_state 与 checkpoint_writer
+7. runtime/checkpoints.py 与 trace/artifacts.py
+8. runtime/recovery.py
+9. runtime/persistent_runner.py
+10. runtime/retry.py
+11. 对应 unit / integration / PostgreSQL 测试
+```
+
+读完后应能解释：为什么 API 返回 202、为什么不能用长事务代替租约、为什么快照只能落在完整边界、为什么恢复不是从头盲跑，以及为什么重试必须同时受分类与预算约束。

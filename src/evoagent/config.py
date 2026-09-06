@@ -63,7 +63,12 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = Field(default=1.0, gt=0, le=60)
     lease_seconds: float = Field(default=30.0, gt=0, le=3_600)
     heartbeat_seconds: float = Field(default=10.0, gt=0, le=1_200)
+    snapshot_schema_version: int = Field(default=1, ge=1)
     artifact_root: Path = Path("./workspace/artifacts")
+    max_retry_attempts: int = Field(default=3, ge=1, le=100)
+    retry_base_seconds: float = Field(default=1.0, gt=0, le=3_600)
+    retry_max_seconds: float = Field(default=30.0, gt=0, le=86_400)
+    retry_max_elapsed_seconds: float = Field(default=300.0, gt=0, le=86_400)
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -104,4 +109,6 @@ class Settings(BaseSettings):
             raise ValueError("artifact_root must be a child directory of workspace")
         if self.heartbeat_seconds * 3 > self.lease_seconds:
             raise ValueError("heartbeat_seconds must not exceed one third of lease_seconds")
+        if self.retry_base_seconds > self.retry_max_seconds:
+            raise ValueError("retry_base_seconds must not exceed retry_max_seconds")
         return self

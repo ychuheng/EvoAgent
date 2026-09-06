@@ -2,7 +2,7 @@
 
 EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目标是在可靠任务执行的基础上，建立可验证、可版本化、可回滚的 Skill 生命周期。
 
-当前实现进度：阶段一的模块 0～9 已完成；阶段二的模块 0～3 已完成，包括异步数据库基础设施、Alembic、持久化模型、状态机、Repository、Unit of Work、PersistentEventSink 和基础 Trace 查询。
+当前实现进度：阶段一模块 0～9、阶段二模块 0～8 已完成。项目已经具备持久化 Task API、PostgreSQL Job Lease、单 Worker、Artifact、版本化快照、崩溃恢复和分类重试后端主链路。
 
 ## 环境要求
 
@@ -64,7 +64,15 @@ $env:EVOAGENT_DATABASE_URL="postgresql+asyncpg://evoagent:evoagent@127.0.0.1:543
 .\.venv\Scripts\alembic upgrade head
 ```
 
-当前模块只完成持久化底座，FastAPI 和 Worker 将从模块 4 开始接入。SQLite 只用于本地快速测试；PostgreSQL 迁移和跨连接事件序号由 CI 的真实 PostgreSQL 服务验证。
+启动 API：
+
+```powershell
+.\.venv\Scripts\evoagent-api
+```
+
+打开 `http://127.0.0.1:8000/docs` 可以查看 OpenAPI 页面。Task API 只负责提交和控制任务；后台执行由 `JobWorker` 与注入的 `TaskHandler` 完成，不会在 HTTP 请求中运行 Agent。
+
+SQLite 只用于本地快速测试；PostgreSQL 迁移、跨连接事件序号和 Worker 租约竞争由 CI 的真实 PostgreSQL 服务验证。
 
 详细设计见：
 

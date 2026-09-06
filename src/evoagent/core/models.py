@@ -79,6 +79,7 @@ class EventType(StrEnum):
     RUN_CANCELLED = "run.cancelled"
     RUN_TIMEOUT = "run.timeout"
     RUN_LIMIT_REACHED = "run.limit_reached"
+    RECOVERY_COMPLETED = "recovery.completed"
 
 
 class ToolDefinition(ContractModel):
@@ -300,6 +301,26 @@ class AgentLoopResult(ContractModel):
                 raise ValueError("non-completed loops require error_code")
             if self.final_answer is not None:
                 raise ValueError("non-completed loops cannot contain final_answer")
+        return self
+
+
+class LoopState(ContractModel):
+    """只能在完整模型—工具边界保存的可恢复循环状态。"""
+
+    messages: tuple[Message, ...] = Field(min_length=1)
+    completed_iterations: int = Field(ge=0)
+    usage: TokenUsage | None = None
+    usage_is_complete: bool = True
+    previous_tool_fingerprint: str | None = None
+    repeated_tool_calls: int = Field(default=0, ge=0)
+    config_hash: str = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_usage(self) -> Self:
+        if self.usage_is_complete and self.usage is None:
+            raise ValueError("complete usage state requires usage")
+        if self.repeated_tool_calls > 0 and self.previous_tool_fingerprint is None:
+            raise ValueError("repeated tool calls require a fingerprint")
         return self
 
 
