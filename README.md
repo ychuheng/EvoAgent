@@ -97,5 +97,6 @@ SQLite 只用于本地快速测试；PostgreSQL 迁移、跨连接事件序号�
 - `docs/阶段二-可靠可追踪任务执行架构与实现指南.md`
 - `docs/阶段二-安全边界.md`
 - `docs/阶段二-演示与故障注入.md`
+- `docs/阶段三-可验证Skill生命周期架构与实现指南.md`
 - `docs/开发进度与决策记录.md`
 - `docs/EvoAgent-源码讲解与学习手册.md`
