@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from evoagent.core.events import RuntimeEventSink
 from evoagent.core.models import EventType, ToolCall, ToolResult, ToolResultStatus
 from evoagent.tools.base import ToolExecutionError, ToolPermissionError
+from evoagent.tools.execution import ToolExecutionMiddleware
 from evoagent.tools.registry import ToolNotFoundError, ToolRegistry
 
 
@@ -21,6 +22,7 @@ class ToolExecutor:
         *,
         timeout_seconds: float,
         max_result_chars: int,
+        middleware: ToolExecutionMiddleware | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -30,6 +32,7 @@ class ToolExecutor:
         self._event_sink = event_sink
         self._timeout_seconds = timeout_seconds
         self._max_result_chars = max_result_chars
+        self._middleware = middleware
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """执行一次工具调用，并把可恢复失败转换成 ToolResult。"""
@@ -53,14 +56,26 @@ class ToolExecutor:
         except ValidationError as error:
             return await self._failed_result(call, "invalid_arguments", str(error))
 
+        token = None
+        if self._middleware is not None:
+            directive = await self._middleware.before(call, tool, arguments)
+            token = directive.token
+            if directive.result is not None:
+                await self._emit_existing_result(directive.result)
+                return directive.result
+
         try:
             content = await asyncio.wait_for(tool.invoke(arguments), timeout=self._timeout_seconds)
         except asyncio.CancelledError:
             raise
         except TimeoutError:
             message = f"tool execution exceeded {self._timeout_seconds:g} seconds"
+            if self._middleware is not None:
+                await self._middleware.after_failure(token, "tool_timeout", message)
             return await self._failed_result(call, "tool_timeout", message)
         except ToolPermissionError as error:
+            if self._middleware is not None:
+                await self._middleware.after_failure(token, "permission_denied", str(error))
             return await self._failed_result(
                 call,
                 "permission_denied",
@@ -68,8 +83,14 @@ class ToolExecutor:
                 status=ToolResultStatus.PERMISSION_DENIED,
             )
         except ToolExecutionError as error:
+            if self._middleware is not None:
+                await self._middleware.after_failure(token, "tool_execution_error", str(error))
             return await self._failed_result(call, "tool_execution_error", str(error))
         except Exception as error:
+            if self._middleware is not None:
+                await self._middleware.after_failure(
+                    token, "internal_tool_error", type(error).__name__
+                )
             await self._event_sink.emit(
                 EventType.TOOL_FAILED,
                 {
@@ -94,6 +115,8 @@ class ToolExecutor:
             raise TypeError(f"tool {call.name} returned a non-string result")
 
         normalized, truncated = self._truncate(content)
+        if self._middleware is not None:
+            await self._middleware.after_success(token, normalized)
         result = ToolResult(
             tool_call_id=call.call_id,
             name=call.name,
@@ -111,6 +134,23 @@ class ToolExecutor:
             },
         )
         return result
+
+    async def _emit_existing_result(self, result: ToolResult) -> None:
+        event_type = (
+            EventType.TOOL_COMPLETED
+            if result.status is ToolResultStatus.SUCCESS
+            else EventType.TOOL_FAILED
+        )
+        await self._event_sink.emit(
+            event_type,
+            {
+                "tool_call_id": result.tool_call_id,
+                "name": result.name,
+                "status": result.status.value,
+                "error_code": result.error_code,
+                "reused": True,
+            },
+        )
 
     async def execute_many(self, calls: Iterable[ToolCall]) -> tuple[ToolResult, ...]:
         """安全调用可以并发执行，其他调用按原始顺序执行。"""
@@ -162,6 +202,8 @@ class ToolExecutor:
         return f"{content[:keep_chars]}{marker}", True
 
     def _can_run_in_parallel(self, calls: tuple[ToolCall, ...]) -> bool:
+        if self._middleware is not None:
+            return False
         if len(calls) < 2:
             return False
         try:

@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from evoagent.db.models import ApprovalStatus
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
 
@@ -89,3 +90,19 @@ class TaskResponse(ApiModel):
     created_at: datetime
     updated_at: datetime
     latest_run: RunResponse
+
+
+class ApprovalDecisionRequest(ApiModel):
+    response: str | None = Field(default=None, max_length=20_000)
+
+
+class ApprovalResponse(ApiModel):
+    id: UUID
+    task_id: UUID
+    tool_call_id: UUID
+    status: ApprovalStatus
+    risk: str
+    reason: str
+    response: str | None
+    requested_at: datetime
+    decided_at: datetime | None

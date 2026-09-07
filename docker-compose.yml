@@ -15,5 +15,49 @@ services:
     volumes:
       - evoagent-postgres:/var/lib/postgresql/data
 
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: &app-environment
+      EVOAGENT_DATABASE_URL: postgresql+asyncpg://evoagent:evoagent@postgres:5432/evoagent
+      EVOAGENT_PROVIDER: mock
+      EVOAGENT_WORKSPACE: /app/workspace
+      EVOAGENT_ARTIFACT_ROOT: /app/workspace/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    command: ["evoagent-api"]
+    environment:
+      <<: *app-environment
+      EVOAGENT_API_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - evoagent-workspace:/app/workspace
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build: .
+    command: ["evoagent-worker"]
+    environment:
+      <<: *app-environment
+      EVOAGENT_WORKER_ID: worker-compose
+    volumes:
+      - evoagent-workspace:/app/workspace
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   evoagent-postgres:
+  evoagent-workspace:

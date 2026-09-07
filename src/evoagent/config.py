@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     retry_base_seconds: float = Field(default=1.0, gt=0, le=3_600)
     retry_max_seconds: float = Field(default=30.0, gt=0, le=86_400)
     retry_max_elapsed_seconds: float = Field(default=300.0, gt=0, le=86_400)
+    sse_poll_seconds: float = Field(default=0.5, gt=0, le=30)
+    sse_heartbeat_seconds: float = Field(default=15.0, gt=0, le=300)
+    # Shell 默认完全关闭。运维者必须按部署环境显式配置可执行文件白名单。
+    shell_allowed_executables: tuple[str, ...] = ()
+    search_provider: str = "mock"
+    search_api_key: SecretStr | None = None
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -111,4 +117,8 @@ class Settings(BaseSettings):
             raise ValueError("heartbeat_seconds must not exceed one third of lease_seconds")
         if self.retry_base_seconds > self.retry_max_seconds:
             raise ValueError("retry_base_seconds must not exceed retry_max_seconds")
+        if self.search_provider == "brave" and (
+            self.search_api_key is None or not self.search_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("brave search provider requires EVOAGENT_SEARCH_API_KEY")
         return self

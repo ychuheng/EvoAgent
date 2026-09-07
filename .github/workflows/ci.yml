@@ -44,3 +44,14 @@ jobs:
         env:
           EVOAGENT_TEST_DATABASE_URL: postgresql+asyncpg://evoagent:evoagent@127.0.0.1:5432/evoagent_test
         run: pytest
+
+  container:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Validate Compose
+        run: docker compose config
+      - name: Build application image
+        run: docker build -t evoagent:ci .

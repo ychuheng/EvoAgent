@@ -80,6 +80,7 @@ class EventType(StrEnum):
     RUN_TIMEOUT = "run.timeout"
     RUN_LIMIT_REACHED = "run.limit_reached"
     RECOVERY_COMPLETED = "recovery.completed"
+    APPROVAL_REQUIRED = "approval.required"
 
 
 class ToolDefinition(ContractModel):

@@ -37,6 +37,10 @@
 31. 阶段二模块 6：Artifact、Snapshot 与 LoopState
 32. 阶段二模块 7：PersistentAgentRunner 与恢复
 33. 阶段二模块 8：分类重试与预算
+34. 阶段二模块 9：Permission Policy、Approval 与 ToolEffect
+35. 阶段二模块 10：Sandbox 与新增工具
+36. 阶段二模块 11：SSE、完整 Trace 与 Viewer
+37. 阶段二模块 12：容器装配、故障注入与阶段验收
 
 ## 1. 阅读说明
 
@@ -65,7 +69,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 阶段一已经闭环。现在既可以使用 MockProvider 确定性运行和测试，也可以通过 CLI 连接 OpenAI-compatible 模型服务，调用计算、文件读取和网页读取工具，最后得到包含完整事件的 RunResult。
 
-阶段二已经完成模块 0～8：除了持久化底座，现在还具备 Task API、Job Lease、单 Worker、版本化 LoopState、Artifact、本地快照恢复、PersistentAgentRunner，以及受预算约束的分类重试。SSE、权限审批、副作用恢复和新增高风险工具仍未实现。
+阶段二模块 0～12 已全部完成：持久化任务、API、租约 Worker、快照恢复、分类重试、权限审批、副作用账本、受控工具、SSE、完整 Trace、Viewer 和 Compose 已形成可测试闭环。阶段三的 Skill 系统尚未开始。
 
 ### 1.2 相关文档的职责
 
@@ -2040,19 +2044,17 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 
 ## 19. 当前不能完成的功能
 
-截至阶段二模块 3，项目仍不能：
+截至阶段二模块 12，项目仍不能：
 
-- 通过 API 创建和管理持久化任务；
-- 由独立 Worker 领取并执行 Task；
-- 在进程重启后恢复未完成任务；
-- 自动重试模型请求或在多个 Provider 间切换；
-- 提供操作系统级工具沙箱和完整权限审批；
+- 在多个 Provider 间自动路由和熔断；
+- 向不可信公网用户提供生产级认证、RBAC 与多租户隔离；
+- 提供操作系统级强进程沙箱和网络出口隔离；
 - 完全防御 DNS 重绑定；
 - 压缩长期上下文或维护长期记忆；
 - 编排多个 Agent；
 - 生成、评测或发布 Skill。
 
-这些能力属于后续模块和阶段，不能因为对应数据模型已经定义就描述成“已经完成”。
+这些能力属于后续阶段。阶段二实现的 PermissionPolicy、路径边界和 argv allowlist 是应用级防线，不能描述成生产级隔离。
 
 ---
 
@@ -2067,17 +2069,18 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 模块 9    安全只读工具与第一阶段收尾
 ```
 
-### 20.2 当前阶段：持久化与可恢复执行
+### 20.2 第二阶段已经完成：持久化与可恢复执行
 
-模块 0～3 已经建立数据库、状态机和事件持久化底座：
+模块 0～12 已经在阶段一内核外建立可靠执行层：
 
 ```text
-RuntimeEvent → PersistentEventSink → RunEvent
-Task/Run → Repository + UnitOfWork
-run_id → TraceService → 有序事件
+Task API → PostgreSQL → Job Lease → Worker
+AgentLoop → Snapshot / RunEvent / ToolEffect / Artifact
+Approval + Sandbox → 受控工具执行
+RunEvent → SSE，全部事实表 → Trace Viewer
 ```
 
-下一模块实现 Task Service 与最小 FastAPI；Worker、检查点内容和恢复仍在后续模块。阶段一测试继续作为契约基线。
+阶段二现已范围冻结；阶段一测试仍是内核契约基线。下一阶段是尚未开始的可验证 Skill 生命周期。
 
 ---
 
@@ -2268,7 +2271,7 @@ asyncpg 连接正式 PostgreSQL，能够验证事务、行锁和数据库并发�
 
 数据库 URL 使用 SecretStr，配置对象被打印时不会直接显示密码。Artifact 必须位于 Workspace 的子目录。heartbeat 的三倍不能大于 lease，确保 Worker 有足够时间续租。
 
-Docker Compose 当前只提供绑定到本机回环地址的 PostgreSQL，不包含 API 和 Worker，因为它们属于后续模块。
+模块 0 当时的 Docker Compose 只提供 PostgreSQL；模块 12 已把 migration、API 和单 Worker 补入 Compose，端口仍只绑定本机回环地址。
 
 ### 25.4 阅读与测试重点
 
@@ -2418,13 +2421,13 @@ emit(EventType, payload)
 
 ### 28.5 TraceService
 
-TraceService 当前按 run_id 返回 Run 状态和排序后的事件。它是基础投影，还没有聚合 Turn、ToolCall、Snapshot 和 Artifact；这些会随阶段二后续模块扩展。
+模块 3 此时的 TraceService 只按 run_id 返回 Run 状态和排序后的事件。模块 11 已在这个基础投影上聚合 Turn、ToolCall、ToolEffect、Approval、Snapshot 和 Artifact。
 
 ### 28.6 当前边界与测试
 
 本阶段已经证明：工作单元提交/回滚、状态机与乐观锁、事件脱敏、事件有序落库、Trace 查询和 migration 可运行。真实 PostgreSQL CI 还会用两个 PersistentEventSink 并发追加 20 个事件，验证数据库原子序号没有重复。
 
-当前仍没有 Task Service、FastAPI、Worker、Job Lease 和恢复执行。下一模块只把 Session/Task/首个 Run 的创建与查询暴露为应用服务和最小 API。
+这是模块 3 完成时的边界；Task Service、FastAPI、Worker、Job Lease 和恢复执行已经分别在后续模块 4～12 完成。保留本段是为了说明实现顺序，而不是描述仓库当前状态。
 
 ### 28.7 推荐阅读顺序
 
@@ -2642,3 +2645,166 @@ delay = min(base × 2^(attempt-1), max)
 ```
 
 读完后应能解释：为什么 API 返回 202、为什么不能用长事务代替租约、为什么快照只能落在完整边界、为什么恢复不是从头盲跑，以及为什么重试必须同时受分类与预算约束。
+
+## 34. 阶段二模块 9：Permission Policy、Approval 与 ToolEffect
+
+### 34.1 这一模块解决什么问题
+
+阶段一的 ToolExecutor 只判断“参数是否合法、工具能否执行”，却不知道一次调用是否需要用户授权，也无法证明副作用有没有执行过。模块 9 在 ToolExecutor 与具体工具之间加入 `PersistentToolMiddleware`，让每次持久化执行都遵循同一条链路：
+
+```text
+ToolCall
+  → 参数校验
+  → PermissionPolicy 计算有效风险
+  → ALLOW / DENY / REQUIRE_APPROVAL
+  → 记录 ToolCall
+  → 有副作用时检查 ToolEffect
+  → 实际调用工具
+  → 持久化成功结果或 UNKNOWN
+```
+
+`PermissionPolicy` 是规则，不负责弹窗；`ApprovalService` 是审批状态的应用服务，不执行工具；`ToolEffect` 是副作用账本，不等同于普通运行日志。职责分开后，策略、人工决定和执行事实都可以单独测试。
+
+### 34.2 动态风险与三种决定
+
+工具类声明基础风险，但一次具体调用可以通过 `effective_risk()` 提升风险。例如 `file_write` 新建文件是 R1，覆盖已有文件会提升为 R2。默认策略允许 R0/R1，R2/R3 要求审批；明确列入拒绝名单的工具直接 DENY。
+
+审批发生时，Runner 不在 Worker 里等待键盘输入，而是把 Task 和 Run 置为 `WAITING_USER`。用户通过审批 API 作出决定后，它们重新进入 `QUEUED`，由正常租约流程继续执行。这使 API 与 Worker 可以是两个独立进程。续跑时 Provider 可能生成新的 call_id，因此决定按“同一 Task、同一工具、同一组规范化参数”复用；call_id 仍只负责关联单次 Trace。
+
+### 34.3 ToolEffect 为什么不能只记一个调用 ID
+
+Worker 可能在外部动作成功后、数据库提交前崩溃。此时数据库只知道调用开始了，不知道外部世界是否已经改变。因此 ToolEffect 使用规范化的“工具名 + 参数”计算语义键，并保留以下关键状态：
+
+- `PREPARED`：已经登记，尚无开始执行的证据；
+- `EXECUTING`：外部调用已经开始，结果尚未确认；
+- `COMMITTED`：结果和哈希已经持久化，后续直接复用；
+- `UNKNOWN`：无法判断外部动作是否成功，必须由人确认。
+
+用户对 UNKNOWN 选择 `retry`，表示确认外部动作没有提交，可以再执行；选择 `committed:<结果>`，表示确认已经提交，系统保存该结果而不再调用工具。它提供的是可审计的保守恢复，不宣称所有外部系统都具备通用 exactly-once。
+
+### 34.4 推荐阅读顺序
+
+```text
+tools/policy.py
+→ tools/execution.py
+→ tools/executor.py
+→ tools/effects.py
+→ tools/approvals.py
+→ api/routes/approvals.py
+→ tests/integration/test_policy_effects_approvals.py
+```
+
+## 35. 阶段二模块 10：Sandbox 与新增工具
+
+### 35.1 Policy 和 Sandbox 的区别
+
+Policy 回答“是否允许这次调用”，Sandbox 回答“即使允许，代码实际上最多能碰到哪里”。只有 Policy，没有 Sandbox，工具实现中的缺陷仍可能越界；只有 Sandbox，没有 Policy，高风险动作会在没有用户知情的情况下执行。
+
+`RunSandbox` 把写入限制在当前 Run 的 Artifact 目录。路径解析后必须仍在根目录中；写入先落到同目录临时文件，再用原子替换提交，避免读到半个文件。`file_write` 覆盖已有文件会提升风险并进入审批。
+
+### 35.2 四个新增能力
+
+- `file_write`：只写当前 Run 沙箱，覆盖需要更高权限；
+- `web_search`：依赖 SearchProvider 协议，测试使用 Mock，真实实现可以选择 Brave；
+- `ask_user`：不直接读标准输入，而是复用持久化 Approval 流返回用户文本；
+- `shell`：默认关闭；显式启用后只接收 argv 和可执行文件白名单。
+
+Shell 使用 `asyncio.create_subprocess_exec()`，不使用 `shell=True`，因此不会解释管道、重定向和命令替换。它还限制工作目录、环境变量、运行时间和输出长度。不过白名单不等于操作系统隔离，所以阶段二仍不把它称为生产级沙箱。
+
+### 35.3 搜索为什么要再抽象一层
+
+Agent 只依赖 `web_search` 工具，工具只依赖 `SearchProvider`。这样单元测试不会访问公网，也不需要 API Key；替换搜索厂商时不需要修改 AgentLoop。Brave 的密钥用 `SecretStr` 保存，只放在请求头中，不能写入事件和 Trace。
+
+### 35.4 推荐阅读顺序
+
+```text
+tools/sandbox.py
+→ tools/builtin/file_write.py
+→ tools/builtin/web_search.py
+→ tools/builtin/ask_user.py
+→ tools/builtin/shell.py
+→ tests/unit/test_new_tools.py
+```
+
+## 36. 阶段二模块 11：SSE、完整 Trace 与 Viewer
+
+### 36.1 SSE 推送的是什么
+
+SSE 不直接转发 Worker 内存里的事件，而是轮询 PostgreSQL 中已经提交的 RunEvent。数据库因此仍是唯一事实来源：客户端断线不会影响任务，API 重启也不会丢掉已提交历史。
+
+每条消息使用 RunEvent.sequence 作为 SSE `id`。客户端重连时把 `Last-Event-ID` 传回来，服务只查询更大 sequence 的记录：
+
+```text
+首次连接：after_sequence = 0 → 发送 1, 2, 3
+连接断开：客户端保存 id = 3
+再次连接：Last-Event-ID = 3 → 发送 4, 5, ...
+```
+
+空闲时发送注释型 heartbeat；Run 进入终态且历史已经发送完毕后关闭流。关闭 SSE 连接只代表停止观看，不代表取消 Task。
+
+### 36.2 Trace 为什么比事件列表更完整
+
+`TraceService` 以 Run 为主键聚合状态、事件、Turn、ToolCall、ToolEffect、Approval、Snapshot 和 Artifact。事件适合回答“按时间发生了什么”，其他表适合回答“当前事实是什么、对象之间怎样关联”。Trace API 同时返回两者，才能定位一次审批、恢复或副作用复用。
+
+`/viewer` 是刻意保持简单的本地页面：输入 run_id 后读取 Trace 并展示时间线。它用于学习和排障，不承担登录、多会话聊天或复杂前端状态管理。
+
+### 36.3 推荐阅读顺序
+
+```text
+trace/sse.py
+→ api/routes/events.py
+→ trace/service.py
+→ api/routes/traces.py
+→ web/viewer.py
+→ tests/integration/test_sse_and_trace_api.py
+```
+
+## 37. 阶段二模块 12：容器装配、故障注入与阶段验收
+
+### 37.1 为什么还需要进程级装配
+
+前面的类都能单独测试，但只有把 PostgreSQL、migration、API 和 Worker 装成独立进程，才能验证“请求进程不执行 Agent”和“Worker 崩溃后可被另一个进程接管”。`ConfiguredTaskHandler` 根据配置为每个 Run 创建独立 Provider、工具注册表和 PersistentAgentRunner，避免跨 Run 复用有状态 Provider。
+
+Compose 的启动关系是：
+
+```text
+PostgreSQL healthcheck 成功
+  → migrate 一次性升级成功
+    → API 与单 Worker 启动
+```
+
+镜像使用非 root 用户，API 只映射到本机回环地址，Workspace 使用命名卷。Shell 白名单默认为空。完整演示命令和数据清理方式见《阶段二演示与故障注入》，能力边界见《阶段二安全边界》。
+
+### 37.2 故障测试证明什么
+
+普通成功测试无法证明恢复安全。故障注入测试专门制造“ToolEffect 已进入 EXECUTING，但结果尚未提交”的中间状态，验证恢复服务会把它标为 UNKNOWN、创建审批并进入 WAITING_USER；审批为 `retry` 后才重新排队。端到端测试则从 Task API 创建任务，经过真实 JobWorker 和 PersistentAgentRunner，最终查询到 COMPLETED Task 与 Trace。
+
+这些测试证明的是本项目声明的边界，不证明进程永不崩溃，也不证明任意第三方 API 可以 exactly-once。
+
+### 37.3 阶段二完成后的总调用链
+
+```text
+POST Task
+→ PostgreSQL 中的 QUEUED Task/Run
+→ Worker 领取 Job Lease
+→ PersistentAgentRunner 恢复 Snapshot 或创建初始状态
+→ AgentLoop 请求 Provider
+→ ToolExecutor + Policy + Approval + ToolEffect + Sandbox
+→ Snapshot / RunEvent / Artifact 持久化
+→ SSE 与 Trace 从数据库投影给客户端
+→ 正常终态，或崩溃后由 RecoveryService 决策
+```
+
+### 37.4 阶段二的学习验收
+
+读完并运行测试后，应能独立解释：
+
+1. 为什么数据库而不是 API/Worker 内存是事实来源；
+2. 为什么行锁只用于短事务，而长任务所有权使用租约；
+3. Event、Snapshot、Artifact 和 ToolEffect 各保存什么；
+4. 为什么 COMMITTED 可以复用，而 UNKNOWN 必须停下来；
+5. 为什么 Policy 不能替代 Sandbox；
+6. 为什么 Last-Event-ID 可以完成 SSE 断点续传；
+7. 为什么故障注入比只测成功路径更有说服力。
+
+推荐最后阅读：`workers/bootstrap.py`、`docker-compose.yml`、`tests/fault_injection/`、`tests/e2e/`，再按照调用链回看模块 0～11。至此 v0.2 范围冻结，阶段三的 Skill 生命周期需要单独设计和实现。

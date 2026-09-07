@@ -56,7 +56,14 @@ _TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
     TaskStatus.WAITING_USER: frozenset({TaskStatus.QUEUED, TaskStatus.CANCELLED}),
     TaskStatus.RETRYING: frozenset({TaskStatus.QUEUED, TaskStatus.CANCELLED}),
     TaskStatus.PAUSED: frozenset({TaskStatus.QUEUED, TaskStatus.CANCELLED}),
-    TaskStatus.RECOVERING: frozenset({TaskStatus.QUEUED, TaskStatus.FAILED, TaskStatus.CANCELLED}),
+    TaskStatus.RECOVERING: frozenset(
+        {
+            TaskStatus.QUEUED,
+            TaskStatus.WAITING_USER,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }
+    ),
     TaskStatus.COMPLETED: frozenset(),
     TaskStatus.FAILED: frozenset(),
     TaskStatus.CANCELLED: frozenset(),
@@ -95,6 +102,7 @@ _RUN_TRANSITIONS: dict[PersistentRunStatus, frozenset[PersistentRunStatus]] = {
     PersistentRunStatus.RECOVERING: frozenset(
         {
             PersistentRunStatus.QUEUED,
+            PersistentRunStatus.WAITING_USER,
             PersistentRunStatus.FAILED,
             PersistentRunStatus.CANCELLED,
         }

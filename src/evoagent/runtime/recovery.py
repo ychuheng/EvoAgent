@@ -9,8 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.db.models import (
+    ApprovalStatus,
     RunRecord,
     TaskRecord,
+    ToolApprovalRecord,
     ToolCallRecord,
     ToolEffectRecord,
     ToolEffectStatus,
@@ -33,6 +35,7 @@ class RecoveryAction(StrEnum):
     RESUME = "resume"
     FAIL_UNSAFE = "fail_unsafe"
     FAIL_INCOMPATIBLE = "fail_incompatible"
+    WAITING_CONFIRMATION = "waiting_confirmation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +79,7 @@ class RecoveryService:
                 raise ValueError("task and run must both be recovering")
 
             unsafe_effect = await unit.session.scalar(
-                select(ToolEffectRecord.id)
+                select(ToolEffectRecord)
                 .join(ToolCallRecord, ToolCallRecord.id == ToolEffectRecord.tool_call_id)
                 .where(
                     ToolCallRecord.run_id == run.id,
@@ -91,12 +94,48 @@ class RecoveryService:
                 .limit(1)
             )
             if unsafe_effect is not None:
-                return await self._fail(
-                    unit,
-                    task,
-                    run,
-                    action=RecoveryAction.FAIL_UNSAFE,
-                    code="recovery_requires_effect_review",
+                unsafe_effect.status = ToolEffectStatus.UNKNOWN
+                approval = await unit.session.scalar(
+                    select(ToolApprovalRecord).where(
+                        ToolApprovalRecord.tool_call_id == unsafe_effect.tool_call_id
+                    )
+                )
+                if approval is None:
+                    call = await unit.session.get(ToolCallRecord, unsafe_effect.tool_call_id)
+                    if call is None:
+                        raise RuntimeError("tool effect has no tool call")
+                    approval = ToolApprovalRecord(
+                        task_id=task.id,
+                        tool_call_id=call.id,
+                        status=ApprovalStatus.PENDING,
+                        risk=call.risk,
+                        reason=(
+                            "副作用结果未知；请用 response=retry 表示确认未提交，"
+                            "或 response=committed:<结果> 表示确认已提交"
+                        ),
+                    )
+                    unit.session.add(approval)
+                    await unit.session.flush()
+                ensure_task_transition(task.status, TaskStatus.WAITING_USER)
+                ensure_run_transition(run.status, PersistentRunStatus.WAITING_USER)
+                task.status = TaskStatus.WAITING_USER
+                task.lock_version += 1
+                run.status = PersistentRunStatus.WAITING_USER
+                run.lock_version += 1
+                await unit.events.append(
+                    run_id=run.id,
+                    event_type="recovery.decided",
+                    payload={
+                        "action": RecoveryAction.WAITING_CONFIRMATION.value,
+                        "approval_id": str(approval.id),
+                    },
+                    created_at=datetime.now(UTC),
+                )
+                await unit.commit()
+                return RecoveryDecision(
+                    action=RecoveryAction.WAITING_CONFIRMATION,
+                    snapshot_event_sequence=None,
+                    ignored_event_count=0,
                 )
 
             checkpoint = PersistentCheckpointStore(

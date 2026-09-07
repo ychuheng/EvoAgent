@@ -211,16 +211,18 @@ v0.1 功能清单于 2026-09-06 完成；实现证据与已知限制见开发进
 
 ### 6.2 v0.2：可靠、可追踪的任务执行
 
-- [ ] FastAPI 与 SSE 实时进度
-- [ ] PostgreSQL、SQLAlchemy 与 Alembic
-- [ ] Session、Task、Run、Turn、ToolCall 与 RunEvent
-- [ ] 数据库任务租约、heartbeat 与独立 Worker
-- [ ] Turn/Tool 边界检查点和服务重启恢复
-- [ ] Provider/工具分类重试、副作用记录与幂等协议
-- [ ] Workspace、Shell、网络安全策略
-- [ ] 危险操作人工确认
-- [ ] 完整 Agent Trace 与基础 Trace Viewer
-- [ ] Docker Compose 启动和故障注入测试
+- [x] FastAPI 与 SSE 实时进度
+- [x] PostgreSQL、SQLAlchemy 与 Alembic
+- [x] Session、Task、Run、Turn、ToolCall 与 RunEvent
+- [x] 数据库任务租约、heartbeat 与独立 Worker
+- [x] Turn/Tool 边界检查点和服务重启恢复
+- [x] Provider/工具分类重试、副作用记录与幂等协议
+- [x] Workspace、Shell、网络安全策略
+- [x] 危险操作人工确认
+- [x] 完整 Agent Trace 与基础 Trace Viewer
+- [x] Docker Compose 启动和故障注入测试
+
+v0.2 功能清单于 2026-09-08 完成；Shell 默认关闭，Compose 镜像构建由 CI 验证。适用范围和演示证据见阶段二安全边界、演示与故障注入文档。
 
 ### 6.3 v0.3：秋招冻结版——可验证 Skill 生命周期
 

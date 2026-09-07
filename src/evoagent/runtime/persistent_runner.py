@@ -16,7 +16,10 @@ from evoagent.runtime.checkpoints import PersistentCheckpointStore
 from evoagent.runtime.retry import RetryPolicy
 from evoagent.tasks.lease import JobLease, LeaseLostError, TaskExecutionResult
 from evoagent.tasks.state_machine import PersistentRunStatus
+from evoagent.tools.approvals import ApprovalRequiredError
+from evoagent.tools.effects import PersistentToolMiddleware
 from evoagent.tools.executor import ToolExecutor
+from evoagent.tools.policy import PermissionPolicy
 from evoagent.tools.registry import ToolRegistry
 from evoagent.trace.persistent_sink import PersistentEventSink
 
@@ -33,6 +36,7 @@ class PersistentAgentRunner:
         provider: ModelProvider,
         registry: ToolRegistry,
         retry_policy: RetryPolicy | None = None,
+        permission_policy: PermissionPolicy | None = None,
     ) -> None:
         self._settings = settings
         self._session_factory = session_factory
@@ -46,6 +50,7 @@ class PersistentAgentRunner:
             max_elapsed_seconds=settings.retry_max_elapsed_seconds,
             max_total_tokens=settings.max_total_tokens,
         )
+        self._permission_policy = permission_policy or PermissionPolicy()
 
     async def handle(self, lease: JobLease) -> TaskExecutionResult:
         task, run = await self._load_owned_records(lease)
@@ -81,6 +86,12 @@ class PersistentAgentRunner:
             sink,
             timeout_seconds=self._settings.tool_timeout_seconds,
             max_result_chars=self._settings.max_tool_result_chars,
+            middleware=PersistentToolMiddleware(
+                task_id=lease.task_id,
+                run_id=lease.run_id,
+                session_factory=self._session_factory,
+                policy=self._permission_policy,
+            ),
         )
         loop = AgentLoop(
             self._provider,
@@ -96,6 +107,12 @@ class PersistentAgentRunner:
         try:
             async with asyncio.timeout(self._settings.task_timeout_seconds):
                 result = await loop.run(initial_messages, resume_state=resume_state)
+        except ApprovalRequiredError as error:
+            return TaskExecutionResult(
+                status=PersistentRunStatus.WAITING_USER,
+                error_code="approval_required",
+                error_message=str(error),
+            )
         except asyncio.CancelledError:
             raise
         except TimeoutError:

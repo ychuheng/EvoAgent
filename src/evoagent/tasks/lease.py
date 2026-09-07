@@ -187,6 +187,8 @@ class JobLeaseManager:
             if result.next_attempt_at is None:
                 raise ValueError("retrying result requires next_attempt_at")
             task_target = TaskStatus.RETRYING
+        elif result.status is PersistentRunStatus.WAITING_USER:
+            task_target = TaskStatus.WAITING_USER
         elif result.status in _RUN_TO_TASK_TERMINAL:
             task_target = _RUN_TO_TASK_TERMINAL[result.status]
         else:
@@ -219,13 +221,19 @@ class JobLeaseManager:
             run.final_answer = result.final_answer
             run.error_code = result.error_code
             run.error_message = result.error_message
-            run.ended_at = None if result.status is PersistentRunStatus.RETRYING else current_time
+            run.ended_at = (
+                None
+                if result.status in (PersistentRunStatus.RETRYING, PersistentRunStatus.WAITING_USER)
+                else current_time
+            )
             run.lock_version += 1
             await unit.events.append(
                 run_id=run.id,
                 event_type=(
                     "retry.scheduled"
                     if result.status is PersistentRunStatus.RETRYING
+                    else "approval.waiting"
+                    if result.status is PersistentRunStatus.WAITING_USER
                     else f"run.{result.status.value}"
                 ),
                 payload={

@@ -231,6 +231,7 @@ class ToolEffectRecord(Base):
         enum_column(ToolEffectStatus, "tool_effect_status"), default=ToolEffectStatus.PREPARED
     )
     result_hash: Mapped[str | None] = mapped_column(String(128))
+    result_content: Mapped[str | None] = mapped_column(Text)
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -250,6 +251,7 @@ class ToolApprovalRecord(Base):
     reason: Mapped[str] = mapped_column(Text)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    response: Mapped[str | None] = mapped_column(Text)
 
 
 class ArtifactRecord(Base):
