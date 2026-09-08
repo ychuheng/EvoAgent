@@ -345,6 +345,8 @@ class SkillVersionRecord(Base):
         enum_column(SkillVersionStatus, "skill_version_status"),
         default=SkillVersionStatus.DRAFT,
     )
+    evaluation_report_hash: Mapped[str | None] = mapped_column(String(71))
+    gate_report_hash: Mapped[str | None] = mapped_column(String(71))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -404,7 +406,12 @@ class EvalExperimentRecord(Base):
     )
     config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     config_hash: Mapped[str] = mapped_column(String(71))
+    report_artifact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="RESTRICT")
+    )
+    report_hash: Mapped[str | None] = mapped_column(String(71))
     gate_report: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    gate_report_hash: Mapped[str | None] = mapped_column(String(71))
     lease_owner: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -539,6 +546,41 @@ def protect_skill_version_body(
             "created_at",
         ),
     )
+    state = inspect(record)
+    for name in ("evaluation_report_hash", "gate_report_hash"):
+        history = state.attrs[name].history
+        if history.has_changes() and any(value is not None for value in history.deleted):
+            raise ValueError(f"immutable report hash cannot be replaced: {name}")
+
+
+@event.listens_for(EvalExperimentRecord, "before_update")
+def protect_experiment_reports(
+    _mapper: object, _connection: object, record: EvalExperimentRecord
+) -> None:
+    """实验身份与配置不可修改，报告首次写入后也不可替换。"""
+
+    _reject_changed_fields(
+        record,
+        (
+            "kind",
+            "skill_version_id",
+            "dataset_id",
+            "config_snapshot",
+            "config_hash",
+            "created_at",
+        ),
+    )
+
+    state = inspect(record)
+    for name in (
+        "report_artifact_id",
+        "report_hash",
+        "gate_report",
+        "gate_report_hash",
+    ):
+        history = state.attrs[name].history
+        if history.has_changes() and any(value is not None for value in history.deleted):
+            raise ValueError(f"immutable experiment report cannot be replaced: {name}")
 
 
 @event.listens_for(EvalDatasetRecord, "before_update")

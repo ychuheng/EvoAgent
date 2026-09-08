@@ -48,6 +48,18 @@
 42. 阶段三模块 4：来源资格、清洗与冻结
 43. 阶段三模块 5：候选生成与 DRAFT 提炼
 44. 阶段三模块 6：BM25 检索与 Skill 上下文
+45. 阶段三模块 0～6 的总调用链
+46. 阶段三当前测试地图
+47. 阶段三前七个模块的学习验收
+48. 阶段三模块 7：可恢复 EvalCoordinator 与配对运行
+49. 阶段三模块 8：MetricsCollector 与不可变评测报告
+50. 阶段三模块 9：QualityGate 与评测生命周期
+51. 阶段三模块 10：人工审批、发布、禁用与回滚 API
+52. 阶段三模块 11：React + TypeScript 管理页面
+53. 阶段三模块 12：真实数据集、完整 Demo 与阶段冻结
+54. 阶段三完整调用链
+55. 阶段三最终测试地图
+56. 阶段三学习验收
 
 ## 1. 阅读说明
 
@@ -61,7 +73,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-当前处于 `v0.3：可验证 Skill 生命周期` 阶段，已实现模块 0～6。
+当前 `v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。
 
 已经完成：
 
@@ -76,7 +88,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 阶段一已经闭环。现在既可以使用 MockProvider 确定性运行和测试，也可以通过 CLI 连接 OpenAI-compatible 模型服务，调用计算、文件读取和网页读取工具，最后得到包含完整事件的 RunResult。
 
-阶段二模块 0～12 已全部完成。阶段三已经具备严格 DSL、来源验证与冻结、DRAFT 提炼、BM25 检索和运行时上下文注入；配对评测、发布审批和管理页面仍未实现。
+阶段二模块 0～12 已全部完成。阶段三已具备严格 DSL、来源验证与冻结、DRAFT 提炼、BM25 检索、可恢复配对评测、不可变报告、硬门禁、人工发布与回滚，以及 Skill/Eval 管理页面。尚未完成的生产能力包括认证、RBAC、多租户、强沙箱和高可用部署，不能把本地管理面直接当作公网产品。
 
 ### 1.2 相关文档的职责
 
@@ -87,7 +99,8 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 | `EvoAgent-项目设计与分阶段实现计划.md` | 说明项目最终要做什么以及五个阶段如何演进 |
 | `阶段一-可测试Agent内核架构与实现指南.md` | 说明第一阶段的目标架构、实现顺序和完成标准 |
 | `阶段二-可靠可追踪任务执行架构与实现指南.md` | 说明第二阶段的持久化、Worker、恢复、安全和分模块路线 |
-| `阶段三-可验证Skill生命周期架构与实现指南.md` | 说明第三阶段的 DSL、来源、评测门禁、发布回滚和模块路线；当前是计划 |
+| `阶段三-可验证Skill生命周期架构与实现指南.md` | 说明第三阶段的 DSL、来源、评测门禁、发布回滚和模块路线；模块 0～12 已落地 |
+| `阶段三-演示与安全边界.md` | 说明怎样复现完整生命周期，以及哪些生产能力不在 v0.3 范围内 |
 | `开发进度与决策记录.md` | 记录当前真正完成到哪里，以及已经固定的接口决策 |
 | `EvoAgent-源码讲解与学习手册.md` | 解释已经写出的代码及其原理，也就是本手册 |
 
@@ -2000,7 +2013,7 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 
 本项目要求每完成一个模块，同时完成对应确定性测试。测试的作用不仅是判断当前代码是否正确，也是在后续重构时保护已经固定的接口行为。
 
-### 18.2 当前测试文件
+### 18.2 阶段二收尾时的测试文件
 
 | 文件 | 主要覆盖内容 |
 |---|---|
@@ -2024,7 +2037,7 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 | `test_migrations.py` | Alembic upgrade、downgrade 和 PostgreSQL Schema 检查 |
 | `test_postgres_persistence.py` | PostgreSQL 跨连接事件序号 |
 
-当前测试结果：
+阶段二收尾时的测试结果：
 
 ```text
 142 passed, 3 skipped
@@ -2050,7 +2063,7 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 
 ---
 
-## 19. 当前不能完成的功能
+## 19. 阶段二收尾时不能完成的功能
 
 截至阶段二模块 12，项目仍不能：
 
@@ -2060,9 +2073,9 @@ Agent 系统中有大量异步、流式和外部依赖。如果只依赖人工�
 - 完全防御 DNS 重绑定；
 - 压缩长期上下文或维护长期记忆；
 - 编排多个 Agent；
-- 生成、评测或发布 Skill。
+- 生成、评测或发布 Skill（该项已由阶段三补齐）。
 
-这些能力属于后续阶段。阶段二实现的 PermissionPolicy、路径边界和 argv allowlist 是应用级防线，不能描述成生产级隔离。
+这是阶段二结束时的边界快照。阶段三已经补齐 Skill 生命周期；其余 Provider 路由、生产认证、强隔离、长期记忆和多 Agent 仍未实现。阶段二实现的 PermissionPolicy、路径边界和 argv allowlist 是应用级防线，不能描述成生产级隔离。
 
 ---
 
@@ -2088,7 +2101,7 @@ Approval + Sandbox → 受控工具执行
 RunEvent → SSE，全部事实表 → Trace Viewer
 ```
 
-阶段二现已范围冻结；阶段一、二测试仍是回归基线。阶段三模块 0～6 已实现，下一步是可恢复配对评测协调器。
+阶段一、二测试仍是回归基线；阶段三模块 0～12 也已经完成并范围冻结。当前优先学习和验证完整生命周期，是否进入阶段四应单独决定。
 
 ---
 
@@ -2819,56 +2832,1653 @@ POST Task
 
 ## 38. 阶段三模块 0：可重现运行契约
 
-比较“使用 Skill”和“不使用 Skill”的结果时，模型、Prompt、工具、权限或预算只要有一项不同，就不能把差异归因给 Skill。`RunConfigSnapshot` 只保存非敏感且会改变实验语义的字段，并用规范化 JSON 计算 SHA-256。`comparable_with()` 会先抹去 Skill 这一实验变量，再判断其他条件是否一致。
+### 38.1 模块目标
 
-`ToolRegistry.manifest_hash()` 记录工具名、参数 Schema、风险、副作用、并发属性和实现版本。`TraceBundle` 把任务、回答、Turn 摘要、工具调用、副作用、Artifact、验证结果和配置整理成稳定 DTO，但不保存模型隐藏推理。
+阶段二已经可以回答“这次 Run 发生了什么”，但还不能严格回答“为什么这次结果比另一次好”。模块 0 先建立可重现实验所需的三份契约：
 
-推荐阅读：`runtime/run_config.py` → `tools/registry.py` → `trace/bundle.py` → `tests/unit/test_run_config_and_manifest.py`。
+```text
+RunConfigSnapshot：这次运行使用了什么配置
+Tool manifest：这次运行实际向模型开放了哪些工具能力
+TraceBundle：评测和提炼可以读取哪些运行事实
+```
+
+主要文件：
+
+```text
+src/evoagent/runtime/run_config.py
+src/evoagent/tools/base.py
+src/evoagent/tools/registry.py
+src/evoagent/trace/bundle.py
+src/evoagent/config.py
+src/evoagent/runtime/persistent_runner.py
+tests/unit/test_run_config_and_manifest.py
+```
+
+本模块不会生成 Skill，也不会执行评测。它先把以后做对照实验所需的“尺子”固定下来。
+
+### 38.2 为什么阶段二的 `config_hash` 还不够
+
+阶段二的配置哈希主要用于判断快照能否安全恢复。阶段三需要比较两次独立 Run，如果下列任意条件不同，结果差异就不一定来自 Skill：
+
+- 模型或 Provider 不同；
+- 系统提示词不同；
+- 工具参数 Schema 或工具实现不同；
+- 权限策略不同；
+- 最大循环数、Token 预算或超时不同；
+- 检索参数不同；
+- 代码版本不同。
+
+例如，实验组既加入 Skill，又把模型从 A 换成 B。即使实验组更好，也无法证明是 Skill 带来的提升。这就是“控制变量”的工程版本。
+
+### 38.3 `RunMode` 表示什么
+
+一次 Run 有三种 Skill 使用方式：
+
+| 模式 | 普通任务能否使用 | 含义 |
+|---|---|---|
+| `baseline` | 可以 | 明确不加载 Skill，作为基线 |
+| `retrieval` | 可以，也是默认值 | 根据任务目标检索已经发布的 Skill |
+| `pinned_skill` | 不可以直接创建 | 固定使用某个版本，只服务于后续配对评测 |
+
+`TaskService.create_task()` 会拒绝普通 API 创建 `pinned_skill` Run。否则用户可以绕过评测协调器，制造一条看似是正式实验、实际上没有配对条件的记录。
+
+### 38.4 `RunConfigSnapshot` 保存什么
+
+`RunConfigSnapshot` 是冻结的 Pydantic 模型，`extra="forbid"` 会拒绝未知字段。它保存的是影响运行语义、但不包含密码的配置：
+
+| 分类 | 代表字段 | 作用 |
+|---|---|---|
+| 模型 | `provider`、`model`、`temperature` | 固定模型行为来源 |
+| Prompt | `system_prompt_hash` | 检测基础系统提示词是否变化 |
+| 工具与策略 | `tool_manifest_hash`、`policy_hash` | 固定能力和权限边界 |
+| 预算 | `max_iterations`、`max_total_tokens` | 保证两组资源上限相同 |
+| 超时 | 三种 `*_timeout_seconds` | 保证失败条件相同 |
+| 代码 | `code_version` | 标识实现版本 |
+| Skill | `run_mode` 和三个 Skill 字段 | 保存唯一实验变量和实际注入内容 |
+
+这里保存 Prompt、工具和策略的哈希而不是正文，是为了既能比较身份，又避免把敏感配置复制到每条 Run 中。
+
+三个 Skill 字段必须一起出现：版本 ID 表示“选中了谁”，内容哈希表示“它的定义是什么”，上下文哈希表示“最终注入了什么组合”。`baseline` 模式则禁止出现这些字段。
+
+### 38.5 规范化 JSON 与内容哈希
+
+普通 JSON 对象的键顺序和空格可以不同：
+
+```json
+{"model":"demo","provider":"mock"}
+{"provider": "mock", "model": "demo"}
+```
+
+它们语义相同，但原始字符串不同。代码在计算 SHA-256 前会：
+
+```text
+Pydantic 模型
+→ 转成 JSON 可表示的 dict
+→ 键名排序
+→ 去掉无意义空格
+→ UTF-8 编码
+→ SHA-256
+→ sha256:<64 位十六进制>
+```
+
+因此哈希代表结构化内容，而不是某一次偶然的序列化格式。注意：哈希用于身份和完整性检查，不是加密，也不能保护被哈希的低熵秘密。
+
+### 38.6 `comparable_with()` 为什么要先抹去 Skill 字段
+
+配对实验本来就要求一组不用 Skill，另一组固定使用 Skill。如果直接比较完整配置哈希，两组必然不同。`canonical_dict(comparison=True)` 会把以下字段统一成占位值：
+
+```text
+run_mode
+skill_version_id
+skill_content_hash
+skill_context_hash
+```
+
+然后再比较其余配置哈希。相等表示“除 Skill 变量以外，已记录的条件一致”，不代表两个模型输出一定相同。
+
+### 38.7 工具清单为什么必须包含实现版本
+
+`ToolRegistry.manifest()` 不只保存工具名称，还保存：
+
+```text
+名称 + 描述 + 参数 JSON Schema + 风险等级
++ 是否有副作用 + 是否允许并发 + implementation_version
+```
+
+如果 `calculator` 名称不变，但实现修复了计算规则，只记录名称就会把两种不同能力误认为相同。因此每个工具都有 `implementation_version`；工具逻辑或关键语义变化时必须主动升级版本。
+
+清单按工具名称排序，再计算哈希，所以注册顺序不会让实验配置产生无意义变化。
+
+### 38.8 `TraceBundle` 是什么
+
+阶段二的 Trace 面向排障，内容较丰富。阶段三不能让评测器和提炼器随意读取全部数据库对象，因此增加 `TraceBundle` 作为稳定 DTO：
+
+```text
+任务目标、最终回答、Run 状态
++ Turn 摘要
++ ToolCall 与 ToolEffect
++ Artifact 元数据
++ 验证结果
++ RunConfigSnapshot
+```
+
+它明确不保存模型的隐藏思维过程。`TraceBundleService` 通过 `TraceService` 取得运行投影，再从 Task 和 Run 补齐目标与配置。这使 Validator、清洗器和候选生成器面对同一种输入结构，而不是直接依赖 ORM。
+
+### 38.9 配置在运行链路中的落点
+
+`PersistentAgentRunner` 在真正调用模型前完成以下工作：
+
+```text
+加载 Task 和 Run
+→ 选择 Skill（或明确无命中）
+→ 计算 Skill 上下文
+→ 构造 RunConfigSnapshot
+→ 写入 runs.config_snapshot 和 runs.config_hash
+→ 才开始 AgentLoop
+```
+
+如果 Run 已经保存过配置，而恢复时重新计算出的哈希不同，代码会拒绝继续。这样新发布的 Skill、工具变化或配置变化不会悄悄污染旧 Run。
+
+### 38.10 阶段三配置项怎样分组
+
+`Settings` 在模块 0 先加入整阶段会使用的配置。模块 0～6 完成时其中一部分还是预留项；模块 7～12 已正式消费评测租约、重复次数、数据集根目录和前端静态目录等配置：
+
+| 配置 | 默认值 | 当前用途 |
+|---|---:|---|
+| `code_version` | `0.3.0.dev0` | 写入可重现配置 |
+| `skill_schema_version` | `1` | DSL Validator 接受的版本 |
+| `skill_max_steps` | `20` | 限制候选步骤数量 |
+| `skill_max_sources` | `10` | 限制一次提炼来源数量 |
+| `skill_min_sources` | `2` | 已校验与 max 的关系，但提炼服务尚未执行此下限 |
+| `skill_retrieval_top_k` | `1` | 普通 Run 最多注入几个 Skill |
+| `skill_retrieval_min_score` | `0.1` | BM25 最低命中分数 |
+| `skill_max_effective_risk` | `R1` | DSL 与检索的风险上限 |
+| `skill_allowed_tools` | 五个低风险工具 | 提炼和运行兼容性白名单 |
+| `eval_dataset_root` | `./evals/datasets` | 为后续文件数据集加载预留 |
+| `skill_extractor_model` | `None` | 未配置时不启用真实模型提炼 |
+| `eval_repeats`、`eval_poll_seconds`、`eval_lease_seconds` | 见配置文件 | 为模块 7 的评测协调器预留 |
+
+交叉校验会拒绝重复工具、`shell`、高于 R1 的风险，以及 `skill_min_sources > skill_max_sources`。配置对象允许先声明后续字段，但手册会明确区分“配置已存在”和“消费该配置的服务已实现”。
+
+### 38.11 本模块边界、测试与阅读顺序
+
+本模块的直接测试已经证明：配置哈希稳定、Skill 字段组合会被校验、只有 Skill 不同的配置可以比较、工具实现版本变化会改变清单哈希。工具名称的确定性排序由阶段一 `ToolRegistry` 行为保证；若要把它作为独立实验契约，还可以补一条“不同注册顺序得到相同 manifest_hash”的专门测试。
+
+在模块 0 的完成边界内，它还没有证明实验效果；模块 7、8 现已用配对运行和指标汇总补齐这部分能力。
+
+推荐阅读顺序：
+
+```text
+1. runtime/run_config.py
+2. tools/base.py 中的工具元数据
+3. tools/registry.py 的 manifest()
+4. trace/bundle.py
+5. runtime/persistent_runner.py 中配置落库的位置
+6. tests/unit/test_run_config_and_manifest.py
+```
+
+读完后应能解释：为什么“同一个模型名称”仍不足以证明实验可比较，以及为什么 Skill ID、正文哈希和上下文哈希要同时保存。
 
 ## 39. 阶段三模块 1：声明式 Skill DSL
 
-Skill 不是可执行 Python，而是一份受约束的数据。`SkillDefinition` 描述触发词、输入、允许工具、风险上限、步骤和成功条件；`ToolStep` 与 `ModelStep` 用判别联合区分。
+### 39.1 模块目标
 
-Pydantic 判断字段形状，`SkillDefinitionValidator` 继续检查 Schema 版本、工具白名单、R1 风险上限、绝对路径、危险指令、变量引用和依赖图。步骤只能读取输入或祖先步骤的输出；拓扑排序无法完成就说明存在环。规范化 JSON 和 `content_hash` 让相同定义得到相同身份。
+模块 1 定义“什么样的数据才配叫 Skill”。EvoAgent 当前采用指导式 SOP：Skill 向模型提供一套经过验证的操作参考，但不是 Python 插件，也不会自己执行步骤。
 
-推荐阅读：`skills/schema.py` → `skills/validation.py` → `skills/canonical.py` → `tests/unit/test_skill_schema.py`。
+主要文件：
+
+```text
+src/evoagent/skills/schema.py
+src/evoagent/skills/validation.py
+src/evoagent/skills/canonical.py
+tests/unit/test_skill_schema.py
+```
+
+选择声明式 DSL 的核心原因是：可以校验、计算哈希、保存版本、展示差异和限制权限。如果让提炼模型直接生成 Python，后续安全审查和稳定评测都会困难得多。
+
+### 39.2 `SkillDefinition` 的整体结构
+
+一份 Skill 定义包含：
+
+| 字段 | 回答的问题 |
+|---|---|
+| `schema_version` | 应该用哪一版解析规则 |
+| `name`、`description` | Skill 是谁、解决什么问题 |
+| `triggers` | 哪类用户目标可能匹配它 |
+| `inputs` | 执行建议需要哪些输入 |
+| `preconditions` | 最多允许哪些工具和风险 |
+| `steps` | 建议按什么依赖顺序工作 |
+| `success_criteria` | 怎样判断任务做完 |
+| `validators` | 应该使用哪些可信验证器 |
+
+`ContractModel` 会拒绝未声明字段，因此模型不能偷偷在 JSON 中塞入 `python_code`、`admin_override` 一类扩展能力。
+
+### 39.3 输入定义为什么刻意简单
+
+`InputDefinition` 当前支持字符串、整数、数字、布尔和一维数组。数组必须声明 `item_type`，非数组不能声明它，并且不支持嵌套数组。
+
+这不是因为复杂 JSON 无法实现，而是 v0.3 先把模板引用和验证规则控制在容易理解的范围内。复杂嵌套结构以后需要同时设计路径表达式、类型传播和错误提示，不能只加一个枚举值。
+
+### 39.4 `preconditions` 不是授权结果
+
+`SkillPreconditions` 声明 Skill 预计使用哪些工具，以及最高有效风险。它表达的是候选定义的能力上限，不是“已经获得用户授权”。
+
+运行时仍然经过阶段二的：
+
+```text
+ToolExecutor
+→ PermissionPolicy
+→ Approval
+→ ToolEffect
+→ Sandbox
+```
+
+因此 Skill 最多缩小可用能力，不能绕过现有安全链路扩大能力。阶段三当前把声明式 Skill 的最高风险限制在 R1，并且无条件排除 `shell`。
+
+### 39.5 两种步骤和判别联合
+
+步骤根据 `action` 分成两类：
+
+```text
+ToolStep(action="tool")：建议调用一个受控工具
+ModelStep(action="model")：建议模型完成一段推理或整理
+```
+
+Pydantic 使用 `action` 作为 discriminator。读取 JSON 时，不需要猜一个对象属于哪种步骤；`tool` 和 `model` 会进入各自明确的数据模型。
+
+当前步骤只是被 `SkillContextRenderer` 渲染成参考文本，并没有一个 DSL 解释器逐条强制执行。这是必须记住的能力边界。
+
+### 39.6 变量引用规则
+
+DSL 只接受三类引用：
+
+```text
+${inputs.topic}                 读取已声明输入
+${steps.fetch.output}          读取祖先步骤输出
+${steps.fetch.output.some_key} 读取祖先输出的子字段
+${item}                        只允许在 foreach 步骤中使用
+```
+
+一个步骤不能读取尚未依赖的步骤，也不能只因为某一步“写在前面”就读取它。合法性由依赖图决定，而不是由 JSON 数组顺序决定。
+
+### 39.7 `foreach` 的限制
+
+`foreach` 必须是一个完整引用，不能混在长字符串里。若它指向输入，该输入必须声明为数组。只有启用 `foreach` 的工具步骤才能使用 `${item}`。
+
+这些规则避免出现“模板看起来合法，但运行时不知道循环对象是什么”的模糊状态。当前只是验证和渲染该信息，尚未实现自动循环解释器。
+
+### 39.8 为什么需要 DAG 检查
+
+多个步骤可以形成有向无环图 DAG：
+
+```text
+collect ──→ summarize ──→ write
+   └───────────────────→ verify
+```
+
+`depends_on` 给出边。Validator 会检查：
+
+- 步骤 ID 唯一；
+- 依赖项存在且不重复；
+- 步骤不能依赖自己；
+- 引用的步骤必须是当前步骤的直接或间接祖先；
+- 整张图不能有环。
+
+拓扑排序每次选择当前没有依赖的步骤，并按 ID 排序保证结果稳定。如果还有节点却找不到可执行节点，说明图中存在环。
+
+### 39.9 Pydantic 校验与领域校验为什么分开
+
+Pydantic 适合判断单个字段的形状，例如名称格式、长度和枚举值；`SkillDefinitionValidator` 负责需要外部上下文或跨字段推理的规则：
+
+```text
+工具是否真的注册
+工具是否同时位于系统白名单和 Skill 白名单
+风险是否超限
+依赖图是否有环
+引用是否指向祖先
+是否出现绝对路径或危险指令
+Schema 版本是否受支持
+```
+
+这样数据模型保持纯粹，Validator 可以由部署配置和当前 ToolRegistry 组装。
+
+### 39.10 静态安全检查能防什么
+
+Validator 会拒绝宿主机绝对路径、`shell`、超风险工具和明显的“忽略系统指令”文本。其作用是让高风险内容在入库前尽早失败。
+
+它不是完整的自然语言安全证明。正则无法理解所有 Prompt Injection，因此来源清洗、运行时权限策略和 Sandbox 仍然必须保留。这是多层防线，不是某一层包办安全。
+
+### 39.11 规范化与内容身份
+
+`canonical_json()` 固定键顺序和分隔符；`content_hash()` 对结果计算 SHA-256。相同 SkillDefinition 无论字典原始键顺序如何，都得到相同内容哈希。
+
+后续 `SkillVersionRecord` 保存定义和哈希，数据库监听器禁止原地修改正文。修改 Skill 的正确方式是创建新版本。
+
+### 39.12 本模块边界、测试与阅读顺序
+
+测试重点包括：严格字段、数组输入规则、重复 ID、无效依赖、环、非祖先引用、绝对路径、危险指令、工具白名单和确定性哈希。
+
+推荐阅读顺序：
+
+```text
+1. skills/schema.py
+2. tests/unit/test_skill_schema.py 中的合法示例
+3. skills/validation.py 的 validate()
+4. _validate_tool_step() 与 _validate_text()
+5. _ancestors() 与 _topological_order()
+6. skills/canonical.py
+```
+
+读完后应能区分“字段结构合法”和“领域语义安全”，并能说明为什么一份 Skill 是数据而不是代码。
 
 ## 40. 阶段三模块 2：持久化模型、状态机与 ArtifactWrite
 
-`SkillRecord` 是长期聚合根，`SkillVersionRecord` 是不可变正文。`SkillSourceRecord` 保存来源血缘，`RunSkillSelectionRecord` 保存运行时选择理由。EvalDataset、EvalCase、EvalExperiment、EvalRun、PromotionDecision 和 SkillEvent 为后续评测与审批保存事实关系。
+### 40.1 模块目标
 
-状态变化由 `skills/lifecycle.py` 和 `evals/lifecycle.py` 的纯函数先检查，数据库再用外键、唯一约束和 CheckConstraint 兜底。迁移 `20260908_0003` 可以完整升级和回退。
+模块 2 把阶段三对象从“内存里的数据结构”变成“数据库中的可审计事实”，同时补上 Skill 需要的不可覆盖 Artifact 写入能力。
 
-`artifact_write` 与 `file_write` 不同：它只能在当前 Run 下排他创建新文件，不能覆盖。文件系统用 `O_EXCL` 保证并发安全，成功后登记 URI、大小、类型和内容哈希。
+主要文件：
+
+```text
+src/evoagent/db/models.py
+src/evoagent/db/repositories/skills.py
+src/evoagent/db/repositories/evals.py
+src/evoagent/db/unit_of_work.py
+src/evoagent/skills/lifecycle.py
+src/evoagent/evals/lifecycle.py
+src/evoagent/tools/builtin/artifact_write.py
+src/evoagent/trace/artifacts.py
+migrations/versions/20260908_0003_stage_three_foundations.py
+```
+
+### 40.2 为什么 `Skill` 和 `SkillVersion` 必须分开
+
+`SkillRecord` 是长期存在的聚合根，保存名称、slug、启用状态和当前活动版本；`SkillVersionRecord` 保存某一版不可变定义。
+
+```text
+Skill：report_research
+├─ Version 1：RETIRED
+├─ Version 2：ACTIVE  ← active_version_id
+└─ Version 3：DRAFT
+```
+
+如果把正文直接放在 Skill 表中，每次修改都会覆盖旧内容，历史 Run 就无法证明当时加载的是哪一版。分开后，聚合状态可以变化，但每一版正文、哈希和来源身份保持不变。
+
+### 40.3 阶段三表按职责怎样分组
+
+| 分组 | 表 | 作用 |
+|---|---|---|
+| Skill 目录 | `skills`、`skill_versions` | 保存聚合与不可变版本 |
+| 来源血缘 | `skill_sources` | 连接版本、来源 Run、EvalRun 和冻结 Artifact |
+| 运行选择 | `run_skill_selections` | 保存某个 Run 为什么选中哪些版本 |
+| 评测 | `eval_datasets`、`eval_cases`、`eval_experiments`、`eval_runs` | 保存数据、实验和结果 |
+| 发布审计 | `promotion_decisions`、`skill_events` | 保存人工决定和事件序列 |
+
+模块 2 建表时不等于所有业务服务已经完成；当时模块 0～6 只使用其中一部分。现在模块 7～10 已为配对实验、质量门禁和发布表补齐正式服务。
+
+### 40.4 关键数据库约束
+
+数据库负责最后一道一致性保护：
+
+- `(skill_id, version)` 唯一，不能有两个“第 2 版”；
+- `content_hash` 必须是 `sha256:` 加 64 位摘要；
+- `(dataset name, version)` 唯一；
+- 同一数据集中的 `case_key` 唯一；
+- 同一 Run 中选择结果的 `rank` 唯一且从 1 开始；
+- EvalRun 的 `baseline` 必须没有 Skill，`pinned_skill` 必须有版本 ID；
+- 同一 Skill 事件的 sequence 唯一。
+
+应用校验可以提供友好错误，数据库约束负责在并发和程序缺陷下拒绝非法事实。
+
+### 40.5 ORM 不可变监听器
+
+SQLAlchemy 的 `before_update` 监听器保护三类历史：
+
+```text
+SkillVersion：只允许改变 lifecycle_status
+EvalDataset：只允许改变 status
+EvalCase：任何原地更新都拒绝
+SkillSource：任何原地更新都拒绝
+```
+
+这表示“修改内容”必须创建新版本，不能拿到 ORM 对象后直接覆盖 JSON。需要注意，监听器是应用 ORM 层保护；数据库权限和审计仍应作为生产部署的额外边界。
+
+### 40.6 Skill 生命周期状态机
+
+Skill 聚合状态：
+
+```text
+ENABLED ⇄ DISABLED → DEPRECATED
+ENABLED ───────────→ DEPRECATED
+```
+
+SkillVersion 状态：
+
+```text
+DRAFT → EVALUATING → REVIEW_REQUIRED → ACTIVE ⇄ RETIRED
+  └────────→ REJECTED       └────────→ REJECTED
+```
+
+状态机是纯 Python 函数，先判断转换是否合法。`DRAFT → ACTIVE` 被明确拒绝，因为未经评测和人工复核的版本不能直接发布。当前只落地状态规则，推进这些状态的完整服务在模块 9、10 实现。
+
+### 40.7 Eval 生命周期状态机
+
+数据集只允许：
+
+```text
+DRAFT → FROZEN → RETIRED
+```
+
+实验只允许从 QUEUED 进入 RUNNING 或取消，再从 RUNNING 进入终态。终态不能重新启动；重新评测应该创建新实验，保留旧结果。
+
+把状态机从 ORM 拆出来，可以用单元测试验证全部合法和非法路径，也避免 API、Worker 各自写出一套不同规则。
+
+### 40.8 迁移为什么要可升级也可回退
+
+`20260908_0003_stage_three_foundations.py` 先给 `runs` 增加运行模式和 Skill 固定版本字段，再按外键依赖顺序创建阶段三表。`downgrade()` 反向删除外键、索引、表和新增列。
+
+迁移测试验证：
+
+```text
+旧版本 → upgrade 到 head → ORM 与 Schema 一致
+head → downgrade → 阶段三对象被正确移除
+```
+
+这比只用 `Base.metadata.create_all()` 更接近真实项目升级过程。
+
+### 40.9 `artifact_write` 和 `file_write` 的区别
+
+| 工具 | 主要用途 | 是否允许覆盖 |
+|---|---|---|
+| `file_write` | 修改当前 Run 工作文件 | 在审批后可以覆盖 |
+| `artifact_write` | 产出可追踪结果或训练资料 | 不允许覆盖 |
+
+`ArtifactWriteTool` 绑定当前 `run_id`，模型不能通过参数选择其他 Run。它把内容交给 `ArtifactService.create_unique()`；本地存储用排他创建保证并发时同名文件只有一个成功，然后在数据库登记 URI、内容类型、大小、哈希和 `created_by`。
+
+当前实现没有为“文件已经创建、数据库登记却失败”增加补偿删除，因此极端失败下可能留下数据库不知道的孤儿文件。它不会覆盖已有 Artifact，但生产化前还需要增加补偿清理或孤儿扫描；这是当前实现边界。
+
+### 40.10 本模块边界、测试与阅读顺序
+
+模块 2 的完成边界只有 Schema、Repository 入口、状态规则、迁移和窄写入工具；发布事务与 Eval Worker 后来分别由模块 10 和模块 7 实现。
+
+推荐阅读顺序：
+
+```text
+1. db/models.py 的阶段三 Record
+2. skills/lifecycle.py 与 evals/lifecycle.py
+3. db/repositories/skills.py 与 evals.py
+4. migration 0003
+5. trace/artifacts.py 的 create_unique()
+6. tools/builtin/artifact_write.py
+7. migration、状态机与 Artifact 测试
+```
+
+读完后应能解释：为什么 ACTIVE 是版本状态、ENABLED 是聚合状态，以及为什么“Artifact 不可覆盖”需要文件系统和数据库共同参与。
 
 ## 41. 阶段三模块 3：数据集与确定性 Validator
 
-数据集文件是可评审定义，导入数据库后成为有版本、有哈希的领域对象。DRAFT 可以冻结，FROZEN 内容不能原地替换；同名同版本但哈希不同会被拒绝。Case 把模型可见的 `public_input` 与只供验证器使用的 `private_validators` 分开，TRAIN 用于提炼，HOLDOUT 留给后续门禁。
+### 41.1 模块目标
 
-Validator 是可信代码注册表，Case 不能携带 Python。当前内置完成状态、章节、引用数、覆盖项、Artifact、工具白名单、未知副作用和工具调用数验证。每个结果包含实现版本、通过状态、证据、失败原因和耗时。`SourceValidationService` 只对 FROZEN 数据集中的 TRAIN Case 和 COMPLETED Run 创建来源验证记录。
+模块 3 给“回答得好”一个可执行定义。它建立版本化数据集、公开输入与私有断言的隔离、可信 Validator 注册表，以及把已有 Run 绑定到训练 Case 的来源验证流程。
 
-`Run=COMPLETED` 只代表循环正常结束，`EvalRun.passed=true` 才代表结果满足任务断言。
+主要文件：
+
+```text
+src/evoagent/evals/schema.py
+src/evoagent/evals/datasets.py
+src/evoagent/evals/validators/base.py
+src/evoagent/evals/validators/builtin.py
+src/evoagent/evals/service.py
+src/evoagent/trace/bundle.py
+tests/unit/test_phase_three_services.py
+tests/integration/test_phase_three_pipeline.py
+```
+
+### 41.2 为什么 `Run=COMPLETED` 不代表任务正确
+
+AgentLoop 正常返回只说明程序没有以错误结束。例如用户要求“生成含三个章节和两个来源的报告”，模型只回答一句“完成了”，Run 仍可能是 COMPLETED。
+
+阶段三把两个结论分开：
+
+```text
+runs.status = completed
+    说明：执行流程正常结束
+
+eval_runs.passed = true
+    说明：该输出通过此 Case 指定的验证规则
+```
+
+只有后者才有资格成为 Skill 提炼来源或进入质量门禁。
+
+### 41.3 数据集和 Case 的数据契约
+
+`EvalDatasetDefinition` 包含名称、整数版本和至少一个 Case。Case 包含：
+
+| 字段 | 用途 |
+|---|---|
+| `case_key` | 数据集内稳定标识 |
+| `task_family` | 对相似任务分组 |
+| `split` | TRAIN 或 HOLDOUT |
+| `public_input` | 可以交给任务执行端的输入 |
+| `private_validators` | 只供评测系统读取的断言 |
+| `risk_profile` | 对风险条件的结构化描述 |
+
+同一数据集中的 `case_key` 必须唯一，否则结果无法稳定定位到测试题。
+
+### 41.4 TRAIN 与 HOLDOUT 为什么必须分开
+
+TRAIN Case 可以用于：
+
+- 验证已有优秀 Run；
+- 清洗和冻结来源；
+- 提炼候选 Skill。
+
+HOLDOUT Case 只能用于后续发布门禁，不能进入生成器。若生成器提前看过答案要求，它可能只记住评测题，而不是真正学会可迁移的流程，这就是数据泄漏。
+
+当前 `SourceValidationService` 和 `TraceEligibilityChecker` 都会检查 split，而不是只依赖调用方“自觉不传 HOLDOUT”。后续 EvalCoordinator 还需要继续保持这条边界。
+
+### 41.5 导入、幂等与冻结
+
+数据集导入链路：
+
+```text
+EvalDatasetDefinition
+→ 规范化 JSON 并计算 content_hash
+→ 查询同名同版本
+   ├─ 哈希相同：返回已有记录
+   └─ 哈希不同：抛出 DatasetConflictError
+→ 同一事务写 Dataset 和全部 Case
+→ 状态为 DRAFT
+```
+
+冻结时只允许 `DRAFT → FROZEN`。如果题目或验证器需要修改，必须把数据集版本加一并重新导入，不能改写旧实验使用过的 Case。
+
+### 41.6 Validator 为什么是可信代码而不是数据集中的 Python
+
+`ValidatorSpec` 只包含名称、版本和参数。真正的函数由 `ValidatorRegistry` 在应用代码中注册：
+
+```text
+Case: {name: "contains_sections", version: "1", parameters: {...}}
+→ ValidatorRegistry 查找 contains_sections@1
+→ 调用项目内受信任函数
+→ 返回统一 ValidationResult
+```
+
+这样数据集作者只能选择已经审查过的能力，不能在 JSON 中附带任意 Python 并让 Worker 执行。
+
+### 41.7 `ValidationResult` 保存哪些证据
+
+每个验证器统一返回：
+
+```text
+validator + version + passed
++ evidence + failure_reason + duration_ms
+```
+
+版本很重要：同名验证器的算法变更会改变评测含义。证据让失败可解释，例如缺少哪些章节、实际引用数量或出现哪些禁止工具，而不是只留下一个布尔值。
+
+### 41.8 当前内置的确定性 Validator
+
+| Validator | 检查内容 |
+|---|---|
+| `run_completed` | Run 是否完成 |
+| `contains_sections` | 最终回答是否包含指定章节文本 |
+| `minimum_citations` | URL 引用数量是否达到下限 |
+| `covers_items` | 指定内容项是否都出现 |
+| `artifact_exists` | 是否生成指定类型 Artifact |
+| `tool_policy` | 是否使用了允许集合外的工具 |
+| `no_unknown_effects` | 是否存在 UNKNOWN 副作用 |
+| `max_tool_calls` | 工具调用数量是否超限 |
+
+这些检查可重复、便于调试，但不等于完整语义评价。例如字符串出现不必然代表论述正确；后续可以增加新的可信确定性 Validator，再谨慎考虑 LLM Judge。
+
+### 41.9 `SourceValidationService` 的完整链路
+
+```text
+输入 run_id + eval_case_id
+→ 若该 Run 已有 EvalRun，则验证绑定关系并幂等返回
+→ 检查 Run 必须 COMPLETED
+→ 检查 Case 必须是 TRAIN
+→ 检查 Dataset 必须 FROZEN
+→ 构造 TraceBundle
+→ 逐个运行私有 Validator
+→ 所有结果均通过才 passed=true
+→ 同一事务写 SOURCE_VALIDATION Experiment 和 EvalRun
+```
+
+Validator 执行放在数据库事务之外，避免验证耗时期间长期占用事务。最终结果重新开启短事务落库。
+
+### 41.10 当前简化与后续演进
+
+当前来源验证会为一个 Run 创建一个已完成的 SOURCE_VALIDATION Experiment，适合建立提炼来源。它还不是模块 7 的可恢复批量 EvalCoordinator，也不会自动运行 baseline/pinned 配对任务。
+
+引用数量目前按 `http://` 和 `https://` 字符串计数，是确定性启蒙实现，不代表已经校验来源真实性。文档必须如实区分“格式检查”和“事实核验”。
+
+### 41.11 本模块测试与阅读顺序
+
+推荐阅读顺序：
+
+```text
+1. evals/schema.py
+2. evals/lifecycle.py
+3. evals/datasets.py
+4. evals/validators/base.py
+5. evals/validators/builtin.py
+6. evals/service.py
+7. tests/integration/test_phase_three_pipeline.py 的来源验证部分
+```
+
+读完后应能解释：为什么验证器参数属于数据、验证器实现属于可信代码，以及为什么 HOLDOUT 不能成为候选生成资料。
 
 ## 42. 阶段三模块 4：来源资格、清洗与冻结
 
-`TraceEligibilityChecker` 是提炼前的硬门：必须是 passed TRAIN EvalRun、Run 已完成、配置可复现，没有 DENIED 调用、超风险工具、UNKNOWN Effect 或 PENDING Approval。HOLDOUT 永远不能进入提炼输入。
+### 42.1 模块目标
 
-`TraceSanitizer` 递归移除临时 ID 和时间字段，把 Workspace 路径改为 `${workspace}`，并检测敏感字段、私钥、疑似凭据、宿主机绝对路径和 Prompt Injection。高风险发现会阻断，而不是静默掩盖。通过清洗的内容写成不可覆盖 Trace Artifact；读取已有 Artifact 时会复算哈希。
+模块 4 回答一个关键问题：哪些成功 Run 可以安全地交给候选生成器学习？它把过程拆成三道门：
 
-推荐阅读：`skills/provenance.py` → `skills/sanitizer.py` → `trace/artifacts.py`。
+```text
+资格检查 → 内容清洗 → 不可变冻结
+```
+
+主要文件：
+
+```text
+src/evoagent/skills/provenance.py
+src/evoagent/skills/sanitizer.py
+src/evoagent/trace/bundle.py
+src/evoagent/trace/artifacts.py
+tests/unit/test_phase_three_services.py
+tests/integration/test_phase_three_pipeline.py
+```
+
+不能因为一个 Run “效果不错”就直接把整条 Trace 发给模型。Trace 可能包含私有断言、凭据、宿主机路径、未知副作用或恶意网页指令。
+
+### 42.2 资格检查的硬条件
+
+`TraceEligibilityChecker` 要求同时满足：
+
+1. EvalRun 对应 TRAIN Case；
+2. `eval_run.passed` 为真；
+3. 原 Run 状态为 COMPLETED；
+4. Run 已保存 `RunConfigSnapshot`；
+5. `config_hash` 与快照重新计算的哈希一致；
+6. 来源 Run 没有使用任何 Skill；
+7. 没有 DENIED ToolCall；
+8. 工具均在提炼白名单内且风险不超过 R1；
+9. 没有 UNKNOWN ToolEffect；
+10. 没有 PENDING Approval。
+
+任一条件失败都会抛出 `IneligibleSkillSourceError`。这是硬门，不会通过“降低一点分数”放行。
+
+### 42.3 为什么 Skill 辅助 Run 不能继续当来源
+
+如果一个 Skill 生成的结果又被用来提炼自己，系统会形成反馈环：
+
+```text
+Skill A → 产生 Run → Run 又提炼成 Skill A 的新版本
+```
+
+错误步骤和偏见可能被不断放大，也无法区分新版本来自原始成功经验还是旧 Skill。当前版本因此只接受 `skill_version_id is None` 的 baseline 来源。
+
+### 42.4 为什么 UNKNOWN Effect 和 PENDING Approval 会阻断
+
+UNKNOWN 表示系统不知道外部副作用是否真正发生；PENDING 表示执行仍在等待人的决定。这类 Trace 不是一条完整、可信的成功路径。
+
+如果生成器从中总结 SOP，可能学到“调用工具后不确认结果也算完成”或“绕过审批继续执行”。所以资格检查必须读取结构化 ToolEffect 和 Approval，而不是只看最终文本。
+
+### 42.5 `TraceSanitizer` 怎样递归处理数据
+
+Sanitizer 从根对象开始递归访问字典、列表和字符串，为每个发现记录 JSON 风格路径，例如 `$.tool_calls[0].arguments.api_key`。
+
+处理结果分两类：
+
+| 类型 | 行为 | 例子 |
+|---|---|---|
+| 非阻断发现 | 安全转换或删除后继续 | 临时 ID、时间戳、隐藏推理字段、Workspace 路径 |
+| 阻断发现 | 整次清洗失败 | 敏感键、私钥、疑似凭据、外部绝对路径、Prompt Injection |
+
+返回结果同时包含清洗后的 payload、内容哈希和 findings，便于以后审计清洗发生了什么。
+
+### 42.6 为什么临时字段要删除
+
+`run_id`、`task_id`、时间戳和端口等字段通常不表达可迁移的解决方法。保留它们会：
+
+- 让同一逻辑的两条 Trace 得到不同哈希；
+- 诱导生成器写死临时标识；
+- 泄露内部环境细节。
+
+删除后，冻结哈希更接近“可复用过程”的身份，而不是“某次运行的全部偶然值”。
+
+### 42.7 Workspace 路径与外部绝对路径
+
+位于配置 Workspace 下的绝对路径会被改写：
+
+```text
+D:\EvoAgent\workspace\report.md
+→ ${workspace}/report.md
+```
+
+这样 Skill 不依赖某台机器的目录。无法证明属于 Workspace 的 Windows 或 Unix 绝对路径会阻断，因为它既可能泄露宿主机信息，也可能让候选学习越界访问。
+
+### 42.8 凭据与 Prompt Injection 检测
+
+Sanitizer 检查敏感键名、私钥头、Bearer/`sk-` 样式值和高熵短字符串。高熵检测排除了哈希、URL 和正常含空格文本，降低中文说明被误判为 Secret 的概率。
+
+它还检测明显的“忽略之前/系统指令”文本。来源内容被视为不可信数据；发现此类指令时直接阻断，不把它原样交给候选模型。
+
+正则检测存在边界，不能识别所有泄漏和注入表达。因此模型生成器仍有独立系统提示词，生成结果还必须通过 DSL Validator。
+
+### 42.9 冻结流程和完整性复查
+
+`ProvenanceService.freeze()` 的完整过程：
+
+```text
+检查 EvalRun 资格
+→ 查找是否已有该 EvalRun 的冻结 Artifact
+   ├─ 有：读取文件并复算哈希，匹配后幂等返回
+   └─ 无：继续
+→ 构造只含最小验证结论的 TraceBundle
+→ 读取来源 Artifact 并逐个复核内容哈希
+→ TraceSanitizer 清洗
+→ 规范化 JSON
+→ create_unique() 写不可覆盖 Artifact
+→ 返回 FrozenSkillSource
+```
+
+只把 Validator 名称、版本和通过状态传给生成器，不传 `private_validators` 的参数或详细证据，减少答案泄漏。
+
+### 42.10 冻结 Artifact 的身份
+
+冻结文件使用专用媒体类型：
+
+```text
+application/vnd.evoagent.skill-source+json
+```
+
+元数据保存 `eval_run_id` 和 `immutable=true`。`SkillSourceRecord` 后续还会把 SkillVersion、来源 Run、EvalRun、Artifact 与来源哈希连接起来，从候选版本可以反查它学自哪些事实。
+
+### 42.11 本模块边界、测试与阅读顺序
+
+当前清洗器提供保守的结构和正则防线，不是数据防泄漏产品；在真实生产环境还应配合租户隔离、密钥扫描、数据分类和访问审计。
+
+推荐阅读顺序：
+
+```text
+1. skills/provenance.py 的 TraceEligibilityChecker
+2. skills/sanitizer.py 的 Finding 数据结构
+3. TraceSanitizer.sanitize() 与 _visit()
+4. ProvenanceService.freeze()
+5. trace/artifacts.py
+6. tests 中的秘密、路径、注入和篡改案例
+```
+
+读完后应能画出“合格 EvalRun 到 FrozenSkillSource”的链路，并说明清洗与冻结为什么不能合并成一次简单的 JSON 导出。
 
 ## 43. 阶段三模块 5：候选生成与 DRAFT 提炼
 
-`CandidateGenerator` 只负责提出定义，没有发布权限。Mock 实现保证测试确定；模型实现只接收已冻结、去除私有验证证据的资料，并要求纯 JSON。模型结果仍须重新经过 Pydantic 与语义 Validator。
+### 43.1 模块目标
 
-`SkillExtractionService` 用“排序后的来源哈希 + 定义哈希”生成幂等键。新候选在一个事务中写入 Skill、DRAFT SkillVersion、SkillSource 和 SkillEvent；失败不会留下半合法版本。`POST /api/v1/skills/extract` 是最小入口，未显式配置生成器与注册表时返回 503。
+模块 5 把一组已经冻结的优秀训练 Trace 提炼成一个候选 SkillVersion。关键词是“候选”：无论模型输出看起来多好，它只能进入 DRAFT，不能直接 ACTIVE。
+
+主要文件：
+
+```text
+src/evoagent/skills/extraction.py
+src/evoagent/skills/provenance.py
+src/evoagent/skills/validation.py
+src/evoagent/db/repositories/skills.py
+src/evoagent/api/routes/skills.py
+src/evoagent/api/app.py
+tests/unit/test_phase_three_services.py
+tests/integration/test_phase_three_pipeline.py
+```
+
+### 43.2 `CandidateGenerator` 为什么是协议
+
+业务服务只依赖：
+
+```python
+generate(sources) -> SkillDefinition
+```
+
+它不关心候选来自 Mock、真实模型还是未来的规则算法。当前提供：
+
+- `MockCandidateGenerator`：直接返回预设定义或异常，保证测试确定；
+- `ModelCandidateGenerator`：调用 ModelProvider，让模型从清洗资料生成 JSON。
+
+这种分离让“生成是否成功”和“生成结果是否合法”成为两个独立问题。
+
+### 43.3 模型生成器实际看到了什么
+
+`ModelCandidateGenerator` 只接收 `FrozenSkillSource.payload`，不会查询原始 Trace、数据库私有 Validator 或 HOLDOUT Case。请求由两条消息构成：
+
+```text
+system：资料是不可信数据，只返回符合 Schema 的 JSON
+user：sanitized_training_traces 的 JSON 数组
+```
+
+它只在 Provider 发出 COMPLETED 且包含 response 时读取最终内容。没有完成响应或 JSON 无法解析为 `SkillDefinition`，都会转换成 `CandidateGenerationError`。
+
+### 43.4 为什么模型返回 Pydantic 对象后还要语义验证
+
+Pydantic 成功只说明字段形状正确。模型仍可能：
+
+- 引用未注册工具；
+- 声明 `shell`；
+- 形成循环依赖；
+- 使用越权风险；
+- 写入绝对路径；
+- 引用非祖先步骤。
+
+因此生成结果必须再次经过 `SkillDefinitionValidator`。模型是候选提出者，不是规则裁判。
+
+### 43.5 提炼服务的前置检查
+
+`SkillExtractionService.extract()` 要求来源 ID：
+
+- 至少一个；
+- 不能重复；
+- 不能超过 `skill_max_sources`。
+
+随后逐个调用 `ProvenanceService.freeze()`。任何来源不合格、被篡改或清洗失败，整次提炼停止。当前配置同时有 `skill_min_sources`，但现有 Service 只强制非空与最大值；最小来源数尚未在该服务中执行，这是当前实现边界，不能在手册中声称已完成。
+
+### 43.6 两种哈希分别表示什么
+
+生成完成后计算：
+
+```text
+definition_hash = hash(规范化 SkillDefinition)
+
+extraction_key = hash({
+  source_hashes: 排序后的全部来源哈希,
+  definition_hash: definition_hash
+})
+```
+
+`definition_hash` 回答“候选正文是什么”；`extraction_key` 回答“这份正文是否由同一组来源提炼而来”。来源先排序，所以调用方传入 ID 的顺序不会制造重复版本。
+
+### 43.7 幂等返回与版本号
+
+事务开始后先按 `extraction_key` 查询。若已存在，返回原版本并令 `created=false`，不会再创建来源或事件。
+
+若不存在：
+
+```text
+按 definition.name 查 Skill
+├─ 不存在：创建 ENABLED Skill 聚合
+└─ 已存在：复用聚合
+→ max(version) + 1 得到新版本号
+→ 创建 DRAFT SkillVersion
+```
+
+数据库中的 `extraction_key` 唯一约束是并发情况下的最终防线。当前 `max(version)+1` 在高并发创建同一 Skill 新版本时可能由唯一约束拒绝其中一个请求，后续可用行锁和重试增强；它不会静默写出重复版本号。
+
+### 43.8 为什么所有记录必须在一个事务中
+
+一次成功提炼要同时写入：
+
+```text
+Skill（需要时）
++ SkillVersion(DRAFT)
++ 每条 SkillSource
++ skill.version_drafted 事件
+```
+
+UnitOfWork 最后才 commit。若写第二条来源时失败，版本和事件一起回滚，不会出现“候选存在但不知道来源”的半成品。
+
+`SkillEvent.sequence` 在当前事务中根据已有最大序号加一。完整并发事件追加服务属于后续生命周期模块；数据库唯一约束仍会阻止重复 sequence。
+
+### 43.9 为什么只能创建 DRAFT
+
+候选定义虽然通过了静态 Validator，但还没有证明：
+
+- 在 HOLDOUT 上比 baseline 更好；
+- 没有安全回退；
+- 资源消耗在预算内；
+- 人工评审接受它。
+
+因此代码把 `lifecycle_status` 固定为 DRAFT。生成器没有接收目标状态的参数，HTTP API 也不能要求“直接发布”。
+
+### 43.10 HTTP 入口怎样组装服务
+
+`POST /api/v1/skills/extract` 接收来源 EvalRun ID，路由从 `app.state` 获取 CandidateGenerator 和 Skill ToolRegistry，再根据 Settings 组装 ArtifactService、ProvenanceService、Validator 和 ExtractionService。
+
+```text
+没有配置 generator 或 registry → 503
+来源或候选不合法           → 422
+成功创建候选               → 201 + DRAFT 信息
+```
+
+生成器默认不自动启用，避免一启动 API 就意外调用真实模型或产生费用。当前接口面向最小开发闭环，尚未提供列表、详情和发布 API。
+
+### 43.11 日志为什么不直接打印原始错误内容
+
+生成或验证失败时只记录异常类型，而不是把原始模型输出和来源 Trace 全部写入日志。这样可以减少清洗资料或可疑模型输出通过日志再次泄漏的风险。调用方仍收到经过业务边界处理的错误。
+
+### 43.12 本模块测试与阅读顺序
+
+集成测试验证同一来源和定义重复提炼只产生一个版本与一组来源，候选初始状态为 DRAFT，并能在后续人工模拟为 ACTIVE 后被检索。
+
+推荐阅读顺序：
+
+```text
+1. extraction.py 的 CandidateGenerator 与两个实现
+2. SkillExtractionService.extract()
+3. db/repositories/skills.py
+4. api/routes/skills.py
+5. api/app.py 中 app.state 的可选依赖
+6. tests/integration/test_phase_three_pipeline.py
+```
+
+读完后应能解释：为什么“模型返回合法 JSON”仍不能发布，以及 `content_hash` 与 `extraction_key` 为什么不能合成一个概念。
 
 ## 44. 阶段三模块 6：BM25 检索与 Skill 上下文
 
-阶段三 Skill 很少，先使用可解释的纯 Python BM25。英文按词、中文按单字和二元词片切分；查询前过滤非 ENABLED/ACTIVE、未知工具、Shell 和超风险定义，低于阈值即无命中，同分按版本 ID 稳定排序。
+### 44.1 模块目标
 
-普通 Task 只允许 `baseline` 或默认的 `retrieval`；`pinned_skill` 留给后续评测。选择写入 `run_skill_selections` 和 RunEvent，恢复时复用旧决定。即使首次没有命中，也用 RunConfigSnapshot 锁定，避免重试时上下文漂移。
+模块 6 把已发布 Skill 接入普通 Run：先从数据库取出符合条件的活动版本，再按任务目标检索，保存选择证据，渲染为受控上下文，最后由 `PersistentAgentRunner` 注入 AgentLoop。
 
-`SkillContextRenderer` 明确 Skill 只是操作参考，不能扩大权限、绕过审批或覆盖基础系统规则。无命中时，ContextBuilder 保持阶段二行为。
+主要文件：
 
-推荐阅读：`skills/retrieval.py` → `skills/rendering.py` → `core/context.py` → `runtime/persistent_runner.py` → `tests/integration/test_phase_three_pipeline.py`。
+```text
+src/evoagent/skills/retrieval.py
+src/evoagent/skills/rendering.py
+src/evoagent/core/context.py
+src/evoagent/runtime/persistent_runner.py
+src/evoagent/tasks/service.py
+src/evoagent/db/repositories/skills.py
+tests/unit/test_phase_three_services.py
+tests/integration/test_phase_three_pipeline.py
+```
+
+### 44.2 为什么先用 BM25 而不是向量数据库
+
+当前阶段 Skill 数量很少，BM25 有三点适合学习项目：
+
+- 不需要外部数据库和 Embedding API；
+- 同样输入得到确定性结果；
+- 可以展示命中的词和分数，便于解释选择原因。
+
+它的弱点是主要依赖词面重合，对同义表达和复杂语义不如向量检索。以后替换检索器时，选择留痕、过滤、安全和配置冻结仍应保留。
+
+### 44.3 中英文如何分词
+
+`tokenize()` 对英文、数字和下划线按词提取并转小写；对连续中文同时加入单字和二元词片。例如：
+
+```text
+"研究报告"
+→ 研、究、报、告、研究、究报、报告
+```
+
+单字提高召回，二元词片保留一部分局部语义。这不是专业中文分词器，但没有外部依赖，规则透明且输出稳定。
+
+### 44.4 `SkillDocument` 检索哪些字段
+
+每个文档携带 Skill ID、版本 ID、严格解析后的定义和内容哈希。参与 BM25 的文本只有：
+
+```text
+name + description + triggers
+```
+
+步骤正文没有进入检索，避免很长的操作细节淹没真正的触发信息。也因此编写 Skill 时，description 和 triggers 不是装饰字段，而是检索质量的重要输入。
+
+### 44.5 BM25 分数在直觉上表示什么
+
+BM25 会提高“查询词在当前文档中出现”的得分，同时考虑：
+
+- 一个词在全部文档中越少见，区分能力越强；
+- 同一词出现次数增加会提升分数，但收益逐渐饱和；
+- 很长文档会做长度归一化，避免只因词多就占优势。
+
+代码使用 `k1=1.5`、`b=0.75`。所有结果按分数降序；同分时按版本 UUID 字符串排序，保证测试和重放稳定。
+
+### 44.6 检索前为什么必须过滤
+
+`SkillRepository.active_versions()` 只返回：
+
+```text
+Skill.status == ENABLED
+并且 SkillVersion.lifecycle_status == ACTIVE
+并且 Skill.active_version_id 指向该版本
+```
+
+`SkillRetrievalService._compatible()` 再检查定义声明的工具全部存在、没有 `shell`、风险不超过运行配置上限。只有生命周期和当前运行环境都兼容的版本才能参加打分。
+
+过滤必须发生在 Top-K 之前。若先把禁用或越权 Skill 排进前 K，再过滤，可能把真正合法的候选挤掉。
+
+### 44.7 三种运行模式怎样选择
+
+```text
+baseline
+→ 不检索，记录 skill.none_selected
+
+retrieval
+→ 查询 ENABLED + ACTIVE + compatible 版本
+→ BM25 打分
+→ 过滤 minimum_score
+→ 取 top_k
+
+pinned_skill
+→ 只加载 Run 指定版本
+→ 固定匹配分数 1.0，标记 matched term 为 pinned
+```
+
+普通 Task API 只允许前两种；固定版本模式只留给模块 7 已实现的 EvalCoordinator。pinned 分支按 ID 读取候选版本，配对创建与评测资格由内部评测服务约束。
+
+### 44.8 选择为什么要落库
+
+每个命中写入 `run_skill_selections`：
+
+```text
+run_id + skill_version_id + mode
++ rank + score + query_terms
+```
+
+同时追加 `skill.selected` 或 `skill.none_selected` RunEvent。前者保存当前事实，后者进入统一时间线。以后查看 Trace 时，不只能看到模型收到了一段文本，还能回答“选中了哪一版、排第几、为什么匹配”。
+
+### 44.9 恢复时为什么不能重新检索
+
+假设 Run 第一次执行时 Skill A 是 ACTIVE，执行中 Worker 崩溃，随后管理员发布了 Skill B。如果恢复时重新检索，消息上下文会悄悄改变，旧 Snapshot 和新配置不再表示同一次运行。
+
+所以 `select()` 的优先级是：
+
+```text
+已有 RunSkillSelectionRecord → 恢复原选择
+没有选择，但已有 config_snapshot → 恢复“首次无命中”
+两者都没有 → 才执行第一次选择
+```
+
+“无命中”也是一种必须冻结的决定，否则新发布版本会在重试时突然进入旧 Run。
+
+### 44.10 `SkillContextRenderer` 输出什么
+
+Renderer 把结构化定义变成模型容易阅读的参考文本：
+
+```text
+安全边界声明
+Skill 名称与用途
+按序号列出的工具/模型建议步骤
+成功标准
+```
+
+文本开头明确说明它不能扩大工具权限、绕过审批、改变安全规则或要求泄密。工具步骤只展示受控工具名和参数模板；最终是否执行仍由模型决定，实际调用仍经过阶段二安全链路。
+
+### 44.11 ContextBuilder 的注入位置
+
+有 Skill 时，`ContextBuilder` 把渲染文本附加在基础 system 消息中的专用边界后：
+
+```text
+基础系统规则
+→ “受控 Skill 参考边界”
+→ SkillContextRenderer 输出
+→ 外部上下文 user 消息
+→ 最终任务 user 消息
+```
+
+无命中时 `skill_context=None`，消息结构与阶段二保持一致。空白 Skill 上下文会被拒绝，避免出现形式上“使用了 Skill”但内容为空的配置。
+
+### 44.12 `PersistentAgentRunner` 怎样把各模块串起来
+
+当前完整接入链路是：
+
+```text
+Worker 把 JobLease 交给 PersistentAgentRunner
+→ 加载有租约所有权的 Task/Run
+→ SkillRetrievalService.select()
+→ SkillContextRenderer.render()
+→ 计算 skill_context_hash
+→ 构造并持久化 RunConfigSnapshot
+→ 加载 Snapshot
+   ├─ 首次运行：ContextBuilder 注入 Skill
+   └─ 恢复运行：直接复用 Snapshot.messages
+→ AgentLoop 按原有安全链路执行
+```
+
+`skill_context_hash` 当前根据所有命中版本的内容哈希列表计算；`RunConfigSnapshot` 的单个 `skill_version_id` 和 `skill_content_hash` 记录第一名。默认 `top_k=1`，因此两者一致。若未来真正启用多个 Skill，需要把配置契约扩展为完整版本列表，不能只依赖第一名字段。
+
+### 44.13 当前边界和容易误解的地方
+
+- BM25 命中只表示文本相关，不表示 Skill 一定有效；
+- 模块 6 最初的集成测试用人工 fixture 准备 ACTIVE；模块 9、10 现在已经实现真实 QualityGate 与发布事务；
+- Skill 是指导式 SOP，不会逐步解释执行或强制模型遵循 DAG；
+- Top-K 配置允许最多 3，但当前默认 1，多 Skill 冲突处理尚未专门实现；
+- 检索不改变 ToolRegistry，Skill 声明的工具仍必须由运行环境真实提供。
+
+### 44.14 本模块测试与阅读顺序
+
+当前测试直接覆盖中英文分词与 BM25 同分稳定排序，并通过集成链路证明 ENABLED/ACTIVE 版本可以被检索。最低分过滤、禁用版本过滤、选择落库、重复选择恢复，以及 Skill 上下文进入 PersistentAgentRunner 的路径已经实现，但还缺少逐项独立回归测试；后续继续阶段三时应补齐这些测试。
+
+推荐阅读顺序：
+
+```text
+1. skills/retrieval.py 的 tokenize() 和 BM25Retriever
+2. SkillRepository.active_versions()
+3. SkillRetrievalService.select()
+4. skills/rendering.py
+5. core/context.py
+6. runtime/persistent_runner.py 的 handle() 前半段
+7. tests/integration/test_phase_three_pipeline.py
+```
+
+读完后应能解释：为什么“无命中”也要保存、为什么先过滤再 Top-K，以及 Skill 上下文为何不能代替 PermissionPolicy。
+
+---
+
+## 45. 阶段三模块 0～6 的总调用链
+
+前七个模块不是七组互不相关的类，而是从成功经验到候选和运行时复用的前半段生命周期；后半段见第 48～54 章：
+
+```text
+普通 baseline Run 完成
+→ FROZEN TRAIN Case 的 Validator 验证通过
+→ TraceEligibilityChecker 检查来源资格
+→ TraceSanitizer 删除临时信息并阻断风险内容
+→ ProvenanceService 冻结不可变来源 Artifact
+→ CandidateGenerator 提出 SkillDefinition
+→ SkillDefinitionValidator 再做静态与安全校验
+→ UnitOfWork 写入 DRAFT SkillVersion、来源和事件
+→ 配对评测、硬门禁与人工审批（模块 7～10，已实现）
+→ ENABLED Skill 的 ACTIVE 版本参与 BM25
+→ 选择结果和配置快照落库
+→ SkillContextRenderer 注入 PersistentAgentRunner
+→ AgentLoop 仍通过阶段二权限与 Sandbox 执行
+```
+
+当前集成测试为了验证后半段检索，会在测试代码中手动把 DRAFT 版本设为 ACTIVE。那是测试夹具，不代表生产发布流程已经完成。
+
+## 46. 阶段三模块 0～6 测试地图
+
+| 测试文件 | 主要证明 |
+|---|---|
+| `test_run_config_and_manifest.py` | 配置、工具清单和比较哈希稳定 |
+| `test_skill_schema.py` | DSL 字段、引用、DAG 和安全规则 |
+| `test_phase_three_services.py` | 数据集契约、清洗、BM25、生命周期和模型生成器 |
+| `test_phase_three_pipeline.py` | 来源验证→冻结→DRAFT→选择的数据库主链路 |
+| `test_migrations.py` | 阶段三 Schema 可以升级和回退 |
+| `test_postgres_persistence.py` | PostgreSQL 特有并发与迁移语义 |
+
+学习时不要只看测试数量。应先判断某条测试证明的是纯函数、SQLite 下的应用契约，还是 PostgreSQL 的真实约束与并发行为。
+
+## 47. 阶段三模块 0～6 的学习验收
+
+读完源码和本章后，建议不看手册独立回答：
+
+1. `RunConfigSnapshot` 为什么不能保存 API Key，又为什么必须保存工具实现版本的哈希？
+2. Skill 为什么选择声明式 DSL，而不是让模型生成 Python？
+3. Pydantic 校验与 `SkillDefinitionValidator` 各负责什么？
+4. `SkillRecord` 和 `SkillVersionRecord` 为什么不能合并？
+5. 为什么 Run 完成和 Eval 通过是两个结论？
+6. TRAIN 与 HOLDOUT 如何阻止数据泄漏？
+7. 来源资格、清洗和冻结分别解决什么风险？
+8. 为什么候选生成器永远只能得到 DRAFT？
+9. `content_hash` 与 `extraction_key` 有什么区别？
+10. 为什么恢复时要复用旧选择，连“无命中”也不能重新判断？
+11. BM25 的可解释性体现在哪里？
+12. 为什么 Skill 注入以后仍然不能绕过 Policy、Approval、ToolEffect 和 Sandbox？
+
+如果这些问题能结合具体文件和调用链回答清楚，就已经掌握阶段三模块 0～6，可以继续阅读下面的评测、门禁和发布闭环。
+
+---
+
+## 48. 阶段三模块 7：可恢复 EvalCoordinator 与配对运行
+
+### 48.1 本模块解决什么问题
+
+模块 6 只能证明 ACTIVE Skill 可以被检索，不能证明一个 DRAFT 候选比“不使用 Skill”更好。模块 7 新增实验协调层，对每条 HOLDOUT Case 创建一组受控对照：一边是 BASELINE，一边是固定候选版本的 PINNED_SKILL。
+
+这里最重要的文件是：
+
+- `evals/coordinator.py`：创建实验、领取租约、释放 Pair、验证终态 Run；
+- `evals/worker.py`：独立 Eval Worker 进程入口；
+- `db/repositories/evals.py`：读取 Experiment、Case 和 EvalRun；
+- `tests/integration/test_eval_lifecycle.py`：验证 Pair、接管、取消和收尾。
+
+### 48.2 为什么不是直接循环调用 Agent
+
+一个实验可能有很多 Case 和 repeat，运行中 API、Worker 或机器都可能重启。如果只在 Python 内存中写 `for case in cases`，进程一崩溃就不知道哪些样本已经算过，重新运行还可能把同一结果重复计入。
+
+所以 `create_experiment()` 先在一个事务中创建全部占位：
+
+```text
+HOLDOUT Case × repeats × {baseline, pinned_skill}
+→ SessionRecord
+→ TaskRecord
+→ RunRecord
+→ EvalRunRecord
+```
+
+数据库唯一约束和 `metrics.state` 共同表达“这个样本是否已经完成”，恢复时继续消费既有记录，不重新发明一批实验行。
+
+### 48.3 Pair 为什么要一前一后运行
+
+同一 Pair 中只有第一条 Task 进入 QUEUED，第二条先处于 PAUSED。第一条结束并完成 Validator 后，Coordinator 才写入 `eval.pair.released` 并释放第二条。repeat 为偶数时 baseline 先跑，奇数时 pinned 先跑。
+
+这样做有两个目的：
+
+1. 避免两边同时争抢 CPU、网络或 Provider 限流配额；
+2. 避免所有实验永远 baseline 先跑造成固定顺序偏差。
+
+它不能消除真实服务随时间波动，但比无控制并发更容易解释。
+
+### 48.4 为什么有两种 Worker
+
+普通 `evoagent-worker` 仍负责真正执行 Task，它不知道这条任务是不是实验样本。`evoagent-eval-worker` 只负责实验编排：
+
+```text
+claim_next() 领取 Experiment lease
+→ 普通 Worker 执行已 QUEUED 的 Run
+→ run_once() 找到终态但未验证的 EvalRun
+→ TraceBundleService 构造完整事实
+→ ValidatorRegistry 执行 Case 的私有规则
+→ MetricsCollector 保存单次原始指标
+→ 释放同 Pair 的第二条任务
+→ 全部完成后 Experiment = COMPLETED
+```
+
+把两种职责分开后，评测不会复制 Agent Runtime，也不会让协调器直接绕过阶段二的权限、审批、Artifact 和恢复链路。
+
+### 48.5 实验租约怎样恢复
+
+Experiment 保存 `lease_owner`、`heartbeat_at` 和 `lease_expires_at`。正常 Eval Worker 周期性 heartbeat；进程消失后，另一 Worker 只能领取已经过期的 RUNNING 实验。旧 owner 再心跳或收尾会得到 `EvalLeaseLostError`。
+
+SQLite 可能丢掉时间戳时区，因此 `_is_expired()` 只在测试兼容层统一 naive/aware 时间；正式并发和 `FOR UPDATE SKIP LOCKED` 语义仍以 PostgreSQL 为准。
+
+### 48.6 可比较性检查
+
+Pair 两边结束后，Coordinator 读取各自 `RunConfigSnapshot` 并调用 `comparable_with()`。Provider、模型、基础 Prompt、工具清单、代码版本等公共字段必须一致；Skill 版本和 Skill 上下文哈希是实验变量，可以不同。
+
+缺少快照或公共配置不同不会强行报一个改善数字，而是把 `EvalRun.comparable` 设为 false。后续 Metrics 和 QualityGate 会继续传播这个事实。
+
+### 48.7 取消语义
+
+尚未执行的 QUEUED/PAUSED/WAITING_USER/RETRYING/RECOVERING 任务可以直接进入 CANCELLED；正在运行或等待工具的任务只能设置 `cancel_requested`，由持有普通 Job lease 的 Worker 安全提交终态。Experiment 会清除自己的租约，但不能越权替另一个 Worker 假装执行已经停止。
+
+### 48.8 本模块边界与阅读顺序
+
+模块 7 只保存每次运行是否通过和原始指标，不决定候选能否发布。推荐阅读：
+
+```text
+1. EvalExperimentConfig 与 EvalLease
+2. create_experiment() 和 _ensure_pairs()
+3. claim_next() / heartbeat()
+4. run_once() / _validate_and_collect()
+5. _release_second_runs() / _mark_pair_comparability()
+6. evals/worker.py
+7. test_eval_lease_takeover_and_cancel()
+```
+
+读完应能解释：为什么恢复不能重建 Pair，为什么第二条先暂停，以及 Eval Worker 为什么不能代替普通 Worker。
+
+---
+
+## 49. 阶段三模块 8：MetricsCollector 与不可变评测报告
+
+### 49.1 原始运行和评测指标的区别
+
+Run、Turn、ToolCall、Approval、ToolEffect 与 SkillSelection 是运行事实；`RunMetrics` 是从这些事实得到的投影。`MetricsCollector.collect_run()` 读取数据库并汇总：终态、Validator 结果、Token、工具次数与状态分布、延迟、审批、权限拒绝、UNKNOWN Effect、恢复事件和检索选择。
+
+投影可以重新计算，事实不能为了得到好看的指标而修改。
+
+### 49.2 `None` 为什么比 `0` 正确
+
+某些 Provider 不返回 Usage。此时 `total_tokens=None` 表示“不知道”，而零表示“确定没有消耗”。把未知写成零会让候选看起来获得虚假的 100% Token 改善。
+
+延迟也只有在首尾时间事实都存在时才计算；缺失值会一直传播到 Pair 和报告，不在中途偷偷填默认数。
+
+### 49.3 什么时候能比较效率
+
+`PairMetrics.efficiency_comparable` 同时要求：
+
+```text
+公共运行配置可比较
+AND baseline Validator 通过
+AND skill Validator 通过
+AND 两边 Usage 已知
+```
+
+只有满足这些条件才计算 Token delta。Tool Calls 和延迟至少要求配置可比较且两边通过。这样可以避免“Skill 很快失败了，所以比成功完成的 baseline 省很多 Token”这种幸存者偏差。
+
+### 49.4 失败样本为什么仍然保留
+
+效率比较可以排除失败对，但正确性统计不能。报告保存每一组 Pair 的 baseline/skill 结果与 `success_delta`，并同时计算总体成功率和每个 `task_family` 的成功率。
+
+例如总体成功率持平，但架构分析族从 100% 降到 50%，任务族统计会保留这条负面证据，模块 9 也会拒绝它。
+
+### 49.5 均值、中位数和明细各自负责什么
+
+- 均值能反映总体资源变化，但容易受极端样本影响；
+- 中位数描述一个更典型的样本；
+- Pair 明细让人能回到具体 Case 判断异常原因。
+
+当前数据规模较小，所以报告只做描述统计，不输出 p-value，也不宣称统计显著性。
+
+### 49.6 报告怎样冻结
+
+`EvaluationReportService.freeze()` 先用规范 JSON 构造报告并计算 SHA-256，再通过 `ArtifactService.create_unique()` 写入不可覆盖的 Artifact，最后把 Artifact ID 和报告哈希绑定到 Experiment，同时把哈希写入 SkillVersion。
+
+再次读取已冻结报告时，会重新读取 Artifact、解析 DTO 并复算哈希；内容被改动就拒绝。数据库模型的更新监听器还禁止把已经设置的报告引用或哈希替换成另一个值。
+
+当前 Artifact 表要求 `run_id`，因此实验报告暂时挂在该 Experiment 的第一条 Eval Run 上。这是存储模型的已知边界，不代表报告只属于那条 Run；Experiment ID 才是报告的业务归属。
+
+### 49.7 本模块阅读顺序
+
+```text
+1. RunMetrics
+2. MetricsCollector.collect_run()
+3. PairMetrics 与 TaskFamilyMetrics
+4. EvaluationReportService.build()
+5. freeze()
+6. test_correctness_regression_cannot_be_offset_by_lower_token_use()
+```
+
+读完应能区分“不通过”“不可比较”和“Usage 未知”三种不同事实。
+
+---
+
+## 50. 阶段三模块 9：QualityGate 与评测生命周期
+
+### 50.1 为什么不用一个总分
+
+假设正确性下降 10 分，Token 节省 30 分，如果简单加权，候选可能仍得到高分。但一个更便宜却给错答案的 Skill 不应发布。因此 `QualityGate` 把规则分层，所有非 efficiency 层都是硬门禁，效率只提供人工阅读信息。
+
+### 50.2 GateReport 的结构
+
+每条 `GateCheck` 保存：规则名、层级、是否通过、阈值、实际值和证据。`GateReport` 保存候选版本、实验、总结果和全部检查，再用规范 JSON 计算内容哈希。
+
+当前硬检查包括：
+
+- SkillDefinition 仍通过静态语义校验；
+- 当前定义内容哈希仍与版本记录一致；
+- 独立来源数量达到配置下限；
+- 每个来源仍对应 passed TRAIN EvalRun；
+- Skill 声明的 Validator 仍被可信注册表支持；
+- 所有 Pair 都可比较且数量大于零；
+- 总体成功率不低于 baseline；
+- 每个任务族成功率都不低于 baseline；
+- 没有更多 permission denied 或 UNKNOWN Effect。
+
+### 50.3 状态怎样推进
+
+`SkillEvaluationService` 管理自动评测部分的状态：
+
+```text
+DRAFT
+→ start()
+→ EVALUATING + QUEUED Experiment
+→ EvalCoordinator 完成全部 Pair
+→ finalize() 冻结 EvaluationReport
+→ QualityGate.evaluate()
+   ├─ 硬门禁全通过 → REVIEW_REQUIRED
+   └─ 任一硬门禁失败 → REJECTED
+```
+
+`REVIEW_REQUIRED` 只表示“值得人工看”，不是 ACTIVE。自动系统到这里必须停下。
+
+### 50.4 为什么 finalize 是显式写操作
+
+HTTP 层使用 `POST /eval-experiments/{id}/finalize` 冻结报告并推进版本。`GET .../report` 只读取已经存在或可重算的报告，不改变状态。这样刷新浏览器不会成为一次隐蔽审批动作，也符合 GET 的只读语义。
+
+### 50.5 报告不可替换
+
+第一次 finalize 写入 `gate_report` 和 `gate_report_hash`；再次调用会校验并返回同一结果。若 JSON 与哈希不一致，服务直接报错。ORM 更新监听器阻止已经绑定的报告被替换，这使发布时校验的不是一份可以事后编辑的普通 JSON。
+
+### 50.6 失败分类
+
+实验基础设施失败和候选质量失败不应该混为一谈。前者让 Experiment 进入 FAILED 或保留可恢复状态；后者是在完整证据上得到 `GateReport.passed=false`，SkillVersion 进入 REJECTED。前者回答“没有可靠结论”，后者回答“有可靠的拒绝结论”。
+
+### 50.7 本模块阅读顺序
+
+```text
+1. GateCheck / GateReport
+2. QualityGate.evaluate()
+3. SkillEvaluationService.start()
+4. SkillEvaluationService.finalize()
+5. api/routes/evals.py 的 finalize 路由
+6. 正确性回退集成测试
+```
+
+---
+
+## 51. 阶段三模块 10：人工审批、发布、禁用与回滚 API
+
+### 51.1 聚合状态和版本状态
+
+`SkillRecord` 表示一个长期 Skill 聚合，保存 ENABLED/DISABLED/DEPRECATED、`active_version_id` 和 `lock_version`。`SkillVersionRecord` 表示不可混淆的具体定义，拥有 DRAFT、EVALUATING、REVIEW_REQUIRED、ACTIVE、RETIRED、REJECTED 状态。
+
+因此“禁用 Skill”和“退休一个版本”不是同一操作：禁用保留当前发布指针，方便恢复；发布新版则把旧 ACTIVE 变为 RETIRED。
+
+### 51.2 查询和 diff
+
+`SkillService` 提供列表、详情、版本详情、来源、门禁报告和结构化 diff。diff 递归比较 JSON：字典按字段路径输出 added/removed/changed，列表作为一个有顺序的整体比较。
+
+管理页面消费结构化差异，不需要从一大段文本中猜哪项改变。
+
+### 51.3 发布事务
+
+批准流程在同一个 UnitOfWork 中完成：
+
+```text
+读取候选版本
+→ 锁定 Skill 聚合并检查 expected_lock_version
+→ 验证候选处于 REVIEW_REQUIRED
+→ 查找 GateReport 并复算 hash
+→ 退休旧 ACTIVE（如果存在）
+→ 候选变为 ACTIVE
+→ 更新 active_version_id
+→ lock_version + 1
+→ 写 PromotionDecision
+→ 写 SkillEvent
+→ 一次 commit
+```
+
+其中任何一步失败都会整体回滚，不会出现两个 ACTIVE 或“版本已激活但聚合指针仍指向旧版”的半状态。
+
+### 51.4 expected_lock_version 是什么
+
+页面读取 Skill 时得到 `lock_version=3`，提交审批时必须带回 3。如果另一个操作者先完成修改，数据库已经是 4，旧页面会得到稳定的 `version_conflict`，必须刷新后重新判断。
+
+PostgreSQL 行锁负责串行化，额外的 compare-and-set 条件让 SQLite 测试也能发现陈旧请求。它不是用户身份认证，只是并发写保护。
+
+### 51.5 为什么批准还要重新验 GateReport
+
+状态是快速索引，报告是证据。`_require_gate()` 同时检查：报告存在、passed=true、version ID 一致、experiment ID 一致、内容哈希一致。只手工把数据库状态改成 REVIEW_REQUIRED 不能绕过证据校验。
+
+### 51.6 回滚不是改一个外键
+
+目标版本必须：属于同一 Skill、处于 RETIRED、有已接受的 GateReport 哈希，并且它的 Schema、工具和风险在当前运行环境仍能通过 `SkillDefinitionValidator`。随后当前 ACTIVE 退休、目标重新 ACTIVE、聚合指针和审计记录在一个事务内改变。
+
+旧版本曾经安全不代表永远兼容。例如工具已经从当前目录移除时，回滚必须拒绝。
+
+### 51.7 HTTP 层和当前安全边界
+
+`api/routes/skills.py` 暴露提炼、列表、详情、建版本、diff、approve/reject、enable/disable/deprecate 和 rollback。`SkillServiceError` 由应用统一转换为稳定错误码。
+
+当前 `reviewer` 只是请求中的本地审计字符串，没有登录、签名、RBAC 或多租户语义。管理接口只适合本地学习或受信网络，不能直接暴露公网。
+
+### 51.8 本模块阅读顺序
+
+```text
+1. skills/lifecycle.py
+2. SkillService.get_skill() / get_version()
+3. _locked_skill()
+4. _require_gate()
+5. _publish()
+6. rollback()
+7. api/routes/skills.py
+8. test_skill_management_api.py
+```
+
+---
+
+## 52. 阶段三模块 11：React + TypeScript 管理页面
+
+### 52.1 前端的职责
+
+`frontend/` 是一个独立 Vite + React + TypeScript 工程，只实现 Skill 和 Eval 管理面。它不重复实现聊天、Session 或完整 Trace Viewer。
+
+主要目录：
+
+```text
+frontend/src/api/types.ts       后端 DTO 的 TypeScript 形状
+frontend/src/api/client.ts      统一请求和错误转换
+frontend/src/components/        Loading、Empty、Error、Badge
+frontend/src/pages/SkillsPage   Skill 列表、状态切换与详情
+frontend/src/pages/ReviewPage   版本 diff、Gate、审批与回滚
+frontend/src/pages/EvalPage     报告汇总和 Pair 明细
+frontend/e2e/                   浏览器关键流程
+```
+
+### 52.2 为什么先定义类型化 API Client
+
+页面如果到处直接 `fetch()` 并猜字段，很容易把 `gate_report` 的空值、稳定错误结构或 lock_version 忘掉。`request<T>()` 统一处理 HTTP 错误，页面 Hook 只关心 `loading/data/error` 三种基本状态。
+
+TypeScript 类型不是运行时安全替代品，真正的事实仍由 FastAPI/Pydantic 和数据库产生；它负责在前端开发阶段尽早暴露字段使用错误。
+
+### 52.3 页面怎样处理服务端事实
+
+页面不会乐观地假装发布成功。用户点击 approve、disable 或 rollback 后，先等待后端事务成功，再重新加载 Skill/Version。若 lock_version 已过期，页面展示后端冲突，不覆盖另一位操作者的结果。
+
+Eval 页面展示 Pair 数、可比较数、双方成功率、安全回退、Token/Tool delta 和哈希。尚未 finalize 时门禁明确显示“尚未执行”，不会把空报告解释为通过。
+
+### 52.4 静态托管与容器构建
+
+前端执行 `pnpm build` 生成 `frontend/dist`。FastAPI 在该目录存在时将它挂载到 `/ui`。Dockerfile 使用 Node 构建阶段生成静态文件，再把 dist 复制进 Python 运行镜像；最终运行容器不需要 Node。
+
+`EVOAGENT_FRONTEND_DIST` 可以改变静态目录。开发时 Vite 代理 `/api` 到本地 FastAPI，生产时浏览器请求同源 API。
+
+### 52.5 测试分层
+
+- `tsc --noEmit`：DTO 和组件类型；
+- Vitest + Testing Library：loading、empty、error 等组件状态；
+- `vite build`：生产构建是否成立；
+- Playwright：报告查看、批准发布、回滚三个浏览器流程。
+
+Playwright 当前用路由 Mock 固定 API 返回，证明浏览器交互和请求契约；后端生命周期由 Python 集成测试证明。二者组合不等于生产环境认证测试。
+
+### 52.6 阅读顺序
+
+```text
+1. api/types.ts
+2. api/client.ts
+3. components/State.tsx
+4. SkillsPage.tsx
+5. ReviewPage.tsx
+6. EvalPage.tsx
+7. App.tsx
+8. e2e/lifecycle.spec.ts
+```
+
+---
+
+## 53. 阶段三模块 12：真实数据集、完整 Demo 与阶段冻结
+
+### 53.1 数据集内容
+
+`evals/datasets/open-source-research-v1.json` 包含 24 条公开输入：12 TRAIN、12 HOLDOUT，覆盖 architecture_review 和 evidence_report 两个任务族。每条 Case 使用确定性 Validator，不把私有答案文本放进公开输入。
+
+数据集加载器只允许读取配置根目录内的 `.json` 文件，并在解析后使用严格 Pydantic 契约。路径穿越、根目录外绝对路径、非 JSON 文件和非法字段都会拒绝。
+
+### 53.2 数据集 CLI
+
+```powershell
+.\.venv\Scripts\evoagent-eval-dataset open-source-research-v1.json --freeze
+```
+
+命令读取配置、导入定义、可选冻结并输出 ID、版本、内容哈希、状态和 Case 数。它不会把 private_validators 打印或经列表 API 暴露。
+
+### 53.3 完整生命周期 Demo
+
+`evals/demo.py` 用确定性数据跑三个场景：
+
+1. 合格候选通过 HOLDOUT 门禁并人工发布；
+2. 正确性回退候选即使 Token 更少也被拒绝；
+3. 合格新版发布后，人工回滚到仍兼容且曾通过门禁的旧版。
+
+最后创建普通 RETRIEVAL Task，证明只检索到回滚后的 ACTIVE 版本。输出中的 UUID 会变化，但门禁结论、Case 数和最终版本关系稳定。
+
+这个 Demo 用模拟完成记录验证生命周期，不把模拟 Token 当成真实模型效果。简历中的效果数字必须来自真实 Provider、冻结配置和保存的报告。
+
+### 53.4 Compose 和 CI 闭环
+
+Compose 现在包含 PostgreSQL、migration、API、普通 Worker 和 Eval Worker。CI 除 Python 3.12/3.13、PostgreSQL 和镜像构建外，还执行前端类型检查、组件测试、生产构建和 Playwright。
+
+新增 migration 0004 为 Experiment 和 SkillVersion 增加报告 Artifact/hash 引用，并维持 0003→0004 的可升级、可回退链。
+
+### 53.5 ADR 和安全说明
+
+`ADR-006-配对评测硬门禁与人工发布.md` 固定为什么选择配对、硬门禁、人工发布和受约束回滚。`阶段三-演示与安全边界.md` 给出复现步骤并明确没有认证、RBAC、生产强沙箱、统计显著性和自动发布。
+
+### 53.6 v0.3 冻结意味着什么
+
+冻结不是说项目永远不改，而是阶段三的必做目标已经闭环。此时停止顺手加入长期记忆、MCP、多 Agent 或自动发布，把已有链路讲清楚、测稳定，比继续堆功能更重要。
+
+---
+
+## 54. 阶段三完整调用链
+
+```text
+普通 BASELINE Task 成功
+→ TRAIN Case 的私有 Validator 验证通过
+→ 来源资格检查、Trace 清洗与不可变 Artifact 冻结
+→ CandidateGenerator 只生成 DRAFT SkillVersion
+→ FROZEN HOLDOUT Dataset 启动 Experiment
+→ EvalCoordinator 创建 case × repeat × 两种 mode 的持久化 Pair
+→ 普通 Worker 分别执行 BASELINE 与内部 PINNED_SKILL
+→ Eval Worker 验证终态、保存指标、检查配置可比较性
+→ EvaluationReport 汇总总体、任务族和 Pair 明细
+→ 显式 finalize 冻结报告并运行 QualityGate
+   ├─ 硬门禁失败 → REJECTED
+   └─ 硬门禁通过 → REVIEW_REQUIRED
+→ 人工查看来源、diff、报告和 GateReport
+   ├─ reject → REJECTED
+   └─ approve → 原子发布 ACTIVE，旧版 RETIRED
+→ 普通 RETRIEVAL Task 只召回 ENABLED + ACTIVE 版本
+→ 如需回滚，再验证旧版门禁证据和当前兼容性后原子切换
+```
+
+整条链路有三条不可混淆的信任边界：生成器只能写 DRAFT；QualityGate 只能决定是否进入人工评审；只有人工发布服务能修改 ACTIVE 指针。
+
+---
+
+## 55. 阶段三最终测试地图
+
+| 测试或检查 | 主要证明 |
+|---|---|
+| `test_run_config_and_manifest.py` | 配置指纹、工具清单和可比较性 |
+| `test_skill_schema.py` | DSL、DAG、引用、风险和安全规则 |
+| `test_phase_three_services.py` | 数据集加载边界、清洗、Validator、BM25 与生成器 |
+| `test_phase_three_pipeline.py` | 来源验证→冻结→DRAFT→检索前半链路 |
+| `test_eval_lifecycle.py` | Pair、租约接管、指标、硬门禁、发布、冲突和回滚 |
+| `test_skill_management_api.py` | 管理 API、稳定错误和私有 Validator 不泄漏 |
+| `test_migrations.py` | Alembic 升级、回退和 Schema 链 |
+| `test_postgres_persistence.py` | PostgreSQL 租约与并发事实 |
+| `frontend/src/App.test.tsx` | 页面 loading/empty/error 状态 |
+| `frontend/e2e/lifecycle.spec.ts` | 报告、批准和回滚浏览器流程 |
+| `evoagent-phase3-demo` | 全新数据库上的确定性生命周期 smoke |
+
+Windows 普通账户没有创建符号链接权限时，WorkspaceGuard 的符号链接测试会跳过；没有配置 PostgreSQL 测试 URL 时，PostgreSQL 专用测试也会跳过。跳过不等于通过，Linux/PostgreSQL CI 才负责这两类平台事实。
+
+---
+
+## 56. 阶段三学习验收
+
+读完阶段三源码后，建议不看手册独立回答：
+
+1. 为什么同一 Case 要同时跑 BASELINE 与 PINNED_SKILL？
+2. 为什么每对顺序交替，且第二条先 PAUSED？
+3. Experiment lease 和普通 Job lease 分别保护什么？
+4. 为什么恢复时不能重新创建 EvalRun？
+5. `passed=false`、`comparable=false` 与 `total_tokens=None` 分别表示什么？
+6. 为什么只有两边都成功才能比较效率？
+7. 为什么正确性失败不能由 Token 改善抵消？
+8. EvaluationReport Artifact、report hash 和 GateReport hash 怎样互相约束？
+9. 为什么 GET report 不执行 finalize？
+10. `REVIEW_REQUIRED` 为什么还不是 ACTIVE？
+11. 发布事务怎样避免两个 ACTIVE 版本？
+12. expected_lock_version 能解决什么，不能解决什么？
+13. 回滚为什么仍要重新检查当前工具兼容性？
+14. 前端为什么提交成功后重新读取服务端状态？
+15. 确定性 Demo 能证明什么，又不能证明什么？
+16. 为什么管理 API 不能直接暴露到公网？
+
+如果能结合具体 Record、Service、API、事件和测试回答这些问题，就已经掌握 EvoAgent v0.3 的完整可验证 Skill 生命周期。

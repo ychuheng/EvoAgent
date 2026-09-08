@@ -58,6 +58,18 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  eval-worker:
+    build: .
+    command: ["evoagent-eval-worker"]
+    environment:
+      <<: *app-environment
+      EVOAGENT_WORKER_ID: eval-compose
+    volumes:
+      - evoagent-workspace:/app/workspace
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   evoagent-postgres:
   evoagent-workspace:

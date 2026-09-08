@@ -2,7 +2,7 @@
 
 > 文档目的：面向刚完成阶段二、第一次接触 DSL、信息检索和模型评测的开发者，解释 EvoAgent 第三阶段要解决的问题、总体架构、Skill 数据结构、来源追踪、训练/留出集隔离、配对评测、发布回滚、安全边界、测试策略和分模块实现顺序。
 >
-> 当前状态（2026-09-08）：模块 0～6 已实现并通过测试；模块 7～12 仍是设计计划。后续仍按照“完成一个模块、理解一个模块、补充学习手册、再进入下一个模块”的节奏开发，不能把未完成目标写成已有功能。
+> 当前状态（2026-09-08）：模块 0～12 已全部实现并通过本机验收。本文前半部分保留设计依据，模块清单现在也可作为源码导航；实际代码边界、演示命令和仍未实现事项以 README、学习手册和开发进度记录为准。
 
 ## 1. 第三阶段的目标
 
@@ -771,6 +771,8 @@ GET    /eval-datasets
 GET    /eval-experiments/{experiment_id}
 GET    /eval-experiments/{experiment_id}/report
 GET    /eval-experiments/{experiment_id}/pairs
+POST   /eval-experiments/{experiment_id}/finalize
+POST   /eval-experiments/{experiment_id}/cancel
 ```
 
 接口规则：
@@ -894,7 +896,7 @@ EvoAgent/
 │     └─ open-source-research-v1.json
 ├─ frontend/
 │  ├─ package.json
-│  ├─ package-lock.json
+│  ├─ pnpm-lock.yaml
 │  ├─ tsconfig.json
 │  ├─ vite.config.ts
 │  └─ src/

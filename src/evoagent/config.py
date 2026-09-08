@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     eval_repeats: int = Field(default=3, ge=1, le=100)
     eval_poll_seconds: float = Field(default=1.0, gt=0, le=60)
     eval_lease_seconds: float = Field(default=60.0, gt=0, le=3_600)
+    frontend_dist: Path = Path("./frontend/dist")
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -153,6 +154,7 @@ class Settings(BaseSettings):
         ):
             raise ValueError("brave search provider requires EVOAGENT_SEARCH_API_KEY")
         self.eval_dataset_root = self.eval_dataset_root.expanduser().resolve(strict=False)
+        self.frontend_dist = self.frontend_dist.expanduser().resolve(strict=False)
         if len(set(self.skill_allowed_tools)) != len(self.skill_allowed_tools):
             raise ValueError("skill_allowed_tools cannot contain duplicates")
         if "shell" in self.skill_allowed_tools:

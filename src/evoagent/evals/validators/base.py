@@ -67,3 +67,11 @@ class ValidatorRegistry:
             failure_reason=reason,
             duration_ms=(time.perf_counter() - started) * 1000,
         )
+
+    def supports(self, name: str, version: str = "1") -> bool:
+        validator = self._validators.get(name)
+        return validator is not None and validator.version == version
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(sorted(self._validators))

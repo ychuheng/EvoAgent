@@ -35,6 +35,9 @@ dev = [
 evoagent = "evoagent.cli:main"
 evoagent-api = "evoagent.api.main:main"
 evoagent-worker = "evoagent.workers.bootstrap:main"
+evoagent-eval-worker = "evoagent.evals.worker:main"
+evoagent-eval-dataset = "evoagent.evals.cli:main"
+evoagent-phase3-demo = "evoagent.evals.demo:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/evoagent"]

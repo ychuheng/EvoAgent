@@ -5,6 +5,10 @@
 __pycache__
 .pytest_cache
 .ruff_cache
+frontend/node_modules
+frontend/dist
+frontend/playwright-report
+frontend/test-results
 tmp
 workspace
 tests

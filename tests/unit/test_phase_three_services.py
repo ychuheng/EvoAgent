@@ -1,3 +1,4 @@
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -9,6 +10,7 @@ from evoagent.core.models import (
     ModelResponse,
     ToolRisk,
 )
+from evoagent.evals.datasets import load_dataset_definition
 from evoagent.evals.schema import EvalCaseDefinition, EvalDatasetDefinition, ValidatorSpec
 from evoagent.evals.validators import default_validator_registry
 from evoagent.providers.mock import MockProvider
@@ -64,6 +66,19 @@ def test_dataset_rejects_duplicate_case_keys() -> None:
     )
     with pytest.raises(ValueError, match="unique"):
         EvalDatasetDefinition(name="smoke", version=1, cases=(case, case))
+
+
+def test_dataset_loader_stays_inside_configured_root(tmp_path) -> None:
+    root = tmp_path / "datasets"
+    root.mkdir()
+    source = Path("evals/datasets/smoke-v1.json").resolve()
+    target = root / "smoke.json"
+    target.write_text(source.read_text("utf-8"), "utf-8")
+    assert load_dataset_definition(Path("smoke.json"), root=root).name == "smoke"
+    outside = tmp_path / "outside.json"
+    outside.write_text(source.read_text("utf-8"), "utf-8")
+    with pytest.raises(ValueError, match="escapes"):
+        load_dataset_definition(outside, root=root)
 
 
 def test_builtin_validators_return_structured_evidence() -> None:

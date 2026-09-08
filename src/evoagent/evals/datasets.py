@@ -1,5 +1,7 @@
-"""评测数据集的导入、内容寻址与冻结服务。"""
+"""评测数据集的安全加载、导入、内容寻址与冻结服务。"""
 
+import json
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
@@ -14,6 +16,21 @@ from evoagent.skills.canonical import content_hash
 
 class DatasetConflictError(ValueError):
     """同名同版本数据集已经对应另一份内容。"""
+
+
+def load_dataset_definition(path: Path, *, root: Path) -> EvalDatasetDefinition:
+    """只从配置的数据集根目录读取 UTF-8 JSON，不跟随越界路径。"""
+
+    resolved_root = root.expanduser().resolve(strict=True)
+    resolved_path = path.expanduser()
+    if not resolved_path.is_absolute():
+        resolved_path = resolved_root / resolved_path
+    resolved_path = resolved_path.resolve(strict=True)
+    if not resolved_path.is_relative_to(resolved_root):
+        raise ValueError("dataset path escapes configured root")
+    if resolved_path.suffix.lower() != ".json" or not resolved_path.is_file():
+        raise ValueError("dataset must be a JSON file")
+    return EvalDatasetDefinition.model_validate(json.loads(resolved_path.read_text("utf-8")))
 
 
 class EvalDatasetService:

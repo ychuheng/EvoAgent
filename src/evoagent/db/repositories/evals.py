@@ -56,3 +56,29 @@ class EvalRepository:
         if record is None:
             raise RecordNotFoundError(f"eval run does not exist: {eval_run_id}")
         return record
+
+    async def get_experiment(self, experiment_id: UUID) -> EvalExperimentRecord:
+        record = await self._session.get(EvalExperimentRecord, experiment_id)
+        if record is None:
+            raise RecordNotFoundError(f"eval experiment does not exist: {experiment_id}")
+        return record
+
+    async def list_experiments(self) -> tuple[EvalExperimentRecord, ...]:
+        return tuple(
+            await self._session.scalars(
+                select(EvalExperimentRecord).order_by(EvalExperimentRecord.created_at.desc())
+            )
+        )
+
+    async def list_runs(self, experiment_id: UUID) -> tuple[EvalRunRecord, ...]:
+        return tuple(
+            await self._session.scalars(
+                select(EvalRunRecord)
+                .where(EvalRunRecord.experiment_id == experiment_id)
+                .order_by(
+                    EvalRunRecord.eval_case_id,
+                    EvalRunRecord.repeat_index,
+                    EvalRunRecord.mode,
+                )
+            )
+        )
