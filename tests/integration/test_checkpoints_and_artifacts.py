@@ -105,6 +105,27 @@ async def test_local_artifact_has_safe_path_and_verifiable_hash(
         await store.write(run_id, "../escape.txt", b"bad")
 
 
+@pytest.mark.asyncio
+async def test_unique_artifact_never_overwrites(persistence, tmp_path: Path) -> None:
+    database, run_id = persistence
+    store = LocalArtifactStore(tmp_path / "unique-artifacts")
+    service = ArtifactService(store, database.session_factory)
+    await service.create_unique(
+        run_id=run_id,
+        name="result.md",
+        content=b"first",
+        artifact_type="markdown",
+    )
+    with pytest.raises(FileExistsError):
+        await service.create_unique(
+            run_id=run_id,
+            name="result.md",
+            content=b"second",
+            artifact_type="markdown",
+        )
+    assert await store.read(f"{run_id}/result.md") == b"first"
+
+
 class MemoryCheckpointWriter:
     def __init__(self) -> None:
         self.states: list[LoopState] = []

@@ -22,6 +22,7 @@ from evoagent.providers.mock import MockProvider
 from evoagent.providers.openai_compatible import OpenAICompatibleProvider
 from evoagent.runtime.persistent_runner import PersistentAgentRunner
 from evoagent.tasks.lease import JobLease, JobLeaseManager, TaskExecutionResult
+from evoagent.tools.builtin.artifact_write import ArtifactWriteTool
 from evoagent.tools.builtin.ask_user import AskUserTool
 from evoagent.tools.builtin.calculator import CalculatorTool
 from evoagent.tools.builtin.file_read import FileReadTool
@@ -37,6 +38,7 @@ from evoagent.tools.builtin.web_search import (
 from evoagent.tools.guards import URLGuard
 from evoagent.tools.registry import ToolRegistry
 from evoagent.tools.sandbox import RunSandbox, ShellSandbox
+from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
 from evoagent.workers.main import JobWorker
 
 
@@ -111,11 +113,15 @@ class ConfiguredTaskHandler:
         provider = self._provider(lease.run_id)
         search_provider = self._search_provider()
         web_fetch = WebFetchTool(URLGuard(), timeout_seconds=self._settings.tool_timeout_seconds)
+        artifact_service = ArtifactService(
+            LocalArtifactStore(self._settings.artifact_root), self._database.session_factory
+        )
         registry = ToolRegistry(
             [
                 CalculatorTool(),
                 FileReadTool(self._settings.workspace),
                 FileWriteTool(RunSandbox(self._settings.artifact_root, lease.run_id)),
+                ArtifactWriteTool(lease.run_id, artifact_service),
                 WebSearchTool(search_provider),
                 web_fetch,
                 AskUserTool(),

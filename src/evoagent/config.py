@@ -7,6 +7,8 @@ from typing import Self
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from evoagent.core.models import ToolRisk
+
 
 class ProviderName(StrEnum):
     """可以通过配置选择的模型服务实现。"""
@@ -76,6 +78,28 @@ class Settings(BaseSettings):
     search_provider: str = "mock"
     search_api_key: SecretStr | None = None
 
+    # 阶段三 Skill 默认只使用低风险、非 Shell 能力。
+    code_version: str = Field(default="0.3.0.dev0", min_length=1, max_length=128)
+    skill_schema_version: int = Field(default=1, ge=1)
+    skill_max_steps: int = Field(default=20, ge=1, le=100)
+    skill_max_sources: int = Field(default=10, ge=1, le=100)
+    skill_min_sources: int = Field(default=2, ge=1, le=100)
+    skill_retrieval_top_k: int = Field(default=1, ge=0, le=3)
+    skill_retrieval_min_score: float = Field(default=0.1, ge=0)
+    skill_max_effective_risk: ToolRisk = ToolRisk.R1
+    skill_allowed_tools: tuple[str, ...] = (
+        "calculator",
+        "file_read",
+        "web_fetch",
+        "web_search",
+        "artifact_write",
+    )
+    eval_dataset_root: Path = Path("./evals/datasets")
+    skill_extractor_model: str | None = Field(default=None, max_length=256)
+    eval_repeats: int = Field(default=3, ge=1, le=100)
+    eval_poll_seconds: float = Field(default=1.0, gt=0, le=60)
+    eval_lease_seconds: float = Field(default=60.0, gt=0, le=3_600)
+
     @field_validator("database_url", mode="before")
     @classmethod
     def validate_database_url(cls, value: object) -> str:
@@ -87,6 +111,13 @@ class Settings(BaseSettings):
         if not normalized.startswith(allowed):
             raise ValueError("database_url must use postgresql+asyncpg or sqlite+aiosqlite")
         return normalized
+
+    @field_validator("skill_extractor_model", mode="before")
+    @classmethod
+    def normalize_optional_extractor_model(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @model_validator(mode="after")
     def validate_provider_requirements(self) -> Self:
@@ -121,4 +152,13 @@ class Settings(BaseSettings):
             self.search_api_key is None or not self.search_api_key.get_secret_value().strip()
         ):
             raise ValueError("brave search provider requires EVOAGENT_SEARCH_API_KEY")
+        self.eval_dataset_root = self.eval_dataset_root.expanduser().resolve(strict=False)
+        if len(set(self.skill_allowed_tools)) != len(self.skill_allowed_tools):
+            raise ValueError("skill_allowed_tools cannot contain duplicates")
+        if "shell" in self.skill_allowed_tools:
+            raise ValueError("shell cannot be enabled for declarative skills")
+        if self.skill_min_sources > self.skill_max_sources:
+            raise ValueError("skill_min_sources cannot exceed skill_max_sources")
+        if self.skill_max_effective_risk not in (ToolRisk.R0, ToolRisk.R1):
+            raise ValueError("declarative skills cannot exceed R1 in phase three")
         return self

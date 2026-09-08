@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from evoagent.db.models import RunRecord, SessionRecord, TaskRecord
 from evoagent.db.repositories.base import ConcurrentUpdateError, RecordNotFoundError
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.runtime.run_config import RunMode
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
 
@@ -63,6 +64,7 @@ class TaskService:
         goal: str,
         provider: str,
         model: str,
+        run_mode: RunMode = RunMode.RETRIEVAL,
     ) -> TaskAggregate:
         """在同一事务中创建 Task、首个 Run 和初始事件。"""
 
@@ -73,6 +75,8 @@ class TaskService:
             raise ValueError("task goal cannot be blank")
         if not normalized_provider or not normalized_model:
             raise ValueError("provider and model cannot be blank")
+        if run_mode is RunMode.PINNED_SKILL:
+            raise ValueError("pinned skill runs may only be created by the evaluation service")
 
         async with UnitOfWork(self._session_factory) as unit:
             if await unit.session.get(SessionRecord, session_id) is None:
@@ -89,6 +93,7 @@ class TaskService:
                 status=PersistentRunStatus.QUEUED,
                 provider=normalized_provider,
                 model=normalized_model,
+                run_mode=run_mode.value,
             )
             unit.runs.add(run)
             await unit.session.flush()

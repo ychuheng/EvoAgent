@@ -2,7 +2,7 @@
 
 EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目标是在可靠任务执行的基础上，建立可验证、可版本化、可回滚的 Skill 生命周期。
 
-当前实现进度：阶段一模块 0～9、阶段二模块 0～12 已完成，v0.2 范围已经冻结。项目具备持久化 Task API、PostgreSQL Job Lease、独立单 Worker、版本化快照与恢复、分类重试、权限审批、副作用账本、SSE、完整 Trace 和本地 Viewer。
+当前实现进度：阶段一模块 0～9、阶段二模块 0～12、阶段三模块 0～6 已完成。除可靠任务执行外，项目已具备声明式 Skill DSL、训练来源验证与冻结、DRAFT 候选提炼、BM25 检索和运行时 Skill 上下文；配对评测、人工发布与回滚仍待后续模块完成。
 
 ## 环境要求
 
@@ -57,6 +57,9 @@ pytest
 - `web_search`：通过可替换 SearchProvider 搜索，默认 Mock，可选 Brave；
 - `ask_user`：通过数据库审批流暂停并取得用户答复；
 - `shell`：默认关闭；显式配置 argv 可执行文件白名单后才可使用。
+- `artifact_write`：只创建当前 Run 的新 Artifact，不允许覆盖同名文件。
+
+普通 Task 可选择 `baseline` 或默认的 `retrieval` 运行模式。`pinned_skill` 不向普通 Task API 开放，只保留给后续配对评测使用。最小候选提炼入口为 `/api/v1/skills/extract`，它只有在应用显式注入 CandidateGenerator 和 Skill 工具注册表后才启用。
 
 ## 阶段二数据库
 

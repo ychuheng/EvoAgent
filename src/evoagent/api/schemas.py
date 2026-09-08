@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from evoagent.db.models import ApprovalStatus
+from evoagent.runtime.run_config import RunMode
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
 
@@ -51,6 +52,14 @@ class TaskCreateRequest(ApiModel):
     goal: str = Field(min_length=1, max_length=100_000)
     provider: str | None = Field(default=None, min_length=1, max_length=64)
     model: str | None = Field(default=None, min_length=1, max_length=256)
+    run_mode: RunMode = RunMode.RETRIEVAL
+
+    @field_validator("run_mode")
+    @classmethod
+    def public_run_mode(cls, value: RunMode) -> RunMode:
+        if value is RunMode.PINNED_SKILL:
+            raise ValueError("pinned_skill mode is reserved for evaluation")
+        return value
 
     @field_validator("goal")
     @classmethod
@@ -76,6 +85,7 @@ class RunResponse(ApiModel):
     status: PersistentRunStatus
     provider: str
     model: str
+    run_mode: str
     created_at: datetime
     updated_at: datetime
 

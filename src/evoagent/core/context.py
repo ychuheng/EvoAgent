@@ -19,8 +19,16 @@ class ContextBuilder:
             raise ValueError("system_prompt cannot be blank")
         self._system_prompt = prompt
 
+    @property
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
     def build(
-        self, user_input: str, *, external_context: Iterable[str] = ()
+        self,
+        user_input: str,
+        *,
+        external_context: Iterable[str] = (),
+        skill_context: str | None = None,
     ) -> tuple[Message, ...]:
         """构造不可变的初始消息快照，不维护后续对话历史。"""
 
@@ -28,7 +36,13 @@ class ContextBuilder:
         if not task:
             raise ValueError("user_input cannot be blank")
 
-        messages = [Message(role=MessageRole.SYSTEM, content=self._system_prompt)]
+        system_prompt = self._system_prompt
+        if skill_context is not None:
+            normalized_skill = skill_context.strip()
+            if not normalized_skill:
+                raise ValueError("skill_context cannot be blank")
+            system_prompt += "\n\n--- 受控 Skill 参考边界 ---\n" + normalized_skill
+        messages = [Message(role=MessageRole.SYSTEM, content=system_prompt)]
         for index, raw_context in enumerate(external_context, start=1):
             context = raw_context.strip()
             if not context:

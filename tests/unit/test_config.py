@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from evoagent.config import LogLevel, ProviderName, Settings
+from evoagent.core.models import ToolRisk
 
 
 def test_defaults_use_mock_provider_and_resolve_workspace(tmp_path: Path) -> None:
@@ -107,3 +108,12 @@ def test_artifact_root_must_be_below_workspace(tmp_path: Path) -> None:
             workspace=tmp_path / "workspace",
             artifact_root=tmp_path / "outside",
         )
+
+
+def test_stage_three_skill_configuration_relations() -> None:
+    with pytest.raises(ValidationError, match="cannot exceed"):
+        Settings(_env_file=None, skill_min_sources=3, skill_max_sources=2)
+    with pytest.raises(ValidationError, match="cannot exceed R1"):
+        Settings(_env_file=None, skill_max_effective_risk=ToolRisk.R2)
+    with pytest.raises(ValidationError, match="shell"):
+        Settings(_env_file=None, skill_allowed_tools=("calculator", "shell"))

@@ -22,6 +22,7 @@ class BaseTool[ArgumentsT: BaseModel](ABC):
     risk: ToolRisk
     has_side_effects: bool
     parallel_safe: bool
+    implementation_version: str = "1"
 
     def definition(self) -> ToolDefinition:
         """构建向模型公开的、与具体模型服务无关的工具定义。"""

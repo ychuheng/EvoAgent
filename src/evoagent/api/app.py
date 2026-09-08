@@ -8,13 +8,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import text
 
-from evoagent.api.routes import approvals, events, sessions, tasks, traces
+from evoagent.api.routes import approvals, events, sessions, skills, tasks, traces
 from evoagent.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from evoagent.config import Settings
 from evoagent.db.repositories.base import RecordNotFoundError
 from evoagent.db.session import Database
+from evoagent.skills.extraction import CandidateGenerator
+from evoagent.skills.sanitizer import TraceSanitizer
 from evoagent.tasks.service import TaskServiceError
 from evoagent.tools.approvals import ApprovalServiceError
+from evoagent.tools.registry import ToolRegistry
 from evoagent.web.viewer import trace_viewer
 
 
@@ -22,6 +25,8 @@ def create_app(
     settings: Settings | None = None,
     *,
     database: Database | None = None,
+    candidate_generator: CandidateGenerator | None = None,
+    skill_tool_registry: ToolRegistry | None = None,
 ) -> FastAPI:
     """创建可在生产环境和测试中注入依赖的 API 应用。"""
 
@@ -33,16 +38,20 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = resolved_settings
         app.state.database = resolved_database
+        app.state.candidate_generator = candidate_generator
+        app.state.skill_tool_registry = skill_tool_registry
+        app.state.trace_sanitizer = TraceSanitizer(resolved_settings.workspace)
         yield
         if owns_database:
             await resolved_database.dispose()
 
-    app = FastAPI(title="EvoAgent API", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="EvoAgent API", version="0.3.0.dev0", lifespan=lifespan)
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")
     app.include_router(approvals.router, prefix="/api/v1")
     app.include_router(events.router, prefix="/api/v1")
     app.include_router(traces.router, prefix="/api/v1")
+    app.include_router(skills.router, prefix="/api/v1")
     app.add_api_route("/viewer", trace_viewer, response_class=HTMLResponse, include_in_schema=False)
 
     @app.exception_handler(TaskServiceError)

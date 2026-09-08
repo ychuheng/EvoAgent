@@ -50,6 +50,7 @@ class AgentLoop:
         temperature: float | None = None,
         max_output_tokens: int | None = None,
         checkpoint_writer: LoopCheckpointWriter | None = None,
+        context_hash: str = "",
     ) -> None:
         normalized_model = model.strip()
         if not normalized_model:
@@ -72,6 +73,7 @@ class AgentLoop:
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
         self._checkpoint_writer = checkpoint_writer
+        self._context_hash = context_hash
         self._config_hash = self._make_config_hash()
 
     async def run(
@@ -276,16 +278,19 @@ class AgentLoop:
     def _make_config_hash(self) -> str:
         """只哈希会改变循环语义的公开配置，不包含密钥。"""
 
+        payload = {
+            "model": self._model,
+            "max_iterations": self._max_iterations,
+            "max_total_tokens": self._max_total_tokens,
+            "max_repeated_tool_calls": self._max_repeated_tool_calls,
+            "temperature": self._temperature,
+            "max_output_tokens": self._max_output_tokens,
+            "tools": [item.model_dump(mode="json") for item in self._registry.definitions()],
+        }
+        if self._context_hash:
+            payload["context_hash"] = self._context_hash
         serialized = json.dumps(
-            {
-                "model": self._model,
-                "max_iterations": self._max_iterations,
-                "max_total_tokens": self._max_total_tokens,
-                "max_repeated_tool_calls": self._max_repeated_tool_calls,
-                "temperature": self._temperature,
-                "max_output_tokens": self._max_output_tokens,
-                "tools": [item.model_dump(mode="json") for item in self._registry.definitions()],
-            },
+            payload,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

@@ -41,6 +41,13 @@
 35. 阶段二模块 10：Sandbox 与新增工具
 36. 阶段二模块 11：SSE、完整 Trace 与 Viewer
 37. 阶段二模块 12：容器装配、故障注入与阶段验收
+38. 阶段三模块 0：可重现运行契约
+39. 阶段三模块 1：声明式 Skill DSL
+40. 阶段三模块 2：持久化模型、状态机与 ArtifactWrite
+41. 阶段三模块 3：数据集与确定性 Validator
+42. 阶段三模块 4：来源资格、清洗与冻结
+43. 阶段三模块 5：候选生成与 DRAFT 提炼
+44. 阶段三模块 6：BM25 检索与 Skill 上下文
 
 ## 1. 阅读说明
 
@@ -54,7 +61,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-当前处于 `v0.2：可靠、可追踪的任务执行` 阶段。
+当前处于 `v0.3：可验证 Skill 生命周期` 阶段，已实现模块 0～6。
 
 已经完成：
 
@@ -69,7 +76,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 阶段一已经闭环。现在既可以使用 MockProvider 确定性运行和测试，也可以通过 CLI 连接 OpenAI-compatible 模型服务，调用计算、文件读取和网页读取工具，最后得到包含完整事件的 RunResult。
 
-阶段二模块 0～12 已全部完成：持久化任务、API、租约 Worker、快照恢复、分类重试、权限审批、副作用账本、受控工具、SSE、完整 Trace、Viewer 和 Compose 已形成可测试闭环。阶段三的 Skill 系统尚未开始。
+阶段二模块 0～12 已全部完成。阶段三已经具备严格 DSL、来源验证与冻结、DRAFT 提炼、BM25 检索和运行时上下文注入；配对评测、发布审批和管理页面仍未实现。
 
 ### 1.2 相关文档的职责
 
@@ -2081,7 +2088,7 @@ Approval + Sandbox → 受控工具执行
 RunEvent → SSE，全部事实表 → Trace Viewer
 ```
 
-阶段二现已范围冻结；阶段一测试仍是内核契约基线。下一阶段是尚未开始的可验证 Skill 生命周期。
+阶段二现已范围冻结；阶段一、二测试仍是回归基线。阶段三模块 0～6 已实现，下一步是可恢复配对评测协调器。
 
 ---
 
@@ -2809,3 +2816,59 @@ POST Task
 7. 为什么故障注入比只测成功路径更有说服力。
 
 推荐最后阅读：`workers/bootstrap.py`、`docker-compose.yml`、`tests/fault_injection/`、`tests/e2e/`，再按照调用链回看模块 0～11。至此 v0.2 范围冻结，阶段三的 Skill 生命周期需要单独设计和实现。
+
+## 38. 阶段三模块 0：可重现运行契约
+
+比较“使用 Skill”和“不使用 Skill”的结果时，模型、Prompt、工具、权限或预算只要有一项不同，就不能把差异归因给 Skill。`RunConfigSnapshot` 只保存非敏感且会改变实验语义的字段，并用规范化 JSON 计算 SHA-256。`comparable_with()` 会先抹去 Skill 这一实验变量，再判断其他条件是否一致。
+
+`ToolRegistry.manifest_hash()` 记录工具名、参数 Schema、风险、副作用、并发属性和实现版本。`TraceBundle` 把任务、回答、Turn 摘要、工具调用、副作用、Artifact、验证结果和配置整理成稳定 DTO，但不保存模型隐藏推理。
+
+推荐阅读：`runtime/run_config.py` → `tools/registry.py` → `trace/bundle.py` → `tests/unit/test_run_config_and_manifest.py`。
+
+## 39. 阶段三模块 1：声明式 Skill DSL
+
+Skill 不是可执行 Python，而是一份受约束的数据。`SkillDefinition` 描述触发词、输入、允许工具、风险上限、步骤和成功条件；`ToolStep` 与 `ModelStep` 用判别联合区分。
+
+Pydantic 判断字段形状，`SkillDefinitionValidator` 继续检查 Schema 版本、工具白名单、R1 风险上限、绝对路径、危险指令、变量引用和依赖图。步骤只能读取输入或祖先步骤的输出；拓扑排序无法完成就说明存在环。规范化 JSON 和 `content_hash` 让相同定义得到相同身份。
+
+推荐阅读：`skills/schema.py` → `skills/validation.py` → `skills/canonical.py` → `tests/unit/test_skill_schema.py`。
+
+## 40. 阶段三模块 2：持久化模型、状态机与 ArtifactWrite
+
+`SkillRecord` 是长期聚合根，`SkillVersionRecord` 是不可变正文。`SkillSourceRecord` 保存来源血缘，`RunSkillSelectionRecord` 保存运行时选择理由。EvalDataset、EvalCase、EvalExperiment、EvalRun、PromotionDecision 和 SkillEvent 为后续评测与审批保存事实关系。
+
+状态变化由 `skills/lifecycle.py` 和 `evals/lifecycle.py` 的纯函数先检查，数据库再用外键、唯一约束和 CheckConstraint 兜底。迁移 `20260908_0003` 可以完整升级和回退。
+
+`artifact_write` 与 `file_write` 不同：它只能在当前 Run 下排他创建新文件，不能覆盖。文件系统用 `O_EXCL` 保证并发安全，成功后登记 URI、大小、类型和内容哈希。
+
+## 41. 阶段三模块 3：数据集与确定性 Validator
+
+数据集文件是可评审定义，导入数据库后成为有版本、有哈希的领域对象。DRAFT 可以冻结，FROZEN 内容不能原地替换；同名同版本但哈希不同会被拒绝。Case 把模型可见的 `public_input` 与只供验证器使用的 `private_validators` 分开，TRAIN 用于提炼，HOLDOUT 留给后续门禁。
+
+Validator 是可信代码注册表，Case 不能携带 Python。当前内置完成状态、章节、引用数、覆盖项、Artifact、工具白名单、未知副作用和工具调用数验证。每个结果包含实现版本、通过状态、证据、失败原因和耗时。`SourceValidationService` 只对 FROZEN 数据集中的 TRAIN Case 和 COMPLETED Run 创建来源验证记录。
+
+`Run=COMPLETED` 只代表循环正常结束，`EvalRun.passed=true` 才代表结果满足任务断言。
+
+## 42. 阶段三模块 4：来源资格、清洗与冻结
+
+`TraceEligibilityChecker` 是提炼前的硬门：必须是 passed TRAIN EvalRun、Run 已完成、配置可复现，没有 DENIED 调用、超风险工具、UNKNOWN Effect 或 PENDING Approval。HOLDOUT 永远不能进入提炼输入。
+
+`TraceSanitizer` 递归移除临时 ID 和时间字段，把 Workspace 路径改为 `${workspace}`，并检测敏感字段、私钥、疑似凭据、宿主机绝对路径和 Prompt Injection。高风险发现会阻断，而不是静默掩盖。通过清洗的内容写成不可覆盖 Trace Artifact；读取已有 Artifact 时会复算哈希。
+
+推荐阅读：`skills/provenance.py` → `skills/sanitizer.py` → `trace/artifacts.py`。
+
+## 43. 阶段三模块 5：候选生成与 DRAFT 提炼
+
+`CandidateGenerator` 只负责提出定义，没有发布权限。Mock 实现保证测试确定；模型实现只接收已冻结、去除私有验证证据的资料，并要求纯 JSON。模型结果仍须重新经过 Pydantic 与语义 Validator。
+
+`SkillExtractionService` 用“排序后的来源哈希 + 定义哈希”生成幂等键。新候选在一个事务中写入 Skill、DRAFT SkillVersion、SkillSource 和 SkillEvent；失败不会留下半合法版本。`POST /api/v1/skills/extract` 是最小入口，未显式配置生成器与注册表时返回 503。
+
+## 44. 阶段三模块 6：BM25 检索与 Skill 上下文
+
+阶段三 Skill 很少，先使用可解释的纯 Python BM25。英文按词、中文按单字和二元词片切分；查询前过滤非 ENABLED/ACTIVE、未知工具、Shell 和超风险定义，低于阈值即无命中，同分按版本 ID 稳定排序。
+
+普通 Task 只允许 `baseline` 或默认的 `retrieval`；`pinned_skill` 留给后续评测。选择写入 `run_skill_selections` 和 RunEvent，恢复时复用旧决定。即使首次没有命中，也用 RunConfigSnapshot 锁定，避免重试时上下文漂移。
+
+`SkillContextRenderer` 明确 Skill 只是操作参考，不能扩大权限、绕过审批或覆盖基础系统规则。无命中时，ContextBuilder 保持阶段二行为。
+
+推荐阅读：`skills/retrieval.py` → `skills/rendering.py` → `core/context.py` → `runtime/persistent_runner.py` → `tests/integration/test_phase_three_pipeline.py`。

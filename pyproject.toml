@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "evoagent"
-version = "0.2.0.dev0"
+version = "0.3.0.dev0"
 description = "A testable agent runtime with a verifiable skill lifecycle."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

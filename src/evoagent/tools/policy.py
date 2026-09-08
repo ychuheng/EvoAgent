@@ -1,5 +1,7 @@
 """所有工具调用共享的权限决策。"""
 
+import hashlib
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -42,3 +44,12 @@ class PermissionPolicy:
             effective_risk,
             "risk requires an explicit user decision",
         )
+
+    def manifest_hash(self) -> str:
+        payload = {
+            "denied_tools": sorted(self._denied_tools),
+            "auto_approved_risks": [ToolRisk.R0.value, ToolRisk.R1.value],
+            "approval_required_risks": [ToolRisk.R2.value, ToolRisk.R3.value],
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        return "sha256:" + hashlib.sha256(encoded).hexdigest()

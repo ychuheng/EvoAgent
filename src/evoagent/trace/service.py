@@ -127,6 +127,8 @@ class TraceService:
                     "id": str(item.id),
                     "sequence": item.sequence,
                     "status": item.status,
+                    "request_summary": item.request_summary,
+                    "response_summary": item.response_summary,
                     "usage": item.usage,
                 }
                 for item in turns

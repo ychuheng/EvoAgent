@@ -14,6 +14,10 @@ from evoagent.db.models import RunRecord, TaskRecord
 from evoagent.providers.base import ModelProvider
 from evoagent.runtime.checkpoints import PersistentCheckpointStore
 from evoagent.runtime.retry import RetryPolicy
+from evoagent.runtime.run_config import RunConfigSnapshot, RunMode, sha256_text
+from evoagent.skills.canonical import content_hash
+from evoagent.skills.rendering import SkillContextRenderer
+from evoagent.skills.retrieval import SkillRetrievalService
 from evoagent.tasks.lease import JobLease, LeaseLostError, TaskExecutionResult
 from evoagent.tasks.state_machine import PersistentRunStatus
 from evoagent.tools.approvals import ApprovalRequiredError
@@ -54,6 +58,43 @@ class PersistentAgentRunner:
 
     async def handle(self, lease: JobLease) -> TaskExecutionResult:
         task, run = await self._load_owned_records(lease)
+        matches = await SkillRetrievalService(
+            self._session_factory,
+            self._registry,
+            top_k=self._settings.skill_retrieval_top_k,
+            minimum_score=self._settings.skill_retrieval_min_score,
+            max_risk=self._settings.skill_max_effective_risk,
+        ).select(run.id, task.goal)
+        skill_context = (
+            "\n\n".join(SkillContextRenderer().render(item.document.definition) for item in matches)
+            or None
+        )
+        selected = matches[0].document if matches else None
+        skill_context_hash = (
+            content_hash([item.document.content_hash for item in matches]) if matches else None
+        )
+        config_snapshot = RunConfigSnapshot(
+            provider=run.provider,
+            model=run.model,
+            system_prompt_hash=sha256_text(self._context_builder.system_prompt),
+            tool_manifest_hash=self._registry.manifest_hash(),
+            policy_hash=self._permission_policy.manifest_hash(),
+            max_iterations=self._settings.max_iterations,
+            max_total_tokens=self._settings.max_total_tokens,
+            max_repeated_tool_calls=self._settings.max_repeated_tool_calls,
+            max_tool_result_chars=self._settings.max_tool_result_chars,
+            model_timeout_seconds=self._settings.model_timeout_seconds,
+            task_timeout_seconds=self._settings.task_timeout_seconds,
+            tool_timeout_seconds=self._settings.tool_timeout_seconds,
+            code_version=self._settings.code_version,
+            skill_retrieval_top_k=self._settings.skill_retrieval_top_k,
+            skill_retrieval_min_score=self._settings.skill_retrieval_min_score,
+            run_mode=RunMode(run.run_mode),
+            skill_version_id=selected.version_id if selected else None,
+            skill_content_hash=selected.content_hash if selected else None,
+            skill_context_hash=skill_context_hash,
+        )
+        await self._persist_run_config(run.id, config_snapshot)
         sink = PersistentEventSink(lease.run_id, self._session_factory)
         checkpoints = PersistentCheckpointStore(
             lease.run_id,
@@ -62,7 +103,7 @@ class PersistentAgentRunner:
         )
         resume_state = await checkpoints.load_latest()
         if resume_state is None:
-            initial_messages = self._context_builder.build(task.goal)
+            initial_messages = self._context_builder.build(task.goal, skill_context=skill_context)
         else:
             initial_messages = resume_state.messages
             await sink.emit(
@@ -103,6 +144,7 @@ class PersistentAgentRunner:
             max_total_tokens=self._settings.max_total_tokens,
             max_repeated_tool_calls=self._settings.max_repeated_tool_calls,
             checkpoint_writer=checkpoints,
+            context_hash=skill_context_hash or "",
         )
         try:
             async with asyncio.timeout(self._settings.task_timeout_seconds):
@@ -174,3 +216,16 @@ class PersistentAgentRunner:
             if task is None or run is None or run.task_id != lease.task_id:
                 raise LeaseLostError(f"lease is no longer owned by {lease.owner}")
             return task, run
+
+    async def _persist_run_config(self, run_id, snapshot: RunConfigSnapshot) -> None:
+        async with self._session_factory() as session:
+            run = await session.get(RunRecord, run_id)
+            if run is None:
+                raise LeaseLostError(f"run no longer exists: {run_id}")
+            serialized = snapshot.model_dump(mode="json")
+            digest = snapshot.content_hash()
+            if run.config_hash is not None and run.config_hash != digest:
+                raise ValueError("persisted run config no longer matches the runtime")
+            run.config_snapshot = serialized
+            run.config_hash = digest
+            await session.commit()

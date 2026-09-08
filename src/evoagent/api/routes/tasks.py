@@ -39,6 +39,7 @@ async def create_task(
         goal=request.goal,
         provider=request.provider or settings.provider.value,
         model=request.model or settings.model or "mock-model",
+        run_mode=request.run_mode,
     )
     return _response(aggregate)
 

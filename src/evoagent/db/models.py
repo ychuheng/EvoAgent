@@ -1,4 +1,4 @@
-"""阶段二 PostgreSQL 持久化记录。"""
+"""EvoAgent PostgreSQL 持久化记录。"""
 
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -18,10 +18,21 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    event,
+    inspect,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from evoagent.db.base import Base
+from evoagent.evals.lifecycle import (
+    DatasetStatus,
+    EvalExperimentKind,
+    EvalExperimentStatus,
+    EvalRunMode,
+    EvalSplit,
+    PromotionAction,
+)
+from evoagent.skills.lifecycle import SkillStatus, SkillVersionStatus
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
 
@@ -122,6 +133,14 @@ class RunRecord(Base):
     __table_args__ = (
         CheckConstraint("next_event_sequence >= 1", name="next_event_sequence_positive"),
         CheckConstraint("lock_version >= 0", name="lock_version_non_negative"),
+        CheckConstraint(
+            "run_mode != 'pinned_skill' OR pinned_skill_version_id IS NOT NULL",
+            name="pinned_skill_present",
+        ),
+        CheckConstraint(
+            "run_mode IN ('baseline', 'retrieval', 'pinned_skill')",
+            name="run_mode_valid",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -131,6 +150,12 @@ class RunRecord(Base):
     )
     provider: Mapped[str] = mapped_column(String(64))
     model: Mapped[str] = mapped_column(String(256))
+    run_mode: Mapped[str] = mapped_column(String(32), default="retrieval")
+    pinned_skill_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("skill_versions.id", ondelete="RESTRICT")
+    )
+    config_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    config_hash: Mapped[str | None] = mapped_column(String(71))
     next_event_sequence: Mapped[int] = mapped_column(Integer, default=1)
     lock_version: Mapped[int] = mapped_column(Integer, default=0)
     final_answer: Mapped[str | None] = mapped_column(Text)
@@ -266,3 +291,274 @@ class ArtifactRecord(Base):
     size_bytes: Mapped[int] = mapped_column(Integer)
     attributes: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SkillRecord(Base):
+    __tablename__ = "skills"
+    __table_args__ = (CheckConstraint("lock_version >= 0", name="lock_version_non_negative"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(128))
+    slug: Mapped[str] = mapped_column(String(64), unique=True)
+    description: Mapped[str] = mapped_column(Text)
+    status: Mapped[SkillStatus] = mapped_column(
+        enum_column(SkillStatus, "skill_status"), default=SkillStatus.ENABLED
+    )
+    active_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "skill_versions.id",
+            ondelete="RESTRICT",
+            use_alter=True,
+            name="fk_skills_active_version_id_skill_versions",
+        )
+    )
+    lock_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class SkillVersionRecord(Base):
+    __tablename__ = "skill_versions"
+    __table_args__ = (
+        UniqueConstraint("skill_id", "version"),
+        CheckConstraint("version >= 1", name="version_positive"),
+        CheckConstraint("schema_version >= 1", name="schema_version_positive"),
+        CheckConstraint(
+            "length(content_hash) = 71 AND content_hash LIKE 'sha256:%'",
+            name="content_hash_format",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    skill_id: Mapped[UUID] = mapped_column(ForeignKey("skills.id", ondelete="RESTRICT"), index=True)
+    parent_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("skill_versions.id", ondelete="RESTRICT")
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    schema_version: Mapped[int] = mapped_column(Integer)
+    definition: Mapped[dict[str, Any]] = mapped_column(JSON)
+    content_hash: Mapped[str] = mapped_column(String(71))
+    extraction_key: Mapped[str] = mapped_column(String(71), unique=True)
+    lifecycle_status: Mapped[SkillVersionStatus] = mapped_column(
+        enum_column(SkillVersionStatus, "skill_version_status"),
+        default=SkillVersionStatus.DRAFT,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class EvalDatasetRecord(Base):
+    __tablename__ = "eval_datasets"
+    __table_args__ = (
+        UniqueConstraint("name", "version"),
+        CheckConstraint("version >= 1", name="version_positive"),
+        CheckConstraint(
+            "length(content_hash) = 71 AND content_hash LIKE 'sha256:%'",
+            name="content_hash_format",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(128))
+    version: Mapped[int] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(String(71))
+    status: Mapped[DatasetStatus] = mapped_column(
+        enum_column(DatasetStatus, "dataset_status"), default=DatasetStatus.DRAFT
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class EvalCaseRecord(Base):
+    __tablename__ = "eval_cases"
+    __table_args__ = (UniqueConstraint("dataset_id", "case_key"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    dataset_id: Mapped[UUID] = mapped_column(
+        ForeignKey("eval_datasets.id", ondelete="RESTRICT"), index=True
+    )
+    case_key: Mapped[str] = mapped_column(String(128))
+    task_family: Mapped[str] = mapped_column(String(128), index=True)
+    split: Mapped[EvalSplit] = mapped_column(enum_column(EvalSplit, "eval_split"))
+    public_input: Mapped[dict[str, Any]] = mapped_column(JSON)
+    private_validators: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    risk_profile: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class EvalExperimentRecord(Base):
+    __tablename__ = "eval_experiments"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    kind: Mapped[EvalExperimentKind] = mapped_column(
+        enum_column(EvalExperimentKind, "eval_experiment_kind")
+    )
+    skill_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("skill_versions.id", ondelete="RESTRICT")
+    )
+    dataset_id: Mapped[UUID] = mapped_column(
+        ForeignKey("eval_datasets.id", ondelete="RESTRICT"), index=True
+    )
+    status: Mapped[EvalExperimentStatus] = mapped_column(
+        enum_column(EvalExperimentStatus, "eval_experiment_status"),
+        default=EvalExperimentStatus.QUEUED,
+    )
+    config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    config_hash: Mapped[str] = mapped_column(String(71))
+    gate_report: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    lease_owner: Mapped[str | None] = mapped_column(String(128))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class EvalRunRecord(Base):
+    __tablename__ = "eval_runs"
+    __table_args__ = (
+        UniqueConstraint("experiment_id", "eval_case_id", "mode", "repeat_index"),
+        CheckConstraint("repeat_index >= 0", name="repeat_index_non_negative"),
+        CheckConstraint(
+            "(mode = 'baseline' AND skill_version_id IS NULL) OR "
+            "(mode = 'pinned_skill' AND skill_version_id IS NOT NULL)",
+            name="mode_skill_consistent",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    experiment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("eval_experiments.id", ondelete="RESTRICT"), index=True
+    )
+    eval_case_id: Mapped[UUID] = mapped_column(
+        ForeignKey("eval_cases.id", ondelete="RESTRICT"), index=True
+    )
+    mode: Mapped[EvalRunMode] = mapped_column(enum_column(EvalRunMode, "eval_run_mode"))
+    repeat_index: Mapped[int] = mapped_column(Integer, default=0)
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="RESTRICT"))
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), unique=True)
+    skill_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("skill_versions.id", ondelete="RESTRICT")
+    )
+    paired_eval_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("eval_runs.id", ondelete="RESTRICT")
+    )
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    validation_results: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    passed: Mapped[bool] = mapped_column(Boolean)
+    comparable: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SkillSourceRecord(Base):
+    __tablename__ = "skill_sources"
+    __table_args__ = (UniqueConstraint("skill_version_id", "source_run_id"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    skill_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("skill_versions.id", ondelete="RESTRICT"), index=True
+    )
+    source_run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
+    source_eval_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("eval_runs.id", ondelete="RESTRICT")
+    )
+    trace_artifact_id: Mapped[UUID] = mapped_column(ForeignKey("artifacts.id", ondelete="RESTRICT"))
+    source_trace_hash: Mapped[str] = mapped_column(String(71))
+
+
+class RunSkillSelectionRecord(Base):
+    __tablename__ = "run_skill_selections"
+    __table_args__ = (
+        UniqueConstraint("run_id", "rank"),
+        CheckConstraint("rank >= 1", name="rank_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), index=True)
+    skill_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("skill_versions.id", ondelete="RESTRICT")
+    )
+    mode: Mapped[str] = mapped_column(String(32))
+    rank: Mapped[int] = mapped_column(Integer)
+    score: Mapped[float] = mapped_column()
+    query_terms: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class PromotionDecisionRecord(Base):
+    __tablename__ = "promotion_decisions"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    skill_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("skill_versions.id", ondelete="RESTRICT"), index=True
+    )
+    action: Mapped[PromotionAction] = mapped_column(
+        enum_column(PromotionAction, "promotion_action")
+    )
+    reviewer: Mapped[str] = mapped_column(String(128))
+    reason: Mapped[str] = mapped_column(Text)
+    gate_report_hash: Mapped[str | None] = mapped_column(String(71))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SkillEventRecord(Base):
+    __tablename__ = "skill_events"
+    __table_args__ = (
+        UniqueConstraint("skill_id", "sequence"),
+        CheckConstraint("sequence >= 1", name="sequence_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    skill_id: Mapped[UUID] = mapped_column(ForeignKey("skills.id", ondelete="RESTRICT"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    event_type: Mapped[str] = mapped_column(String(128))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+def _reject_changed_fields(record: object, field_names: tuple[str, ...]) -> None:
+    state = inspect(record)
+    changed = [name for name in field_names if state.attrs[name].history.has_changes()]
+    if changed:
+        raise ValueError(f"immutable record fields cannot change: {', '.join(changed)}")
+
+
+@event.listens_for(SkillVersionRecord, "before_update")
+def protect_skill_version_body(
+    _mapper: object, _connection: object, record: SkillVersionRecord
+) -> None:
+    """版本创建后只允许生命周期状态变化，正文和来源身份保持不变。"""
+
+    _reject_changed_fields(
+        record,
+        (
+            "skill_id",
+            "parent_version_id",
+            "version",
+            "schema_version",
+            "definition",
+            "content_hash",
+            "extraction_key",
+            "created_at",
+        ),
+    )
+
+
+@event.listens_for(EvalDatasetRecord, "before_update")
+def protect_dataset_version(
+    _mapper: object, _connection: object, record: EvalDatasetRecord
+) -> None:
+    """数据集版本只能改变生命周期状态，内容变化必须创建新版本。"""
+
+    _reject_changed_fields(record, ("name", "version", "content_hash", "created_at"))
+
+
+@event.listens_for(EvalCaseRecord, "before_update")
+def protect_eval_case(_mapper: object, _connection: object, _record: EvalCaseRecord) -> None:
+    """Case 随数据集版本创建后不可原地修改。"""
+
+    raise ValueError("eval cases are immutable; create a new dataset version")
+
+
+@event.listens_for(SkillSourceRecord, "before_update")
+def protect_skill_source(_mapper: object, _connection: object, _record: SkillSourceRecord) -> None:
+    """来源血缘创建后不可被改写。"""
+
+    raise ValueError("skill sources are immutable")

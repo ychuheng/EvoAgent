@@ -1,5 +1,7 @@
 """以确定性顺序注册和发现可用工具。"""
 
+import hashlib
+import json
 from collections.abc import Iterable
 
 from evoagent.core.models import ToolDefinition
@@ -61,6 +63,30 @@ class ToolRegistry:
         """以相同的确定性顺序返回面向模型的工具定义。"""
 
         return tuple(self._tools[name].definition() for name in self.names)
+
+    def manifest(self) -> tuple[dict[str, object], ...]:
+        """返回用于实验复现的稳定工具清单。"""
+
+        return tuple(
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.arguments_model.model_json_schema(),
+                "risk": tool.risk.value,
+                "has_side_effects": tool.has_side_effects,
+                "parallel_safe": tool.parallel_safe,
+                "implementation_version": tool.implementation_version,
+            }
+            for tool in (self._tools[name] for name in self.names)
+        )
+
+    def manifest_hash(self) -> str:
+        """对规范化工具清单计算 SHA-256。"""
+
+        encoded = json.dumps(
+            self.manifest(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
     def __contains__(self, name: object) -> bool:
         return name in self._tools

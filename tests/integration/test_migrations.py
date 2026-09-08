@@ -21,6 +21,16 @@ EXPECTED_TABLES = {
     "tool_calls",
     "tool_effects",
     "turns",
+    "skills",
+    "skill_versions",
+    "skill_sources",
+    "skill_events",
+    "eval_datasets",
+    "eval_cases",
+    "eval_experiments",
+    "eval_runs",
+    "run_skill_selections",
+    "promotion_decisions",
 }
 
 

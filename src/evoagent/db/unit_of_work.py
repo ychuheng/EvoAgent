@@ -5,9 +5,12 @@ from types import TracebackType
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.db.repositories import (
+    EvalRepository,
     RunEventRepository,
     RunRepository,
     RunSnapshotRepository,
+    SkillRepository,
+    SkillVersionRepository,
     TaskRepository,
     ToolEffectRepository,
 )
@@ -26,6 +29,9 @@ class UnitOfWork:
         self.events = RunEventRepository(self.session)
         self.snapshots = RunSnapshotRepository(self.session)
         self.effects = ToolEffectRepository(self.session)
+        self.skills = SkillRepository(self.session)
+        self.skill_versions = SkillVersionRepository(self.session)
+        self.evals = EvalRepository(self.session)
         return self
 
     async def __aexit__(

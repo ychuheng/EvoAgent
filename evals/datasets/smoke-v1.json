@@ -1,0 +1,17 @@
+{
+  "name": "smoke",
+  "version": 1,
+  "cases": [
+    {
+      "case_key": "basic_report",
+      "task_family": "research_report",
+      "split": "train",
+      "public_input": {"goal": "生成包含总结和来源的简短报告"},
+      "private_validators": [
+        {"name": "run_completed", "version": "1", "parameters": {}},
+        {"name": "contains_sections", "version": "1", "parameters": {"sections": ["总结"]}}
+      ],
+      "risk_profile": {"max_risk": "R1"}
+    }
+  ]
+}
