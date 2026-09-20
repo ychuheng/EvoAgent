@@ -43,6 +43,7 @@ def test_openai_compatible_provider_accepts_complete_configuration() -> None:
         api_key="test-secret",
         base_url="https://llm.example.test/v1",
         model="example-model",
+        context_window_tokens=32768,
     )
 
     assert settings.provider is ProviderName.OPENAI_COMPATIBLE
@@ -80,7 +81,7 @@ def test_stage_two_database_and_worker_defaults(tmp_path: Path) -> None:
     assert settings.api_host == "127.0.0.1"
     assert settings.api_port == 8_000
     assert settings.heartbeat_seconds * 3 <= settings.lease_seconds
-    assert settings.snapshot_schema_version == 1
+    assert settings.snapshot_schema_version == 2
     assert settings.max_retry_attempts == 3
     assert settings.retry_base_seconds <= settings.retry_max_seconds
     assert settings.artifact_root == (tmp_path / "artifacts").resolve()
@@ -117,3 +118,27 @@ def test_stage_three_skill_configuration_relations() -> None:
         Settings(_env_file=None, skill_max_effective_risk=ToolRisk.R2)
     with pytest.raises(ValidationError, match="shell"):
         Settings(_env_file=None, skill_allowed_tools=("calculator", "shell"))
+
+
+def test_real_bounded_mode_requires_explicit_window_and_legacy_remains_available():
+    fields = dict(
+        _env_file=None,
+        provider="openai_compatible",
+        api_key="test",
+        base_url="https://example.test/v1",
+        model="unknown-model",
+    )
+    with pytest.raises(ValidationError, match="CONTEXT_WINDOW_TOKENS"):
+        Settings(**fields)
+    assert Settings(**fields, context_policy="legacy").context_policy == "legacy"
+    with pytest.raises(ValidationError, match="context window"):
+        Settings(_env_file=None, context_window_tokens=5000)
+
+
+def test_embedding_empty_connection_and_snapshot_requirement():
+    example = Settings(_env_file=".env.example")
+    assert example.retrieval_backend == "lexical" and not example.memory_retrieval_enabled
+    settings = Settings(embedding_base_url="", embedding_api_key="")
+    assert settings.embedding_base_url is None and settings.embedding_api_key is None
+    with pytest.raises(ValueError, match="context retrieval requires"):
+        Settings(memory_retrieval_enabled=True, snapshot_schema_version=1)

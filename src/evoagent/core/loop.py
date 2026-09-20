@@ -5,6 +5,7 @@ import hashlib
 import json
 from typing import Protocol
 
+from evoagent.core.context_policy import ContextPolicy, ContextPolicyError, LegacyContextPolicy
 from evoagent.core.events import RuntimeEventSink
 from evoagent.core.models import (
     AgentLoopResult,
@@ -51,6 +52,8 @@ class AgentLoop:
         max_output_tokens: int | None = None,
         checkpoint_writer: LoopCheckpointWriter | None = None,
         context_hash: str = "",
+        context_policy: ContextPolicy | None = None,
+        context_store=None,
     ) -> None:
         normalized_model = model.strip()
         if not normalized_model:
@@ -74,6 +77,10 @@ class AgentLoop:
         self._max_output_tokens = max_output_tokens
         self._checkpoint_writer = checkpoint_writer
         self._context_hash = context_hash
+        self._context_policy = context_policy or LegacyContextPolicy()
+        self._context_store = context_store
+        self._context_revision_id = None
+        self._history_before_sequence = 0
         self._config_hash = self._make_config_hash()
 
     async def run(
@@ -88,6 +95,8 @@ class AgentLoop:
             raise ValueError("initial_messages cannot be empty")
 
         if resume_state is not None:
+            self._context_revision_id = resume_state.context_revision_id
+            self._history_before_sequence = resume_state.history_before_sequence
             if resume_state.config_hash != self._config_hash:
                 raise ValueError("snapshot config hash does not match current AgentLoop")
             messages = list(resume_state.messages)
@@ -114,6 +123,55 @@ class AgentLoop:
                 temperature=self._temperature,
                 max_output_tokens=self._max_output_tokens,
             )
+            try:
+                if self._context_store is not None:
+                    prepared = await self._context_store.prepare(
+                        LoopState(
+                            schema_version=2,
+                            messages=tuple(messages),
+                            completed_iterations=iteration - 1,
+                            usage=known_usage if usage_is_complete else None,
+                            usage_is_complete=usage_is_complete,
+                            previous_tool_fingerprint=previous_tool_fingerprint,
+                            repeated_tool_calls=repeated_tool_calls,
+                            config_hash=self._config_hash,
+                            context_revision_id=self._context_revision_id,
+                            history_before_sequence=self._history_before_sequence,
+                        ),
+                        request,
+                    )
+                    self._context_revision_id = prepared.context_revision_id
+                    self._history_before_sequence = prepared.history_before_sequence
+                    messages = list(prepared.messages)
+                    request = request.model_copy(update={"messages": prepared.messages})
+                decision = self._context_policy.prepare(request)
+                if self._context_store is not None:
+                    await self._context_store.check_sources()
+            except ContextPolicyError as error:
+                await self._event_sink.emit(
+                    EventType.CONTEXT_REJECTED,
+                    {
+                        "iteration": iteration,
+                        "error_code": error.code,
+                    },
+                )
+                return AgentLoopResult(
+                    status=AgentLoopStatus.LIMIT_REACHED,
+                    messages=tuple(messages),
+                    iterations=iteration,
+                    usage=known_usage if usage_is_complete else None,
+                    error_code=error.code,
+                    error_message=str(error),
+                )
+            request = decision.request
+            messages = list(request.messages)
+            if decision.estimate is not None:
+                await self._event_sink.emit(
+                    EventType.CONTEXT_TRIMMED
+                    if decision.dropped_indices
+                    else EventType.CONTEXT_CHECKED,
+                    {"iteration": iteration, **decision.audit_payload()},
+                )
             await self._event_sink.emit(
                 EventType.MODEL_REQUESTED,
                 {
@@ -265,6 +323,9 @@ class AgentLoop:
             return
         await self._checkpoint_writer.save(
             LoopState(
+                schema_version=2 if self._context_store else 1,
+                context_revision_id=self._context_revision_id,
+                history_before_sequence=self._history_before_sequence,
                 messages=tuple(messages),
                 completed_iterations=completed_iterations,
                 usage=usage,
@@ -287,6 +348,8 @@ class AgentLoop:
             "max_output_tokens": self._max_output_tokens,
             "tools": [item.model_dump(mode="json") for item in self._registry.definitions()],
         }
+        if not isinstance(self._context_policy, LegacyContextPolicy):
+            payload["context_policy"] = self._context_policy.manifest()
         if self._context_hash:
             payload["context_hash"] = self._context_hash
         serialized = json.dumps(
@@ -360,12 +423,21 @@ class AgentLoop:
 
     @staticmethod
     def _tool_fingerprint(calls: tuple[ToolCall, ...], results: tuple[ToolResult, ...]) -> str:
+        def stable_content(content):
+            try:
+                reference = json.loads(content.splitlines()[0])
+                if isinstance(reference, dict) and reference.get("read_tool") == "artifact_read":
+                    return reference["hash"]
+            except (ValueError, KeyError, IndexError):
+                pass
+            return content
+
         normalized = [
             {
                 "name": call.name,
                 "arguments": call.arguments,
                 "status": result.status.value,
-                "content": result.content,
+                "content": stable_content(result.content),
                 "error_code": result.error_code,
             }
             for call, result in zip(calls, results, strict=True)

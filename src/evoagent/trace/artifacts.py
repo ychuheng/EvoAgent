@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.db.models import ArtifactRecord
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.memory.repository import check_run_references
+from evoagent.tasks.lease_guard import LeaseGuard
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +87,12 @@ class LocalArtifactStore:
     async def read(self, uri: str) -> bytes:
         return await asyncio.to_thread(self._read, uri)
 
+    async def erase(self, uri: str) -> None:
+        target = (self._root / uri).resolve(strict=False)
+        if not target.is_relative_to(self._root) or target == self._root:
+            raise ValueError("artifact path escapes configured root")
+        await asyncio.to_thread(target.unlink, missing_ok=True)
+
     def _read(self, uri: str) -> bytes:
         target = (self._root / uri).resolve(strict=False)
         if not target.is_relative_to(self._root):
@@ -106,7 +114,9 @@ class ArtifactService:
         self,
         store: ArtifactStore,
         session_factory: async_sessionmaker[AsyncSession],
+        lease_guard: LeaseGuard | None = None,
     ) -> None:
+        self._lease_guard = lease_guard
         self._store = store
         self._session_factory = session_factory
 
@@ -124,8 +134,16 @@ class ArtifactService:
         artifact_type: str,
         attributes: dict[str, object] | None = None,
     ) -> ArtifactRecord:
+        if self._lease_guard is not None:
+            if self._lease_guard.lease.run_id != run_id:
+                raise ValueError("artifact run does not match lease")
+            async with self._session_factory() as session:
+                await self._lease_guard.check(session)
         stored = await self._store.write(run_id, name, content)
         async with UnitOfWork(self._session_factory) as unit:
+            if self._lease_guard is not None:
+                await self._lease_guard.check(unit.session)
+                await check_run_references(unit.session, run_id)
             record = ArtifactRecord(
                 run_id=run_id,
                 type=artifact_type,
@@ -150,8 +168,16 @@ class ArtifactService:
     ) -> ArtifactRecord:
         """创建不可覆盖的 Artifact，并登记内容哈希与元数据。"""
 
+        if self._lease_guard is not None:
+            if self._lease_guard.lease.run_id != run_id:
+                raise ValueError("artifact run does not match lease")
+            async with self._session_factory() as session:
+                await self._lease_guard.check(session)
         stored = await self._store.write_unique(run_id, name, content)
         async with UnitOfWork(self._session_factory) as unit:
+            if self._lease_guard is not None:
+                await self._lease_guard.check(unit.session)
+                await check_run_references(unit.session, run_id)
             record = ArtifactRecord(
                 run_id=run_id,
                 type=artifact_type,

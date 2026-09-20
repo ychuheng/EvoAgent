@@ -67,6 +67,9 @@ class AgentLoopStatus(StrEnum):
 
 class EventType(StrEnum):
     RUN_STARTED = "run.started"
+    CONTEXT_CHECKED = "context.checked"
+    CONTEXT_TRIMMED = "context.trimmed"
+    CONTEXT_REJECTED = "context.rejected"
     MODEL_REQUESTED = "model.requested"
     MODEL_DELTA = "model.delta"
     MODEL_COMPLETED = "model.completed"
@@ -124,9 +127,12 @@ class Message(ContractModel):
     content: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
+    context_priority: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_role_shape(self) -> Self:
+        if self.context_priority is not None and self.role is not MessageRole.USER:
+            raise ValueError("only optional user-context blocks may carry context_priority")
         if self.role is MessageRole.TOOL:
             if self.content is None or not self.tool_call_id:
                 raise ValueError("tool messages require content and tool_call_id")
@@ -308,6 +314,9 @@ class AgentLoopResult(ContractModel):
 class LoopState(ContractModel):
     """只能在完整模型—工具边界保存的可恢复循环状态。"""
 
+    schema_version: int = Field(default=1, ge=1, le=2)
+    context_revision_id: UUID | None = None
+    history_before_sequence: int = Field(default=0, ge=0)
     messages: tuple[Message, ...] = Field(min_length=1)
     completed_iterations: int = Field(ge=0)
     usage: TokenUsage | None = None

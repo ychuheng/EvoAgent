@@ -17,11 +17,16 @@ from evoagent.core.models import (
     ToolCall,
 )
 from evoagent.db.session import Database
+from evoagent.memory.maintenance import MaintenanceWorker
 from evoagent.providers.base import ModelProvider
 from evoagent.providers.mock import MockProvider
 from evoagent.providers.openai_compatible import OpenAICompatibleProvider
+from evoagent.retrieval.embeddings import provider_from_settings
+from evoagent.retrieval.indexing import IndexService
 from evoagent.runtime.persistent_runner import PersistentAgentRunner
 from evoagent.tasks.lease import JobLease, JobLeaseManager, TaskExecutionResult
+from evoagent.tasks.lease_guard import LeaseGuard
+from evoagent.tools.builtin.artifact_read import ArtifactReadTool
 from evoagent.tools.builtin.artifact_write import ArtifactWriteTool
 from evoagent.tools.builtin.ask_user import AskUserTool
 from evoagent.tools.builtin.calculator import CalculatorTool
@@ -36,6 +41,7 @@ from evoagent.tools.builtin.web_search import (
     WebSearchTool,
 )
 from evoagent.tools.guards import URLGuard
+from evoagent.tools.output_store import ToolOutputStore
 from evoagent.tools.registry import ToolRegistry
 from evoagent.tools.sandbox import RunSandbox, ShellSandbox
 from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
@@ -114,7 +120,9 @@ class ConfiguredTaskHandler:
         search_provider = self._search_provider()
         web_fetch = WebFetchTool(URLGuard(), timeout_seconds=self._settings.tool_timeout_seconds)
         artifact_service = ArtifactService(
-            LocalArtifactStore(self._settings.artifact_root), self._database.session_factory
+            LocalArtifactStore(self._settings.artifact_root),
+            self._database.session_factory,
+            lease_guard=LeaseGuard(lease),
         )
         registry = ToolRegistry(
             [
@@ -122,6 +130,9 @@ class ConfiguredTaskHandler:
                 FileReadTool(self._settings.workspace),
                 FileWriteTool(RunSandbox(self._settings.artifact_root, lease.run_id)),
                 ArtifactWriteTool(lease.run_id, artifact_service),
+                ArtifactReadTool(
+                    ToolOutputStore(lease.run_id, artifact_service, self._database.session_factory)
+                ),
                 WebSearchTool(search_provider),
                 web_fetch,
                 AskUserTool(),
@@ -181,6 +192,7 @@ class ConfiguredTaskHandler:
 
 async def run_worker() -> None:
     settings = Settings()
+    embedding_provider = provider_from_settings(settings)
     async with Database(settings.database_url.get_secret_value()) as database:
         manager = JobLeaseManager(database.session_factory, lease_seconds=settings.lease_seconds)
         worker = JobWorker(
@@ -189,8 +201,20 @@ async def run_worker() -> None:
             handler=ConfiguredTaskHandler(settings, database),
             heartbeat_seconds=settings.heartbeat_seconds,
             poll_seconds=settings.worker_poll_seconds,
+            snapshot_schema_version=settings.snapshot_schema_version,
+            maintenance_worker=MaintenanceWorker(
+                database.session_factory,
+                LocalArtifactStore(settings.artifact_root),
+                IndexService(
+                    database.session_factory, embedding_provider, settings.embedding_model
+                ),
+            ),
         )
-        await worker.run_forever()
+        try:
+            await worker.run_forever()
+        finally:
+            if hasattr(embedding_provider, "aclose"):
+                await embedding_provider.aclose()
 
 
 def main() -> None:

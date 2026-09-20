@@ -9,11 +9,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from evoagent.api.routes import approvals, evals, events, sessions, skills, tasks, traces
+from evoagent.api.routes import approvals, evals, events, memory, sessions, skills, tasks, traces
 from evoagent.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from evoagent.config import ProviderName, Settings
 from evoagent.db.repositories.base import RecordNotFoundError
 from evoagent.db.session import Database
+from evoagent.memory.extraction import ModelMemoryExtractor
+from evoagent.memory.schema import MemoryError
 from evoagent.providers.openai_compatible import OpenAICompatibleProvider
 from evoagent.skills.extraction import CandidateGenerator, ModelCandidateGenerator
 from evoagent.skills.sanitizer import TraceSanitizer
@@ -31,6 +33,7 @@ def create_app(
     database: Database | None = None,
     candidate_generator: CandidateGenerator | None = None,
     skill_tool_registry: ToolRegistry | None = None,
+    memory_generator=None,
 ) -> FastAPI:
     """创建可在生产环境和测试中注入依赖的 API 应用。"""
 
@@ -40,6 +43,22 @@ def create_app(
     resolved_skill_registry = skill_tool_registry or default_skill_tool_catalog()
     resolved_candidate_generator = candidate_generator
     owned_extractor_provider: OpenAICompatibleProvider | None = None
+    owned_memory_provider = None
+    if memory_generator is None and resolved_settings.memory_extractor_model:
+        if (
+            resolved_settings.provider is not ProviderName.OPENAI_COMPATIBLE
+            or resolved_settings.api_key is None
+            or resolved_settings.base_url is None
+        ):
+            raise ValueError("memory extractor requires configured real provider")
+        owned_memory_provider = OpenAICompatibleProvider(
+            api_key=resolved_settings.api_key,
+            base_url=str(resolved_settings.base_url),
+            timeout_seconds=10,
+        )
+        memory_generator = ModelMemoryExtractor(
+            owned_memory_provider, resolved_settings.memory_extractor_model
+        )
     if (
         resolved_candidate_generator is None
         and resolved_settings.skill_extractor_model is not None
@@ -60,6 +79,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = resolved_settings
+        app.state.memory_generator = memory_generator
         app.state.database = resolved_database
         app.state.candidate_generator = resolved_candidate_generator
         app.state.skill_tool_registry = resolved_skill_registry
@@ -67,12 +87,18 @@ def create_app(
         try:
             yield
         finally:
+            if owned_memory_provider is not None:
+                await owned_memory_provider.aclose()
             if owned_extractor_provider is not None:
                 await owned_extractor_provider.aclose()
             if owns_database:
                 await resolved_database.dispose()
 
-    app = FastAPI(title="EvoAgent API", version="0.3.0.dev0", lifespan=lifespan)
+    app = FastAPI(title="EvoAgent API", version="0.4.0.dev0", lifespan=lifespan)
+    app.include_router(memory.router, prefix="/api/v1")
+    from evoagent.api.routes import retrieval
+
+    app.include_router(retrieval.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")
     app.include_router(approvals.router, prefix="/api/v1")
@@ -87,6 +113,13 @@ def create_app(
             "/ui",
             StaticFiles(directory=resolved_settings.frontend_dist, html=True),
             name="skill-ui",
+        )
+
+    @app.exception_handler(MemoryError)
+    async def handle_memory_error(_request: Request, error: MemoryError) -> JSONResponse:
+        return JSONResponse(
+            status_code=404 if error.code.endswith("not_found") else 409,
+            content={"error": {"code": error.code, "message": str(error)}},
         )
 
     @app.exception_handler(TaskServiceError)

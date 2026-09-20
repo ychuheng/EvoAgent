@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     model_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     task_timeout_seconds: float = Field(default=300.0, gt=0, le=86_400)
     tool_timeout_seconds: float = Field(default=30.0, gt=0, le=3_600)
+    context_policy: Literal["bounded", "legacy"] = "bounded"
+    context_window_tokens: int = Field(default=32768, ge=1)
+    max_output_tokens: int = Field(default=4096, ge=1)
+    context_safety_margin: int = Field(default=1024, ge=0)
+    context_strict: bool = False
     max_total_tokens: int = Field(default=32_000, ge=1)
     max_repeated_tool_calls: int = Field(default=3, ge=1, le=20)
     max_tool_result_chars: int = Field(default=20_000, ge=1, le=1_000_000)
@@ -65,7 +70,7 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = Field(default=1.0, gt=0, le=60)
     lease_seconds: float = Field(default=30.0, gt=0, le=3_600)
     heartbeat_seconds: float = Field(default=10.0, gt=0, le=1_200)
-    snapshot_schema_version: int = Field(default=1, ge=1)
+    snapshot_schema_version: int = Field(default=2, ge=1, le=2)
     artifact_root: Path = Path("./workspace/artifacts")
     max_retry_attempts: int = Field(default=3, ge=1, le=100)
     retry_base_seconds: float = Field(default=1.0, gt=0, le=3_600)
@@ -79,7 +84,7 @@ class Settings(BaseSettings):
     search_api_key: SecretStr | None = None
 
     # 阶段三 Skill 默认只使用低风险、非 Shell 能力。
-    code_version: str = Field(default="0.3.0.dev0", min_length=1, max_length=128)
+    code_version: str = Field(default="0.4.0.dev0", min_length=1, max_length=128)
     skill_schema_version: int = Field(default=1, ge=1)
     skill_max_steps: int = Field(default=20, ge=1, le=100)
     skill_max_sources: int = Field(default=10, ge=1, le=100)
@@ -96,6 +101,19 @@ class Settings(BaseSettings):
     )
     eval_dataset_root: Path = Path("./evals/datasets")
     skill_extractor_model: str | None = Field(default=None, max_length=256)
+    memory_extractor_model: str | None = Field(default=None, max_length=256)
+    retrieval_backend: Literal["lexical", "hybrid"] = "lexical"
+    memory_retrieval_enabled: bool = False
+    archive_retrieval_enabled: bool = False
+    embedding_model: str = "mock-hash-v1"
+    embedding_api_key: SecretStr | None = None
+    embedding_base_url: AnyHttpUrl | None = None
+    memory_retrieval_top_k: int = Field(default=3, ge=0, le=10)
+    retrieval_min_lexical_score: float = Field(default=0.1, gt=0)
+    retrieval_max_vector_distance: float = Field(default=0.35, ge=0, lt=1)
+    retrieval_rrf_k: int = Field(default=60, ge=1)
+    retrieval_skill_budget: int = Field(default=4000, ge=0, le=32000)
+    retrieval_memory_budget: int = Field(default=2000, ge=0, le=32000)
     eval_repeats: int = Field(default=3, ge=1, le=100)
     eval_poll_seconds: float = Field(default=1.0, gt=0, le=60)
     eval_lease_seconds: float = Field(default=60.0, gt=0, le=3_600)
@@ -113,9 +131,16 @@ class Settings(BaseSettings):
             raise ValueError("database_url must use postgresql+asyncpg or sqlite+aiosqlite")
         return normalized
 
-    @field_validator("skill_extractor_model", mode="before")
+    @field_validator(
+        "skill_extractor_model",
+        "memory_extractor_model",
+        "embedding_base_url",
+        "embedding_api_key",
+        "base_url",
+        mode="before",
+    )
     @classmethod
-    def normalize_optional_extractor_model(cls, value: object) -> object:
+    def normalize_optional_connection_and_model(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
             return None
         return value
@@ -123,6 +148,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_provider_requirements(self) -> Self:
         """仅在使用真实模型服务时要求提供连接信息。"""
+
+        if (
+            self.retrieval_backend == "hybrid"
+            or self.memory_retrieval_enabled
+            or self.archive_retrieval_enabled
+        ) and self.snapshot_schema_version != 2:
+            raise ValueError("context retrieval requires snapshot_version 2")
 
         if self.provider is ProviderName.OPENAI_COMPATIBLE:
             missing: list[str] = []
@@ -136,6 +168,13 @@ class Settings(BaseSettings):
                 fields = ", ".join(missing)
                 raise ValueError(f"openai_compatible provider requires: {fields}")
 
+        if self.context_policy == "bounded":
+            if self.context_window_tokens <= self.max_output_tokens + self.context_safety_margin:
+                raise ValueError("context window must exceed output reserve and safety margin")
+            if self.provider is ProviderName.OPENAI_COMPATIBLE and (
+                "context_window_tokens" not in self.model_fields_set
+            ):
+                raise ValueError("bounded real provider requires EVOAGENT_CONTEXT_WINDOW_TOKENS")
         self.workspace = self.workspace.expanduser().resolve(strict=False)
         if "artifact_root" not in self.model_fields_set:
             self.artifact_root = self.workspace / "artifacts"

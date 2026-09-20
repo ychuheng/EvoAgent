@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -78,16 +79,49 @@ class ApprovalStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+DEFAULT_WORKSPACE_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
+@event.listens_for(Base.metadata, "before_create")
+def enable_vector_extension(_target, connection, **_kwargs):
+    if connection.dialect.name == "postgresql":
+        connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
+
+
+class WorkspaceRecord(Base):
+    __tablename__ = "workspaces"
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+@event.listens_for(WorkspaceRecord.__table__, "after_create")
+def seed_local_workspace(_target, connection, **_kwargs):
+    connection.execute(
+        WorkspaceRecord.__table__.insert().values(
+            id=DEFAULT_WORKSPACE_ID, name="Local workspace", created_at=utc_now()
+        )
+    )
+
+
 class SessionRecord(Base):
     __tablename__ = "sessions"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     title: Mapped[str] = mapped_column(String(256))
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), default=DEFAULT_WORKSPACE_ID
+    )
+    next_message_sequence: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class MessageRecord(Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        UniqueConstraint("session_id", "session_sequence"),
+        UniqueConstraint("run_id", "kind"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     session_id: Mapped[UUID] = mapped_column(
@@ -96,6 +130,12 @@ class MessageRecord(Base):
     role: Mapped[str] = mapped_column(String(32))
     content: Mapped[str] = mapped_column(Text)
     token_count: Mapped[int | None] = mapped_column(Integer)
+    task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id", ondelete="RESTRICT"))
+    run_id: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
+    session_sequence: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32), default="legacy")
+    content_hash: Mapped[str] = mapped_column(String(71))
+    backfill: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -116,6 +156,8 @@ class TaskRecord(Base):
         enum_column(TaskStatus, "task_status"), default=TaskStatus.CREATED
     )
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    history_before_sequence: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    lease_epoch: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     lease_owner: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -153,6 +195,9 @@ class RunRecord(Base):
     run_mode: Mapped[str] = mapped_column(String(32), default="retrieval")
     pinned_skill_version_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("skill_versions.id", ondelete="RESTRICT")
+    )
+    skill_selection_frozen: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
     )
     config_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     config_hash: Mapped[str | None] = mapped_column(String(71))
@@ -240,6 +285,250 @@ class RunSnapshotRecord(Base):
     context_ref: Mapped[str | None] = mapped_column(String(1_024))
     schema_version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ContextRevisionRecord(Base):
+    __tablename__ = "context_revisions"
+    __table_args__ = (
+        UniqueConstraint("run_id", "revision", name="uq_context_revision_number"),
+        UniqueConstraint("run_id", "dedupe_key", name="uq_context_revision_dedupe"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
+    revision: Mapped[int] = mapped_column(Integer)
+    parent_id: Mapped[UUID | None] = mapped_column(ForeignKey("context_revisions.id"))
+    dedupe_key: Mapped[str] = mapped_column(String(71))
+    input_hash: Mapped[str] = mapped_column(String(71))
+    policy_hash: Mapped[str] = mapped_column(String(71))
+    artifact_id: Mapped[UUID] = mapped_column(ForeignKey("artifacts.id", ondelete="RESTRICT"))
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON)
+    estimate: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MemoryEntryRecord(Base):
+    __tablename__ = "memory_entries"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "scope_key", "fact_key"),
+        CheckConstraint(
+            "(scope_key = 'workspace' AND session_id IS NULL) OR "
+            "(scope_key <> 'workspace' AND session_id IS NOT NULL)",
+            name="memory_scope",
+        ),
+        ForeignKeyConstraint(
+            ["id", "current_version_id"],
+            ["memory_versions.entry_id", "memory_versions.id"],
+            use_alter=True,
+            name="fk_memory_current_version",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="RESTRICT"))
+    session_id: Mapped[UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="RESTRICT"))
+    scope_key: Mapped[str] = mapped_column(String(64))
+    fact_key: Mapped[str] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(32), default="proposed")
+    current_version_id: Mapped[UUID | None] = mapped_column(Uuid)
+    lock_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MemoryVersionRecord(Base):
+    __tablename__ = "memory_versions"
+    __table_args__ = (
+        UniqueConstraint("entry_id", "revision", name="uq_memory_revision"),
+        UniqueConstraint("entry_id", "id", name="uq_memory_entry_version"),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="memory_confidence"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    entry_id: Mapped[UUID] = mapped_column(ForeignKey("memory_entries.id", ondelete="RESTRICT"))
+    revision: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))
+    content: Mapped[str | None] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(71))
+    status: Mapped[str] = mapped_column(String(32), default="proposed")
+    confidence: Mapped[float] = mapped_column(default=0.5)
+    confidence_method: Mapped[str] = mapped_column(String(128))
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    supersedes_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("memory_versions.id"))
+    origin_type: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MemorySourceRecord(Base):
+    __tablename__ = "memory_sources"
+    __table_args__ = (UniqueConstraint("version_id", "message_id"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    version_id: Mapped[UUID] = mapped_column(ForeignKey("memory_versions.id", ondelete="RESTRICT"))
+    message_id: Mapped[UUID] = mapped_column(ForeignKey("messages.id", ondelete="RESTRICT"))
+    source_hash: Mapped[str] = mapped_column(String(71))
+    locator: Mapped[str] = mapped_column(String(128))
+
+
+class MemoryEventRecord(Base):
+    __tablename__ = "memory_events"
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    entry_id: Mapped[UUID] = mapped_column(ForeignKey("memory_entries.id", ondelete="RESTRICT"))
+    version_id: Mapped[UUID | None] = mapped_column(ForeignKey("memory_versions.id"))
+    action: Mapped[str] = mapped_column(String(32))
+    actor: Mapped[str] = mapped_column(String(128))
+    reason: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SessionArchiveRecord(Base):
+    __tablename__ = "session_archives"
+    __table_args__ = (
+        UniqueConstraint("session_id", "start_sequence", "end_sequence", "source_hash"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(ForeignKey("sessions.id", ondelete="RESTRICT"))
+    start_sequence: Mapped[int] = mapped_column(Integer)
+    end_sequence: Mapped[int] = mapped_column(Integer)
+    source_hash: Mapped[str] = mapped_column(String(71))
+    summary: Mapped[str | None] = mapped_column(Text)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RunMemoryReferenceRecord(Base):
+    __tablename__ = "run_memory_references"
+    __table_args__ = (UniqueConstraint("run_id", "version_id"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
+    version_id: Mapped[UUID] = mapped_column(ForeignKey("memory_versions.id", ondelete="RESTRICT"))
+    content_hash: Mapped[str] = mapped_column(String(71))
+
+
+class MaintenanceJobRecord(Base):
+    __tablename__ = "maintenance_jobs"
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    dedupe_key: Mapped[str] = mapped_column(String(256), unique=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    lease_owner: Mapped[str | None] = mapped_column(String(128))
+    lease_epoch: Mapped[int] = mapped_column(Integer, default=0)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+@event.listens_for(MemoryVersionRecord, "before_update")
+def protect_memory_content(_mapper, _connection, record):
+    for field in (
+        "entry_id",
+        "revision",
+        "kind",
+        "content_hash",
+        "confidence",
+        "confidence_method",
+        "valid_from",
+        "expires_at",
+        "origin_type",
+        "supersedes_version_id",
+    ):
+        if inspect(record).attrs[field].history.has_changes():
+            raise ValueError("memory version identity is immutable")
+    if inspect(record).attrs.content.history.has_changes() and (
+        record.content is not None or record.status != "erased"
+    ):
+        raise ValueError("memory content is immutable except explicit erase")
+
+
+class EmbeddingProfileRecord(Base):
+    __tablename__ = "embedding_profiles"
+    __table_args__ = (CheckConstraint("dimension = 1536", name="fixed_dimension"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    model: Mapped[str] = mapped_column(String(256), unique=True)
+    dimension: Mapped[int] = mapped_column(Integer, default=1536)
+    metric: Mapped[str] = mapped_column(String(32), default="cosine")
+    preprocessing: Mapped[str] = mapped_column(String(64), default="text-v1")
+    active_generation: Mapped[int] = mapped_column(Integer, default=0)
+    next_generation: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class IndexGenerationRecord(Base):
+    __tablename__ = "index_generations"
+    __table_args__ = (UniqueConstraint("profile_id", "generation"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    profile_id: Mapped[UUID] = mapped_column(ForeignKey("embedding_profiles.id"))
+    generation: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default="building")
+    manifest: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RetrievalDocumentRecord(Base):
+    __tablename__ = "retrieval_documents"
+    __table_args__ = (
+        UniqueConstraint("source_key"),
+        CheckConstraint(
+            "(CASE WHEN skill_version_id IS NULL THEN 0 ELSE 1 END + "
+            "CASE WHEN memory_version_id IS NULL THEN 0 ELSE 1 END + "
+            "CASE WHEN archive_id IS NULL THEN 0 ELSE 1 END) = 1",
+            name="one_source",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    source_key: Mapped[str] = mapped_column(String(128))
+    skill_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("skill_versions.id"))
+    memory_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("memory_versions.id"))
+    archive_id: Mapped[UUID | None] = mapped_column(ForeignKey("session_archives.id"))
+    workspace_id: Mapped[UUID | None] = mapped_column(ForeignKey("workspaces.id"))
+    session_id: Mapped[UUID | None] = mapped_column(ForeignKey("sessions.id"))
+    input_hash: Mapped[str] = mapped_column(String(71))
+    source_hash: Mapped[str] = mapped_column(String(71))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class DocumentEmbeddingRecord(Base):
+    __tablename__ = "document_embeddings"
+    __table_args__ = (UniqueConstraint("document_id", "profile_id", "generation", "input_hash"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(ForeignKey("retrieval_documents.id"))
+    profile_id: Mapped[UUID] = mapped_column(ForeignKey("embedding_profiles.id"))
+    generation: Mapped[int] = mapped_column(Integer)
+    input_hash: Mapped[str] = mapped_column(String(71))
+    from evoagent.retrieval.vector import VECTOR
+
+    vector: Mapped[list[float]] = mapped_column(VECTOR)
+
+
+class RetrievalBatchRecord(Base):
+    __tablename__ = "retrieval_batches"
+    __table_args__ = (UniqueConstraint("run_id", "purpose"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"))
+    purpose: Mapped[str] = mapped_column(String(32), default="context")
+    query_hash: Mapped[str] = mapped_column(String(71))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    session_id: Mapped[UUID] = mapped_column(ForeignKey("sessions.id"))
+    profile_id: Mapped[UUID | None] = mapped_column(ForeignKey("embedding_profiles.id"))
+    generation: Mapped[int | None] = mapped_column(Integer)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON)
+    degraded: Mapped[str | None] = mapped_column(String(128))
+    selected_count: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RetrievalSelectionRecord(Base):
+    __tablename__ = "retrieval_selections"
+    __table_args__ = (UniqueConstraint("batch_id", "source_key"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    batch_id: Mapped[UUID] = mapped_column(ForeignKey("retrieval_batches.id"))
+    source_key: Mapped[str] = mapped_column(String(128))
+    source_hash: Mapped[str] = mapped_column(String(71))
+    text_hash: Mapped[str] = mapped_column(String(71))
+    text: Mapped[str | None] = mapped_column(Text)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON)
+    rank: Mapped[int | None] = mapped_column(Integer)
+    omission_reason: Mapped[str | None] = mapped_column(String(64))
 
 
 class ToolEffectRecord(Base):
@@ -525,6 +814,11 @@ def _reject_changed_fields(record: object, field_names: tuple[str, ...]) -> None
     changed = [name for name in field_names if state.attrs[name].history.has_changes()]
     if changed:
         raise ValueError(f"immutable record fields cannot change: {', '.join(changed)}")
+
+
+@event.listens_for(EmbeddingProfileRecord, "before_update")
+def protect_embedding_identity(_mapper, _connection, record):
+    _reject_changed_fields(record, ("model", "dimension", "metric", "preprocessing"))
 
 
 @event.listens_for(SkillVersionRecord, "before_update")

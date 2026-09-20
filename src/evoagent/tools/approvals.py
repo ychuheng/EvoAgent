@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from evoagent.db.models import (
     ApprovalStatus,
     RunRecord,
+    TaskRecord,
     ToolApprovalRecord,
     ToolCallRecord,
     ToolEffectRecord,
@@ -42,9 +43,25 @@ class ApprovalService:
         response: str | None = None,
     ) -> ToolApprovalRecord:
         async with UnitOfWork(self._session_factory) as unit:
+            reference = await unit.session.get(ToolApprovalRecord, approval_id)
+            if reference is None:
+                raise ApprovalServiceError(f"approval does not exist: {approval_id}")
+            task = await unit.session.scalar(
+                select(TaskRecord).where(TaskRecord.id == reference.task_id).with_for_update()
+            )
+            run = await unit.session.scalar(
+                select(RunRecord)
+                .where(RunRecord.task_id == reference.task_id)
+                .order_by(RunRecord.created_at.desc())
+                .with_for_update()
+                .limit(1)
+            )
+            if task is None or run is None:
+                raise ApprovalServiceError("approval task or run does not exist")
             approval = await unit.session.scalar(
                 select(ToolApprovalRecord)
                 .where(ToolApprovalRecord.id == approval_id)
+                .execution_options(populate_existing=True)
                 .with_for_update()
             )
             if approval is None:
@@ -75,19 +92,19 @@ class ApprovalService:
             approval.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
             approval.response = normalized_response
             approval.decided_at = datetime.now(UTC)
-            task = await unit.tasks.get(approval.task_id)
-            run = await unit.session.scalar(
-                select(RunRecord)
-                .where(RunRecord.task_id == task.id)
-                .order_by(RunRecord.created_at.desc())
+            await unit.session.flush()
+            pending = await unit.session.scalar(
+                select(ToolApprovalRecord.id)
+                .where(
+                    ToolApprovalRecord.task_id == task.id,
+                    ToolApprovalRecord.status == ApprovalStatus.PENDING,
+                )
                 .limit(1)
             )
-            if run is None:
-                raise RuntimeError(f"task has no run: {task.id}")
-            if task.status is TaskStatus.WAITING_USER:
+            if pending is None and task.status is TaskStatus.WAITING_USER:
                 task.status = TaskStatus.QUEUED
                 task.lock_version += 1
-            if run.status is PersistentRunStatus.WAITING_USER:
+            if pending is None and run.status is PersistentRunStatus.WAITING_USER:
                 run.status = PersistentRunStatus.QUEUED
                 run.lock_version += 1
             await unit.events.append(

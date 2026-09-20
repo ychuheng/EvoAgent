@@ -310,6 +310,12 @@ class EvalCoordinator:
                     )
                     unit.runs.add(run)
                     await unit.session.flush()
+                    from evoagent.sessions.service import append_message
+
+                    message = await append_message(
+                        unit.session, task=task, run=run, kind="goal", role="user", content=goal
+                    )
+                    task.history_before_sequence = message.session_sequence
                     await unit.events.append(
                         run_id=run.id,
                         event_type="eval.run.queued" if queued else "eval.run.waiting_pair",

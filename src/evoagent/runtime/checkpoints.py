@@ -7,8 +7,10 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.core.models import LoopState
-from evoagent.db.models import RunSnapshotRecord
+from evoagent.db.models import ContextRevisionRecord, RunSnapshotRecord
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.memory.repository import check_run_references
+from evoagent.tasks.lease_guard import LeaseGuard
 
 
 class SnapshotCompatibilityError(ValueError):
@@ -24,15 +26,22 @@ class PersistentCheckpointStore:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         schema_version: int = 1,
+        lease_guard: LeaseGuard | None = None,
     ) -> None:
         if schema_version < 1:
             raise ValueError("snapshot schema version must be positive")
+        if lease_guard is not None and lease_guard.lease.run_id != run_id:
+            raise ValueError("run does not match lease")
+        self._lease_guard = lease_guard
         self._run_id = run_id
         self._session_factory = session_factory
         self._schema_version = schema_version
 
     async def save(self, state: LoopState) -> None:
         async with UnitOfWork(self._session_factory) as unit:
+            if self._lease_guard is not None:
+                await self._lease_guard.check(unit.session)
+                await check_run_references(unit.session, self._run_id)
             event = await unit.events.append(
                 run_id=self._run_id,
                 event_type="snapshot.saved",
@@ -62,6 +71,19 @@ class PersistentCheckpointStore:
                     "snapshot schema version does not match current runtime"
                 )
             try:
-                return LoopState.model_validate(snapshot.state)
+                state = LoopState.model_validate(snapshot.state)
+                if state.schema_version != snapshot.schema_version:
+                    raise SnapshotCompatibilityError("snapshot body version mismatch")
+                if state.context_revision_id:
+                    revision = await unit.session.get(
+                        ContextRevisionRecord, state.context_revision_id
+                    )
+                    if (
+                        revision is None
+                        or revision.run_id != self._run_id
+                        or revision.summary.get("erased")
+                    ):
+                        raise SnapshotCompatibilityError("context revision missing or erased")
+                return state
             except ValidationError as error:
                 raise SnapshotCompatibilityError("snapshot state is invalid") from error

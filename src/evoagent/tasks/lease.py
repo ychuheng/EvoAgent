@@ -1,24 +1,22 @@
 """PostgreSQL 任务领取、租约续期与终态提交。"""
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.db.models import RunRecord, TaskRecord
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.tasks.lease_guard import LeaseGuard, database_now
+from evoagent.tasks.lease_guard import LeaseLostError as LeaseLostError
 from evoagent.tasks.state_machine import (
     PersistentRunStatus,
     TaskStatus,
     ensure_run_transition,
     ensure_task_transition,
 )
-
-
-class LeaseLostError(RuntimeError):
-    """Worker 已不再拥有任务租约，因而不能提交结果。"""
 
 
 class TaskCancellationRequested(RuntimeError):
@@ -32,6 +30,7 @@ class JobLease:
     owner: str
     expires_at: datetime
     attempt: int
+    epoch: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,8 +73,8 @@ class JobLeaseManager:
         normalized_owner = owner.strip()
         if not normalized_owner:
             raise ValueError("lease owner cannot be blank")
-        current_time = now or datetime.now(UTC)
         async with UnitOfWork(self._session_factory) as unit:
+            current_time = now or await database_now(unit.session)
             statement = (
                 select(TaskRecord)
                 .where(
@@ -114,6 +113,7 @@ class JobLeaseManager:
             task.lease_expires_at = expires_at
             task.heartbeat_at = current_time
             task.attempt_count += 1
+            task.lease_epoch += 1
             task.lock_version += 1
             run.status = PersistentRunStatus.RUNNING
             run.started_at = run.started_at or current_time
@@ -121,7 +121,11 @@ class JobLeaseManager:
             await unit.events.append(
                 run_id=run.id,
                 event_type="worker.claimed",
-                payload={"worker_id": normalized_owner, "attempt": task.attempt_count},
+                payload={
+                    "worker_id": normalized_owner,
+                    "attempt": task.attempt_count,
+                    "lease_epoch": task.lease_epoch,
+                },
                 created_at=current_time,
             )
             await unit.commit()
@@ -131,6 +135,7 @@ class JobLeaseManager:
                 owner=normalized_owner,
                 expires_at=expires_at,
                 attempt=task.attempt_count,
+                epoch=task.lease_epoch,
             )
 
     async def heartbeat(
@@ -141,37 +146,24 @@ class JobLeaseManager:
     ) -> JobLease:
         """只有当前租约拥有者才能续期尚未过期的租约。"""
 
-        current_time = now or datetime.now(UTC)
-        expires_at = current_time + self._lease_duration
         async with self._session_factory() as session, session.begin():
-            statement = (
-                update(TaskRecord)
-                .where(
-                    TaskRecord.id == lease.task_id,
-                    TaskRecord.lease_owner == lease.owner,
-                    TaskRecord.lease_expires_at > current_time,
-                    TaskRecord.status.in_(
-                        (TaskStatus.RUNNING, TaskStatus.WAITING_TOOL, TaskStatus.RECOVERING)
-                    ),
-                )
-                .values(heartbeat_at=current_time, lease_expires_at=expires_at)
-                .returning(TaskRecord.id)
-            )
-            if (await session.execute(statement)).scalar_one_or_none() is None:
-                raise LeaseLostError(f"lease is no longer owned by {lease.owner}")
+            task, _ = await LeaseGuard(lease).check(session, now=now)
+            current_time = now or await database_now(session)
+            expires_at = current_time + self._lease_duration
+            task.heartbeat_at = current_time
+            task.lease_expires_at = expires_at
         return JobLease(
             task_id=lease.task_id,
             run_id=lease.run_id,
             owner=lease.owner,
             expires_at=expires_at,
             attempt=lease.attempt,
+            epoch=lease.epoch,
         )
 
     async def cancellation_requested(self, lease: JobLease) -> bool:
         async with self._session_factory() as session:
-            task = await session.get(TaskRecord, lease.task_id)
-            if task is None or task.lease_owner != lease.owner:
-                raise LeaseLostError(f"lease is no longer owned by {lease.owner}")
+            task, _ = await LeaseGuard(lease).check(session)
             return task.cancel_requested
 
     async def finalize(
@@ -193,22 +185,21 @@ class JobLeaseManager:
             task_target = _RUN_TO_TASK_TERMINAL[result.status]
         else:
             raise ValueError("execution result must be terminal or retrying")
-        current_time = now or datetime.now(UTC)
         async with UnitOfWork(self._session_factory) as unit:
-            task = await unit.session.scalar(
-                select(TaskRecord)
-                .where(
-                    TaskRecord.id == lease.task_id,
-                    TaskRecord.lease_owner == lease.owner,
-                    TaskRecord.lease_expires_at > current_time,
+            current_time = now or await database_now(unit.session)
+            task, run = await LeaseGuard(lease).check(unit.session, now=now)
+            from evoagent.memory.repository import check_run_references
+            from evoagent.memory.schema import MemoryError
+
+            try:
+                await check_run_references(unit.session, run.id)
+            except MemoryError:
+                result = TaskExecutionResult(
+                    status=PersistentRunStatus.FAILED,
+                    error_code="context_source_revoked",
+                    error_message="memory source was revoked",
                 )
-                .with_for_update()
-            )
-            run = await unit.session.scalar(
-                select(RunRecord).where(RunRecord.id == lease.run_id).with_for_update()
-            )
-            if task is None or run is None:
-                raise LeaseLostError(f"lease is no longer owned by {lease.owner}")
+                task_target = TaskStatus.FAILED
             ensure_task_transition(task.status, task_target)
             ensure_run_transition(run.status, result.status)
             task.status = task_target
@@ -227,6 +218,9 @@ class JobLeaseManager:
                 else current_time
             )
             run.lock_version += 1
+            from evoagent.sessions.service import project_terminal
+
+            await project_terminal(unit.session, task, run)
             await unit.events.append(
                 run_id=run.id,
                 event_type=(
@@ -252,9 +246,9 @@ class JobLeaseManager:
     async def recover_expired(self, *, now: datetime | None = None, limit: int = 100) -> int:
         """把失去心跳的运行中任务标为 RECOVERING，等待恢复服务决策。"""
 
-        current_time = now or datetime.now(UTC)
         recovered = 0
         async with UnitOfWork(self._session_factory) as unit:
+            current_time = now or await database_now(unit.session)
             tasks = tuple(
                 await unit.session.scalars(
                     select(TaskRecord)
@@ -268,7 +262,13 @@ class JobLeaseManager:
                 )
             )
             for task in tasks:
-                run = await unit.runs.latest_for_task(task.id)
+                run = await unit.session.scalar(
+                    select(RunRecord)
+                    .where(RunRecord.task_id == task.id)
+                    .order_by(RunRecord.created_at.desc())
+                    .with_for_update()
+                    .limit(1)
+                )
                 if run is None:
                     continue
                 ensure_task_transition(task.status, TaskStatus.RECOVERING)
@@ -294,9 +294,9 @@ class JobLeaseManager:
     async def promote_due_retries(self, *, now: datetime | None = None, limit: int = 100) -> int:
         """把退避时间已到的任务重新放回 QUEUED 队列。"""
 
-        current_time = now or datetime.now(UTC)
         promoted = 0
         async with UnitOfWork(self._session_factory) as unit:
+            current_time = now or await database_now(unit.session)
             tasks = tuple(
                 await unit.session.scalars(
                     select(TaskRecord)
@@ -310,7 +310,13 @@ class JobLeaseManager:
                 )
             )
             for task in tasks:
-                run = await unit.runs.latest_for_task(task.id)
+                run = await unit.session.scalar(
+                    select(RunRecord)
+                    .where(RunRecord.task_id == task.id)
+                    .order_by(RunRecord.created_at.desc())
+                    .with_for_update()
+                    .limit(1)
+                )
                 if run is None:
                     continue
                 ensure_task_transition(task.status, TaskStatus.QUEUED)
@@ -329,3 +335,10 @@ class JobLeaseManager:
                 promoted += 1
             await unit.commit()
         return promoted
+
+    async def recover_pending(self, *, schema_version: int = 1) -> int:
+        from evoagent.runtime.recovery import RecoveryService
+
+        return await RecoveryService(
+            self._session_factory, snapshot_schema_version=schema_version
+        ).recover_pending()

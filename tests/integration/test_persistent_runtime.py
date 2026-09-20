@@ -126,7 +126,7 @@ async def test_recovery_resumes_from_latest_legal_snapshot(runtime_environment) 
 
     decision = await RecoveryService(
         database.session_factory,
-        snapshot_schema_version=1,
+        snapshot_schema_version=settings.snapshot_schema_version,
     ).recover(aggregate.task.id)
     assert decision.action is RecoveryAction.RESUME
 
@@ -151,3 +151,32 @@ async def test_recovery_resumes_from_latest_legal_snapshot(runtime_environment) 
     assert "recovery.started" in event_types
     assert "recovery.decided" in event_types
     assert "recovery.completed" in event_types
+
+
+async def test_changed_context_policy_fails_recovery_without_calling_provider(runtime_environment):
+    database, settings, service, session_id = runtime_environment
+    aggregate = await service.create_task(
+        session_id=session_id,
+        goal="冻结配置",
+        provider="mock",
+        model="mock-model",
+    )
+    manager = JobLeaseManager(database.session_factory, lease_seconds=30)
+    lease = await manager.claim_next("first")
+    await runner(database, settings, MockProvider([response("first")])).handle(lease)
+    await manager.recover_expired(now=datetime.now(UTC) + timedelta(seconds=60))
+    changed = settings.model_copy(update={"context_window_tokens": 64000})
+    provider = MockProvider([response("should not run")])
+    worker = JobWorker(
+        worker_id="replacement",
+        lease_manager=manager,
+        handler=runner(database, changed, provider),
+        heartbeat_seconds=1,
+        poll_seconds=0.01,
+    )
+    assert await worker.run_once()
+    assert provider.requests == ()
+    async with database.session_factory() as session:
+        run = await session.get(RunRecord, aggregate.run.id)
+        assert run.status == PersistentRunStatus.FAILED
+        assert run.error_code == "snapshot_incompatible"

@@ -22,6 +22,7 @@ from evoagent.db.models import (
     TurnRecord,
 )
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.tasks.lease_guard import LeaseGuard
 from evoagent.tools.approvals import ApprovalRequiredError
 from evoagent.tools.base import ToolInstance
 from evoagent.tools.execution import ToolExecutionDirective
@@ -44,7 +45,11 @@ class PersistentToolMiddleware:
         run_id: UUID,
         session_factory: async_sessionmaker[AsyncSession],
         policy: PermissionPolicy,
+        lease_guard: LeaseGuard | None = None,
     ) -> None:
+        if lease_guard is not None and lease_guard.lease.run_id != run_id:
+            raise ValueError("run does not match lease")
+        self._lease_guard = lease_guard
         self._task_id = task_id
         self._run_id = run_id
         self._session_factory = session_factory
@@ -55,6 +60,8 @@ class PersistentToolMiddleware:
     ) -> ToolExecutionDirective:
         decision = self._policy.evaluate(tool, arguments)
         async with UnitOfWork(self._session_factory) as unit:
+            if self._lease_guard is not None:
+                await self._lease_guard.check(unit.session)
             record = await self._get_or_create_call(unit, call, decision.effective_risk.value)
             approval = await unit.session.scalar(
                 select(ToolApprovalRecord).where(ToolApprovalRecord.tool_call_id == record.id)
@@ -149,6 +156,8 @@ class PersistentToolMiddleware:
                         and approval.response == "retry"
                     ):
                         effect.status = ToolEffectStatus.EXECUTING
+                        effect.tool_call_id = record.id
+                        approval.response = None  # retry 是一次性授权
                         record.status = ToolCallStatus.RUNNING
                         await unit.commit()
                         return ToolExecutionDirective(token=EffectToken(record.id, effect.id))
@@ -185,6 +194,11 @@ class PersistentToolMiddleware:
                         )
                         unit.session.add(approval)
                         await unit.session.flush()
+                    elif approval.status is not ApprovalStatus.PENDING:
+                        approval.status = ApprovalStatus.PENDING
+                        approval.response = None
+                        approval.decided_at = None
+                        approval.reason = "side effect outcome is unknown; confirm again"
                     await unit.commit()
                     raise ApprovalRequiredError(approval.id, "side effect outcome is unknown")
                 if effect is None:
@@ -205,6 +219,15 @@ class PersistentToolMiddleware:
         if not isinstance(token, EffectToken):
             return
         async with UnitOfWork(self._session_factory) as unit:
+            if self._lease_guard is not None:
+                await self._lease_guard.check(unit.session)
+                from evoagent.memory.repository import check_run_references
+                from evoagent.memory.schema import MemoryError
+
+                try:
+                    await check_run_references(unit.session, self._run_id)
+                except MemoryError:
+                    content = "[context_source_revoked: output body removed]"
             call = await unit.session.get(ToolCallRecord, token.tool_call_id)
             if call is not None:
                 call.status = ToolCallStatus.SUCCEEDED
@@ -222,6 +245,8 @@ class PersistentToolMiddleware:
         if not isinstance(token, EffectToken):
             return
         async with UnitOfWork(self._session_factory) as unit:
+            if self._lease_guard is not None:
+                await self._lease_guard.check(unit.session)
             call = await unit.session.get(ToolCallRecord, token.tool_call_id)
             if call is not None:
                 call.status = ToolCallStatus.FAILED

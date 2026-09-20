@@ -1,8 +1,5 @@
 """小规模 Skill 的可解释 BM25 检索、过滤与选择留痕。"""
 
-import math
-import re
-from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -13,23 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from evoagent.core.models import ToolRisk
 from evoagent.db.models import RunSkillSelectionRecord, SkillVersionRecord
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.retrieval.lexical import bm25, tokenize  # noqa: F401
 from evoagent.runtime.run_config import RunMode
 from evoagent.skills.schema import SkillDefinition
+from evoagent.tasks.lease_guard import LeaseGuard
 from evoagent.tools.registry import ToolRegistry
-
-_ASCII_WORD = re.compile(r"[a-zA-Z0-9_]+")
-_CJK_RUN = re.compile(r"[\u3400-\u9fff]+")
-
-
-def tokenize(text: str) -> tuple[str, ...]:
-    """英文按词、中文按单字和二元词片切分，结果稳定且不依赖外部分词器。"""
-
-    lowered = text.lower()
-    tokens = _ASCII_WORD.findall(lowered)
-    for run in _CJK_RUN.findall(lowered):
-        tokens.extend(run)
-        tokens.extend(run[index : index + 2] for index in range(len(run) - 1))
-    return tuple(tokens)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,32 +46,16 @@ class BM25Retriever:
     def search(
         self, query: str, documents: tuple[SkillDocument, ...]
     ) -> tuple[RetrievalMatch, ...]:
-        if not documents:
-            return ()
-        query_terms = tuple(dict.fromkeys(tokenize(query)))
-        tokenized = [tokenize(document.text) for document in documents]
-        average_length = sum(map(len, tokenized)) / len(tokenized) or 1.0
-        document_frequency = Counter(
-            term for tokens in tokenized for term in set(tokens) if term in query_terms
+        by_id = {document.version_id: document for document in documents}
+        return tuple(
+            RetrievalMatch(by_id[key], score, terms)
+            for key, score, terms in bm25(
+                query,
+                {key: document.text for key, document in by_id.items()},
+                k1=self._k1,
+                b=self._b,
+            )
         )
-        matches: list[RetrievalMatch] = []
-        for document, tokens in zip(documents, tokenized, strict=True):
-            frequencies = Counter(tokens)
-            matched = tuple(term for term in query_terms if frequencies[term])
-            score = 0.0
-            for term in matched:
-                frequency = frequencies[term]
-                inverse = math.log(
-                    1
-                    + (len(documents) - document_frequency[term] + 0.5)
-                    / (document_frequency[term] + 0.5)
-                )
-                denominator = frequency + self._k1 * (
-                    1 - self._b + self._b * len(tokens) / average_length
-                )
-                score += inverse * frequency * (self._k1 + 1) / denominator
-            matches.append(RetrievalMatch(document, score, matched))
-        return tuple(sorted(matches, key=lambda item: (-item.score, str(item.document.version_id))))
 
 
 class SkillRetrievalService:
@@ -98,7 +67,9 @@ class SkillRetrievalService:
         top_k: int = 1,
         minimum_score: float = 0.1,
         max_risk: ToolRisk = ToolRisk.R1,
+        lease_guard: LeaseGuard | None = None,
     ) -> None:
+        self._lease_guard = lease_guard
         self._session_factory = session_factory
         self._registry = registry
         self._top_k = top_k
@@ -108,6 +79,10 @@ class SkillRetrievalService:
 
     async def select(self, run_id: UUID, goal: str) -> tuple[RetrievalMatch, ...]:
         async with UnitOfWork(self._session_factory) as unit:
+            if self._lease_guard is not None:
+                if self._lease_guard.lease.run_id != run_id:
+                    raise ValueError("retrieval run does not match lease")
+                await self._lease_guard.check(unit.session)
             run = await unit.runs.get(run_id)
             saved = tuple(
                 await unit.session.scalars(
@@ -120,8 +95,9 @@ class SkillRetrievalService:
                 return tuple([await self._restore(unit, item) for item in saved])
             # 首次运行已经明确“无命中”后，配置快照就是这个负选择的锁。
             # 恢复时不能因为后来发布了新 Skill 而悄悄改变上下文。
-            if run.config_snapshot is not None:
+            if run.skill_selection_frozen or run.config_snapshot is not None:
                 return ()
+            run.skill_selection_frozen = True
             mode = RunMode(run.run_mode)
             if mode is RunMode.BASELINE or self._top_k == 0:
                 await unit.events.append(

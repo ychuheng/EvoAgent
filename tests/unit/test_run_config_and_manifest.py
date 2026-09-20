@@ -55,6 +55,16 @@ def test_run_config_rejects_partial_or_baseline_skill_identity() -> None:
         )
 
 
+def test_full_selection_order_and_second_skill_change_run_identity():
+    first = {"version_id": str(uuid4()), "content_hash": sha256_text("first")}
+    second = {"version_id": str(uuid4()), "content_hash": sha256_text("second")}
+    a = snapshot(run_mode=RunMode.RETRIEVAL, selected_skills=[first, second])
+    b = snapshot(run_mode=RunMode.RETRIEVAL, selected_skills=[first])
+    c = snapshot(run_mode=RunMode.RETRIEVAL, selected_skills=[second, first])
+    assert len({a.content_hash(), b.content_hash(), c.content_hash()}) == 3
+    assert a.comparable_with(b)
+
+
 def test_tool_manifest_hash_tracks_implementation_version() -> None:
     registry = ToolRegistry([CalculatorTool()])
     first = registry.manifest_hash()
@@ -66,3 +76,25 @@ def test_tool_manifest_hash_tracks_implementation_version() -> None:
 
     assert first.startswith("sha256:")
     assert first != second
+
+
+def test_context_policy_changes_comparison_hash_without_changing_legacy_hash():
+    import hashlib
+    import json
+
+    old = snapshot()
+    legacy = old.model_dump(mode="json")
+    legacy.pop("context_policy")
+    legacy.pop("schema_version")
+    legacy.pop("summarizer")
+    legacy.pop("selected_skills")
+    legacy.pop("retrieval")
+    digest = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    assert old.content_hash() == digest
+    bounded = snapshot(context_policy={"mode": "bounded", "version": 1}, max_output_tokens=100)
+    assert not bounded.comparable_with(old)

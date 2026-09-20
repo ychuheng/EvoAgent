@@ -11,6 +11,7 @@ from evoagent.db.models import RunRecord, SessionRecord, TaskRecord
 from evoagent.db.repositories.base import ConcurrentUpdateError, RecordNotFoundError
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.runtime.run_config import RunMode
+from evoagent.sessions.service import append_message, project_terminal
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
 
@@ -97,6 +98,15 @@ class TaskService:
             )
             unit.runs.add(run)
             await unit.session.flush()
+            message = await append_message(
+                unit.session,
+                task=task,
+                run=run,
+                kind="goal",
+                role="user",
+                content=normalized_goal,
+            )
+            task.history_before_sequence = message.session_sequence
             await unit.events.append(
                 run_id=run.id,
                 event_type="task.queued",
@@ -198,6 +208,7 @@ class TaskService:
                 )
             except (ConcurrentUpdateError, ValueError) as error:
                 raise TaskOperationConflictError(str(error)) from error
+            await project_terminal(unit.session, task, run)
             await unit.events.append(
                 run_id=run.id,
                 event_type=event_type,

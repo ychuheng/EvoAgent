@@ -23,6 +23,7 @@ class ToolExecutor:
         timeout_seconds: float,
         max_result_chars: int,
         middleware: ToolExecutionMiddleware | None = None,
+        output_store=None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -33,6 +34,7 @@ class ToolExecutor:
         self._timeout_seconds = timeout_seconds
         self._max_result_chars = max_result_chars
         self._middleware = middleware
+        self._output_store = output_store
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """执行一次工具调用，并把可恢复失败转换成 ToolResult。"""
@@ -114,7 +116,11 @@ class ToolExecutor:
             )
             raise TypeError(f"tool {call.name} returned a non-string result")
 
+        original_size = len(content)
+        if self._output_store is not None:
+            content = await self._output_store.preserve(content, self._max_result_chars)
         normalized, truncated = self._truncate(content)
+        truncated = truncated or original_size > self._max_result_chars
         if self._middleware is not None:
             await self._middleware.after_success(token, normalized)
         result = ToolResult(

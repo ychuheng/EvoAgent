@@ -426,6 +426,13 @@ class SkillService:
 
     @staticmethod
     async def _event(unit, skill_id: UUID, event_type: str, payload: dict[str, Any]) -> None:
+        if event_type not in {"skill.version_drafted", "skill.version_rejected"}:
+            from evoagent.retrieval.indexing import enqueue_source
+
+            for version_id in await unit.session.scalars(
+                select(SkillVersionRecord.id).where(SkillVersionRecord.skill_id == skill_id)
+            ):
+                await enqueue_source(unit.session, f"skill:{version_id}")
         sequence = (
             int(
                 await unit.session.scalar(

@@ -22,6 +22,7 @@ from evoagent.runtime.checkpoints import (
     PersistentCheckpointStore,
     SnapshotCompatibilityError,
 )
+from evoagent.tasks.lease_guard import database_now
 from evoagent.tasks.state_machine import (
     PersistentRunStatus,
     TaskStatus,
@@ -45,6 +46,10 @@ class RecoveryDecision:
     ignored_event_count: int
 
 
+class RecoveryAlreadyHandled(ValueError):
+    """另一个恢复扫描器已处理该任务。"""
+
+
 class RecoveryService:
     """检查快照与未决副作用，再决定从头重跑、续跑或失败。"""
 
@@ -56,6 +61,25 @@ class RecoveryService:
     ) -> None:
         self._session_factory = session_factory
         self._snapshot_schema_version = snapshot_schema_version
+
+    async def recover_pending(self, *, limit: int = 100) -> int:
+        async with self._session_factory() as session:
+            ids = tuple(
+                await session.scalars(
+                    select(TaskRecord.id)
+                    .where(TaskRecord.status == TaskStatus.RECOVERING)
+                    .order_by(TaskRecord.created_at, TaskRecord.id)
+                    .limit(limit)
+                )
+            )
+        count = 0
+        for task_id in ids:
+            try:
+                await self.recover(task_id)
+                count += 1
+            except RecoveryAlreadyHandled:
+                pass
+        return count
 
     async def recover(self, task_id: UUID) -> RecoveryDecision:
         async with UnitOfWork(self._session_factory) as unit:
@@ -76,24 +100,28 @@ class RecoveryService:
             if task.status is not TaskStatus.RECOVERING or (
                 run.status is not PersistentRunStatus.RECOVERING
             ):
-                raise ValueError("task and run must both be recovering")
+                raise RecoveryAlreadyHandled("task and run must both be recovering")
 
-            unsafe_effect = await unit.session.scalar(
-                select(ToolEffectRecord)
-                .join(ToolCallRecord, ToolCallRecord.id == ToolEffectRecord.tool_call_id)
-                .where(
-                    ToolCallRecord.run_id == run.id,
-                    ToolEffectRecord.status.in_(
-                        (
-                            ToolEffectStatus.PREPARED,
-                            ToolEffectStatus.EXECUTING,
-                            ToolEffectStatus.UNKNOWN,
-                        )
-                    ),
+            unsafe_effects = tuple(
+                await unit.session.scalars(
+                    select(ToolEffectRecord)
+                    .join(ToolCallRecord, ToolCallRecord.id == ToolEffectRecord.tool_call_id)
+                    .where(
+                        ToolCallRecord.run_id == run.id,
+                        ToolEffectRecord.status.in_(
+                            (
+                                ToolEffectStatus.PREPARED,
+                                ToolEffectStatus.EXECUTING,
+                                ToolEffectStatus.UNKNOWN,
+                            )
+                        ),
+                    )
+                    .order_by(ToolEffectRecord.id)
+                    .with_for_update()
                 )
-                .limit(1)
             )
-            if unsafe_effect is not None:
+            approval_ids = []
+            for unsafe_effect in unsafe_effects:
                 unsafe_effect.status = ToolEffectStatus.UNKNOWN
                 approval = await unit.session.scalar(
                     select(ToolApprovalRecord).where(
@@ -116,6 +144,14 @@ class RecoveryService:
                     )
                     unit.session.add(approval)
                     await unit.session.flush()
+                elif approval.status is not ApprovalStatus.PENDING:
+                    # 过去的执行许可不能证明本次调用未提交；要求新的人工确认。
+                    approval.status = ApprovalStatus.PENDING
+                    approval.response = None
+                    approval.decided_at = None
+                    approval.reason = "副作用结果未知；需要重新确认 retry 或 committed:<结果>"
+                approval_ids.append(str(approval.id))
+            if unsafe_effects:
                 ensure_task_transition(task.status, TaskStatus.WAITING_USER)
                 ensure_run_transition(run.status, PersistentRunStatus.WAITING_USER)
                 task.status = TaskStatus.WAITING_USER
@@ -127,7 +163,8 @@ class RecoveryService:
                     event_type="recovery.decided",
                     payload={
                         "action": RecoveryAction.WAITING_CONFIRMATION.value,
-                        "approval_id": str(approval.id),
+                        "approval_ids": approval_ids,
+                        "approval_id": approval_ids[0],
                     },
                     created_at=datetime.now(UTC),
                 )
@@ -163,7 +200,7 @@ class RecoveryService:
             ensure_task_transition(task.status, TaskStatus.QUEUED)
             ensure_run_transition(run.status, PersistentRunStatus.QUEUED)
             task.status = TaskStatus.QUEUED
-            task.next_attempt_at = datetime.now(UTC)
+            task.next_attempt_at = await database_now(unit.session)
             task.lock_version += 1
             run.status = PersistentRunStatus.QUEUED
             run.lock_version += 1
@@ -202,6 +239,9 @@ class RecoveryService:
         run.error_message = "recovery stopped because automatic replay is unsafe"
         run.ended_at = datetime.now(UTC)
         run.lock_version += 1
+        from evoagent.sessions.service import project_terminal
+
+        await project_terminal(unit.session, task, run)
         await unit.events.append(
             run_id=run.id,
             event_type="recovery.failed",

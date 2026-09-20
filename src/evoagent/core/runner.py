@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from evoagent.config import Settings
 from evoagent.core.context import ContextBuilder
+from evoagent.core.context_policy import policy_from_settings
 from evoagent.core.events import InMemoryEventSink
 from evoagent.core.loop import AgentLoop
 from evoagent.core.models import (
@@ -78,6 +79,12 @@ class AgentRunner:
             max_iterations=self._settings.max_iterations,
             max_total_tokens=self._settings.max_total_tokens,
             max_repeated_tool_calls=self._settings.max_repeated_tool_calls,
+            context_policy=policy_from_settings(self._settings),
+            max_output_tokens=(
+                self._settings.max_output_tokens
+                if self._settings.context_policy == "bounded"
+                else None
+            ),
         )
 
         try:

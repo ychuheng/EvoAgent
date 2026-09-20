@@ -60,6 +60,23 @@
 54. 阶段三完整调用链
 55. 阶段三最终测试地图
 56. 阶段三学习验收
+57. 阶段四模块 0：v0.3 基线冻结与恢复装配
+58. 阶段四模块 1：租约代次与统一写入保护
+59. 阶段四模块 2：上下文契约、TokenCounter 与确定性裁剪
+60. 阶段四模块 0～2 完整调用链
+61. 阶段四模块 0～2 测试地图
+62. 阶段四模块 0～2 学习验收
+63. 阶段四模块 3：可恢复压缩与完整输出归档
+64. 阶段四模块 4：Workspace、消息投影与版本化记忆
+65. 阶段四模块 5：事实提议、人工确认与遗忘
+66. 阶段四模块 3～5 完整调用链
+67. 阶段四模块 3～5 测试地图
+68. 阶段四模块 3～5 学习验收
+69. 阶段四模块 6：Embedding 契约、派生索引与代次切换
+70. 阶段四模块 7：混合检索、分区预算与选择冻结
+71. 阶段四模块 6～7 完整调用链
+72. 阶段四模块 6～7 测试地图与故障定位
+73. 阶段四模块 6～7 学习验收
 
 ## 1. 阅读说明
 
@@ -73,7 +90,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-当前 `v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。
+`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～7 已实现；PostgreSQL+vector、容器和真实模型效果证据待补。本手册原有章节保留历史学习脉络，最新增量见第 69～73 章；第 57～68 章的完成范围和测试数字保留对应交付时间点。
 
 已经完成：
 
@@ -4482,3 +4499,1800 @@ Windows 普通账户没有创建符号链接权限时，WorkspaceGuard 的符号
 16. 为什么管理 API 不能直接暴露到公网？
 
 如果能结合具体 Record、Service、API、事件和测试回答这些问题，就已经掌握 EvoAgent v0.3 的完整可验证 Skill 生命周期。
+
+
+---
+
+## 57. 阶段四模块 0：v0.3 基线冻结与恢复装配
+
+### 57.1 模块目标
+
+阶段四没有直接从 Memory 或 MCP 开始。第一步是重新验证 v0.3 基线，并修复一个会影响后续所有长任务的运行缺口：任务租约过期后，Worker 能把状态改成 `RECOVERING`，但原来的主循环没有继续调用恢复决策服务。
+
+这意味着“代码库里存在 `RecoveryService`”和“进程重启后系统会自动恢复”是两件不同的事。模块 0 的核心任务就是让真实进程路径完整闭环：
+
+```text
+RUNNING / WAITING_TOOL 租约过期
+→ 标记 RECOVERING
+→ 执行 RecoveryService 决策
+→ QUEUED / WAITING_USER / FAILED
+→ 替代 Worker 继续处理或等待人工确认
+```
+
+主要文件：
+
+```text
+src/evoagent/workers/main.py
+src/evoagent/tasks/lease.py
+src/evoagent/runtime/recovery.py
+tests/e2e/test_worker_process_recovery.py
+tests/e2e/worker_crash_fixture.py
+```
+
+### 57.2 `run_once()` 为什么要先恢复再领取
+
+当前 `JobWorker.run_once()` 每轮按固定顺序执行：
+
+```text
+promote_due_retries()
+→ recover_expired()
+→ recover_pending()
+→ claim_next()
+→ 同时运行 Handler 和租约心跳
+→ finalize()
+```
+
+四个前置步骤各自解决不同状态：
+
+| 步骤 | 输入状态 | 输出状态或结果 |
+|---|---|---|
+| `promote_due_retries()` | 到期的 RETRYING | QUEUED |
+| `recover_expired()` | 租约已过期的 RUNNING / WAITING_TOOL | RECOVERING |
+| `recover_pending()` | RECOVERING | QUEUED、WAITING_USER 或 FAILED |
+| `claim_next()` | 可执行的 QUEUED | RUNNING + JobLease |
+
+如果跳过第三步，任务会永久停在 RECOVERING，因为 `claim_next()` 只领取 QUEUED。把恢复扫描放在领取之前，也保证替代 Worker 能先处理已有故障，再领取恢复后的同一任务。
+
+### 57.3 `recover_expired()` 和 `recover()` 为什么分开
+
+`recover_expired()` 只确认一个数据库事实：原执行者的租约已经过期。它短暂锁定 Task 和最新 Run，清空 owner、过期时间和心跳，写入 `recovery.started`，然后提交。
+
+`RecoveryService.recover()` 才解释运行证据：
+
+```text
+是否存在未决 ToolEffect？
+├─ 是 → 全部转 UNKNOWN，创建或重置审批，进入 WAITING_USER
+└─ 否 → 读取最新 Snapshot
+         ├─ 无 Snapshot → RESTART，重新排队
+         ├─ 兼容 Snapshot → RESUME，重新排队
+         └─ 不兼容 Snapshot → FAILED
+```
+
+分开有两个好处。第一，过期扫描只做短事务，不在持有批量任务锁时解析快照。第二，RECOVERING 本身成为可重试的持久状态；进程在两步之间再次退出，下一进程仍能通过 `recover_pending()` 接手。
+
+### 57.4 恢复为什么必须检查所有未决副作用
+
+旧实现只读取第一条 PREPARED、EXECUTING 或 UNKNOWN 效果。当前实现读取同一 Run 的全部未决效果，并逐条：
+
+1. 统一改为 UNKNOWN；
+2. 找到关联 ToolCall；
+3. 创建待确认 Approval，或把旧决定重置为 PENDING；
+4. 把全部 approval ID 写入 `recovery.decided`。
+
+只处理第一条会产生危险窗口：用户确认第一条后任务重新排队，第二条未知效果可能未经确认便重新进入执行路径。因此 `ApprovalService.decide()` 会检查同一 Task 是否还存在其他 PENDING Approval；只有全部处理完，Task 和 Run 才从 WAITING_USER 回到 QUEUED。
+
+旧的 APPROVED 也不能直接复用。它只说明用户曾允许执行某个动作，不能证明崩溃前动作究竟有没有提交。UNKNOWN 的确认必须重新回答：
+
+```text
+retry                 已确认没有提交，可以再执行一次
+committed:<结果>      已确认已经提交，直接登记结果
+reject                不允许继续
+```
+
+其中 `retry` 是一次性确认。中间件开始重试时会消费这个响应；如果再次崩溃，系统会重新要求确认，而不是无限复用旧的 retry。
+
+### 57.5 Snapshot 恢复保留什么
+
+Snapshot 只在完整的模型—工具边界保存，因此恢复不会从半段 Provider 流或半次工具调用中继续。兼容快照恢复时，`PersistentAgentRunner`：
+
+```text
+load_latest()
+→ 取得 LoopState.messages、已完成 iteration、usage 和重复调用状态
+→ 写入 recovery.completed
+→ AgentLoop 从 completed_iterations + 1 开始
+```
+
+快照之后已经写入但不属于合法边界的事件被视为尾部记录，不用于重建消息状态。`recovery.decided` 会记录快照事件序号和被忽略的尾部事件数量，便于审计。
+
+### 57.6 进程级测试和普通集成测试的区别
+
+普通集成测试在同一 Python 进程中创建 Service，容易不小心直接调用 `RecoveryService.recover()`，从而绕过真正需要验证的 Worker 装配。
+
+`test_worker_process_recovery.py` 从 API 创建任务，然后启动独立 Python 子进程运行真实的 `JobWorker` 和 `ConfiguredTaskHandler`。Fixture 只在明确的持久化边界写出 ready 标记，父进程随后强制终止 Worker，等待租约过期，再启动同标签替代进程。
+
+它覆盖三个场景：
+
+| 场景 | 终止点 | 替代进程应观察到的结果 |
+|---|---|---|
+| readonly | 合法 Snapshot 保存后 | 从 Snapshot 续跑，只读工具不重复产生额外记录 |
+| committed | ToolEffect 已 COMMITTED 后 | 复用结果，文件实际只写一次 |
+| unknown | 外部写完成、账本提交前 | Effect 进入 UNKNOWN，任务停在 WAITING_USER |
+
+这个测试证明主进程链路已接通，也证明 COMMITTED 与 UNKNOWN 的分界。它不证明 PostgreSQL 行锁语义，也不把本地文件写入提升为通用外部 exactly-once。
+
+### 57.7 基线验证结果与边界
+
+实现前回归为 207 passed、4 skipped。实现后阶段三完整生命周期 Demo 在独立 SQLite 数据库重跑，仍满足：24 个 Case、合格版本通过并发布、退化版本被门禁拒绝、回滚后只检索到目标旧版。
+
+这个 Demo 使用确定性模拟记录，只证明阶段三生命周期没有因阶段四改动回退。它不是实际模型质量证据。本机没有 PostgreSQL 和 Docker 服务，真实模型配对报告也未取得；这些验收在运行说明中保留为待完成，不能用 Mock 结果代替。
+
+### 57.8 推荐阅读顺序
+
+```text
+1. workers/main.py 的 run_once()
+2. tasks/lease.py 的 recover_expired() 与 recover_pending()
+3. runtime/recovery.py 的 recover()
+4. runtime/checkpoints.py 的 load_latest()
+5. tools/approvals.py 的 decide()
+6. tests/e2e/worker_crash_fixture.py
+7. tests/e2e/test_worker_process_recovery.py
+8. tests/fault_injection/test_unknown_effect_recovery.py
+```
+
+---
+
+## 58. 阶段四模块 1：租约代次与统一写入保护
+
+### 58.1 模块目标
+
+阶段二已经在终态提交时检查 lease owner，但运行过程还会持续写事件、快照、ToolEffect、Approval、Skill 选择、配置和 Artifact 元数据。如果 Worker A 失去租约、Worker B 接管，而 A 的网络请求稍后返回，A 仍可能把迟到结果写进数据库。
+
+模块 1 引入 fencing token。它解决的问题不是“怎样发现 Worker 已死”，而是“即使旧 Worker 又活过来，怎样拒绝它的所有迟到写入”。
+
+主要文件：
+
+```text
+src/evoagent/tasks/lease_guard.py
+src/evoagent/tasks/lease.py
+src/evoagent/runtime/persistent_runner.py
+src/evoagent/trace/persistent_sink.py
+src/evoagent/runtime/checkpoints.py
+src/evoagent/tools/effects.py
+src/evoagent/trace/artifacts.py
+src/evoagent/skills/retrieval.py
+migrations/versions/20260919_0005_lease_fencing.py
+tests/integration/test_lease_fencing.py
+```
+
+### 58.2 Worker 标签、实例身份和 lease epoch
+
+这三个值职责不同：
+
+| 值 | 示例 | 作用 |
+|---|---|---|
+| 配置标签 | `worker-local` | 供部署者识别 Worker 类型或位置 |
+| 实例 owner | `worker-local:<uuid>` | 区分同标签的不同进程启动 |
+| lease epoch | `7`、`8` | 区分同一 Task 的前后两次领取 |
+
+`JobWorker` 构造时给配置标签追加一次 UUID，所以同标签重启不会获得相同 owner。`claim_next()` 每次成功领取都会在 Task 行锁内执行：
+
+```text
+attempt_count += 1
+lease_epoch += 1
+lease_owner = 当前实例 owner
+lease_expires_at = 数据库当前时间 + lease duration
+```
+
+随后返回的 `JobLease` 同时携带 task_id、run_id、owner、expires_at、attempt 和 epoch。
+
+只用 owner 不够，因为部署编排常使用稳定名称；只用 epoch 也不够，因为 owner 仍是审计和定位进程的重要信息。两者同时检查，能清楚表达“哪个实例持有第几代执行权”。
+
+### 58.3 为什么租约判断使用数据库时间
+
+PostgreSQL 路径通过 `clock_timestamp()` 获取数据库当前时间。租约是数据库中的共享事实，如果不同 Worker 使用各自主机时间，时钟漂移可能让一个进程认为租约有效，另一个进程认为已经过期。
+
+这里选择 `clock_timestamp()`，而不是事务开始时固定的 `now()`，是因为租约判断需要得到调用时的实际数据库时间。SQLite 功能测试退回 Python UTC 时间，但这不构成多连接并发保证。
+
+测试为了构造精确的过期边界仍可显式传入 `now`。生产路径不传该参数，统一使用数据库时钟。
+
+### 58.4 `LeaseGuard.check()` 的六项检查
+
+Guard 在调用者提供的 `AsyncSession` 中工作，依次锁定 Task 和 Run。它检查：
+
+1. Task 存在；
+2. `lease_owner` 等于 JobLease.owner；
+3. `lease_epoch` 等于 JobLease.epoch；
+4. 租约到期时间晚于数据库当前时间；
+5. Task 仍处于 RUNNING 或 WAITING_TOOL；
+6. Run 存在、属于该 Task，并处于 RUNNING。
+
+任一条件失败都抛出 `LeaseLostError`。Guard 返回已锁定的 Task 和 Run，让终态提交等调用者直接在同一事务中更新它们。
+
+锁顺序固定为：
+
+```text
+Task → Run → 其他运行记录
+```
+
+ApprovalService 同样先锁 Task、再锁最新 Run、最后锁 Approval。统一锁顺序减少不同路径互相等待形成死锁的风险。
+
+### 58.5 为什么“检查”和“写入”必须在同一事务
+
+下面的写法没有 fencing 效果：
+
+```text
+事务 A：检查租约有效 → 提交
+外部发生接管
+事务 B：写入旧结果 → 提交
+```
+
+当前正确结构是：
+
+```text
+开启短事务
+→ LeaseGuard 锁 Task 并检查 owner、epoch、状态、到期时间
+→ 锁并检查 Run
+→ 写事件、快照或账本记录
+→ 提交并释放锁
+```
+
+因为 Task 行锁一直持有到写入提交，接管扫描使用 `FOR UPDATE SKIP LOCKED` 时不能跨过正在提交的合法写入。旧 Worker 如果在接管完成后进入事务，会看到 owner/epoch 已变化并被拒绝。
+
+Guard 不能在调用者外面先检查一次再把布尔值传进去；它的 API 刻意接收 session，就是为了让事务边界可见。
+
+### 58.6 哪些运行写路径受保护
+
+`PersistentAgentRunner` 为一次 JobLease 创建一个 `LeaseGuard`，再注入各个持久化组件：
+
+| 组件 | 受保护的数据库事实 |
+|---|---|
+| `PersistentEventSink` | RunEvent 和 sequence 推进 |
+| `PersistentCheckpointStore.save()` | snapshot.saved 事件与 RunSnapshot |
+| `PersistentToolMiddleware.before()` | Turn、ToolCall、Approval、ToolEffect 执行前状态 |
+| `after_success()` / `after_failure()` | ToolCall 结果和 Effect 的 COMMITTED / UNKNOWN |
+| `SkillRetrievalService.select()` | Skill 选择、零命中冻结和检索事件 |
+| `_persist_run_config()` | RunConfigSnapshot 与 config hash |
+| `ArtifactService.create*()` | Artifact 元数据 |
+| `heartbeat()` / `finalize()` | 租约续期、Task/Run 终态和终态事件 |
+
+构造这些组件时还会核对 run_id 是否与租约一致，防止有效租约被错误地接到另一个 Run。
+
+读取 Snapshot 不需要 Guard，因为只读不会污染权威事实；但从快照恢复后的所有新写入仍必须通过 Guard。
+
+### 58.7 外部动作为什么不能放在数据库锁里
+
+模型请求、网页访问、Shell、文件写入可能持续很久。若在调用这些外部操作期间一直持有 Task 行锁，会占住数据库连接、阻塞心跳和恢复扫描，最终把短租约设计重新变成长事务。
+
+因此工具链采用三个短阶段：
+
+```text
+短事务：Guard + Effect=EXECUTING
+→ 无数据库锁地执行外部动作
+→ 短事务：Guard + Effect=COMMITTED 或 UNKNOWN
+```
+
+这能保护数据库事实，但不能撤销已发出的外部动作。Worker 在外部写完成后、COMMITTED 提交前失联时，数据库只能知道结果未知，所以进入 UNKNOWN 并要求人工确认。
+
+Artifact 文件同样在数据库事务外写入。`ArtifactService` 在文件 I/O 前检查一次租约，在登记元数据的事务中再检查一次。若两次检查之间失租，数据库不会接受元数据，但磁盘可能留下孤立文件。清理孤立文件属于后续维护任务，不应假装数据库回滚能删除已经完成的外部写。
+
+### 58.8 COMMITTED 复用和 retry 的 ToolCall 关联
+
+ToolEffect 使用 Task 作用域和规范化工具参数生成语义键。同一语义效果已经 COMMITTED 时，新 ToolCall 直接复用保存的结果，不再次执行工具。
+
+UNKNOWN 被人工确认为 retry 后，中间件把 Effect 重新置为 EXECUTING，并把 `effect.tool_call_id` 改为本次新 ToolCall。这样后续结果和审计记录关联当前执行，而不是永远指向崩溃前的旧调用。retry 响应随后清空，保证授权只使用一次。
+
+### 58.9 为什么零命中也要冻结
+
+阶段三使用已保存的 `RunSkillSelectionRecord` 恢复 Skill 选择。但零命中没有 Selection 行，若进程在检索事件提交后、RunConfigSnapshot 保存前退出，恢复时可能因为新 Skill 发布而重新检索出不同结果。
+
+迁移 0005 在 Run 增加 `skill_selection_frozen`。首次选择无论是否命中，都在同一个 Guard 事务中把它设为 true。恢复时看到 true 就返回已冻结的空结果，不重新查询当前 ACTIVE Skill。
+
+这是一个最小的负选择冻结机制。完整 RetrievalBatch、查询 hash 和算法版本将在后续检索模块实现。
+
+### 58.10 Migration 与混跑风险
+
+迁移 `20260919_0005` 增加：
+
+```text
+tasks.lease_epoch              NOT NULL DEFAULT 0
+runs.skill_selection_frozen    NOT NULL DEFAULT false
+```
+
+升级必须先停止全部旧 Worker，再迁移，再启动同版本进程。数据库新增 epoch 字段并不会自动让旧二进制执行 Guard；新旧 Worker 混跑时，旧进程仍可能写入迟到结果。
+
+回退迁移会删除这两个字段。执行降级前应确认没有依赖新语义的活跃任务，并保留数据库备份。
+
+### 58.11 取消与清理
+
+`JobWorker.run_once()` 在 finally 中：
+
+1. 通知心跳停止；
+2. 取消尚未结束的 heartbeat 和 handler task；
+3. 使用 `gather(..., return_exceptions=True)` 等待二者真正退出。
+
+只调用 `cancel()` 而不等待会留下后台协程继续写入或在事件循环关闭后产生警告。等待清理使测试和进程退出都有明确边界。
+
+`run_forever()` 捕获 `LeaseLostError`，将本轮视为没有成功处理任务，然后继续轮询。失去某一租约不应杀死整个 Worker 进程。
+
+### 58.12 PostgreSQL 和 SQLite 分别证明什么
+
+SQLite 用例可以证明字段、状态转换、Guard 判断和各写路径的功能行为。它不实现与 PostgreSQL 相同的行锁和 `SKIP LOCKED` 并发语义。
+
+PostgreSQL 专项用例验证：Guard 持有 Task 行锁直到写事务提交时，过期扫描不能同时接管；事务提交后，扫描才能获得任务。CI 配置了 PostgreSQL 17，本机没有配置测试库，因此本地的 PostgreSQL 参数会跳过。跳过表示尚未在当前机器验证，不等于通过。
+
+### 58.13 推荐阅读顺序
+
+```text
+1. db/models.py 的 TaskRecord 与 RunRecord 新字段
+2. migration 20260919_0005
+3. tasks/lease.py 的 JobLease 和 claim_next()
+4. tasks/lease_guard.py 的 database_now() 与 check()
+5. trace/persistent_sink.py 和 runtime/checkpoints.py
+6. tools/effects.py 的 before()/after_success()/after_failure()
+7. runtime/persistent_runner.py 的 Guard 注入
+8. trace/artifacts.py 的两次检查
+9. skills/retrieval.py 的零命中冻结
+10. tests/integration/test_lease_fencing.py
+```
+
+---
+
+## 59. 阶段四模块 2：上下文契约、TokenCounter 与确定性裁剪
+
+### 59.1 模块目标
+
+原有 `max_total_tokens` 是整个 Run 的累计消耗软预算。它只能在模型返回 Usage 后累加，不能阻止某一轮请求本身超过模型上下文窗口。
+
+模块 2 在每次 Provider 请求前增加纯内存策略：
+
+```text
+完整消息历史 + 本轮工具 Schema
+→ 校验消息组结构
+→ 估算本轮输入大小
+→ 必要时按稳定优先级删除可选资料
+→ 再次计数
+→ 放行或返回 context_budget_exceeded
+```
+
+主要文件：
+
+```text
+src/evoagent/core/context_budget.py
+src/evoagent/core/context_policy.py
+src/evoagent/core/context.py
+src/evoagent/core/models.py
+src/evoagent/core/loop.py
+src/evoagent/runtime/run_config.py
+tests/unit/test_context_policy.py
+```
+
+### 59.2 三类 Token 限制不能混用
+
+当前运行时同时存在三类限制：
+
+| 限制 | 作用范围 | 何时可判断 | 失败结果 |
+|---|---|---|---|
+| `context_window_tokens` | 单次请求的总窗口 | 发请求前 | 本地裁剪或拒绝 |
+| `max_output_tokens` | 单次模型输出预留 | 发请求前，并传给 Provider | Provider 输出上限 |
+| `max_total_tokens` | 整个 Run 的累计消耗 | Provider 返回 Usage 后 | `token_budget_reached` |
+
+把累计预算设为 32000，并不表示一次请求可以发送 32000 个输入 Token。模型窗口还要为输出和计数误差留空间。
+
+### 59.3 `ContextBudget` 的公式
+
+`ContextBudget` 保存三个正交值：
+
+```text
+W = context_window       已确认的模型上下文窗口
+O = output_tokens        本轮最大输出预留
+S = safety_margin        封装差异与估算误差余量
+I = W - O - S            本轮允许的输入上限
+```
+
+构造时必须满足 `W > O + S`。例如：
+
+```text
+W = 32768
+O = 4096
+S = 1024
+I = 27648
+```
+
+这组默认数值只用于 Mock 开发环境，不声明任何真实模型一定拥有 32768 Token 窗口。真实兼容服务使用 bounded 模式时，Settings 要求显式提供已核对的 `EVOAGENT_CONTEXT_WINDOW_TOKENS`。
+
+策略不会只在计算时扣除 O；它还会把 O 写入 `ModelRequest.max_output_tokens`。否则本地为输出保留 4096，Provider 却可能使用更大的默认上限，预算公式就失去意义。
+
+### 59.4 `TokenEstimate` 为什么记录方法和置信度
+
+TokenCounter 返回的不只是整数，而是：
+
+```text
+TokenEstimate(
+    count,
+    method,
+    tokenizer_version,
+    confidence,
+)
+```
+
+不同计数器不能被描述成同一种保证：
+
+| Counter | 计数内容 | confidence | 能证明什么 |
+|---|---|---|---|
+| `MockCounter` | 定义好的 UTF-8 字节与封装规则 | `exact_mock` | 离线算法按同一规则可重复 |
+| `ConservativeTokenCounter` | UTF-8 字节、消息/工具封装余量 | `estimated` | 本地采用了保守估算，不能证明服务端真实 Token 上界 |
+
+真实模型的分词方式依赖模型和服务端协议。当前没有引入厂商 tokenizer，因此不能把字节估算包装成“精确 Token”。`context_strict=true` 时只接受 `exact`、`exact_mock` 或 `verified_upper_bound`；真实兼容服务当前会返回 `context_count_unverified`，从而在请求前拒绝。
+
+### 59.5 计数为什么必须包含工具 Schema
+
+Provider 请求中的工具不只是一串名称。每个定义包含 description 和完整 JSON Schema，模型会实际接收这些文本。大量工具或复杂参数 Schema 即使消息很短，也可能占满窗口。
+
+`request_bytes()` 构造接近 OpenAI-compatible 请求形状的规范对象，计入：
+
+- model 名称；
+- 每条消息的 role 和 content；
+- assistant ToolCall 的 id、name 和序列化 arguments；
+- tool_call_id；
+- 每个工具的 function 名称、描述和 parameters Schema；
+- 消息和工具的固定封装余量。
+
+内部的 `context_priority` 是本地裁剪元数据，不会发送给 Provider，也不计入协议负载。
+
+### 59.6 可选资料为什么使用显式元数据
+
+`Message` 增加了可选的 `context_priority`，并限制只有 USER 消息可以携带。`ContextBuilder` 只给 `external_context` 生成的消息标记 priority=0，最后的用户任务没有该字段。
+
+这条边界十分重要。策略不能看到文本以“外部上下文”开头就删除，因为用户可以把自己的真实任务写成同样的字符串。裁剪资格来自可信代码构造的结构化字段，不来自不可信正文的内容匹配。
+
+当前保护内容包括：
+
+- system prompt 和已注入 Skill；
+- 原始用户任务与显式约束；
+- assistant 回复；
+- ToolCall 与 ToolResult；
+- 工具 Schema。
+
+当前可删除内容只有带 `context_priority` 的外部资料。自动摘要、旧消息归档和 Memory 分区还没有实现。
+
+### 59.7 `MessageGroupBuilder` 保护什么协议不变量
+
+一个 assistant 可以一次发出多个 ToolCall，后面必须存在每个 call_id 对应的 ToolResult：
+
+```text
+assistant: tool_calls=[a, b]
+tool: tool_call_id=b
+tool: tool_call_id=a
+```
+
+结果顺序可以不同，但整个组必须完整。`MessageGroupBuilder` 会拒绝：
+
+- 没有前置 assistant ToolCall 的孤立 tool 消息；
+- 缺少某个结果的工具组；
+- assistant 和 tool 之间插入其他消息；
+- 重复的 call_id；
+- 在后续历史中再次使用已经出现过的 call_id。
+
+模块 2 暂时不会压缩历史工具组，但先建立分组不变量，为模块 3 的整组摘要和归档打基础。将来无论保留、替换还是移除，都不能只处理工具组的一半。
+
+### 59.8 确定性裁剪算法
+
+`BoundedContextPolicy.prepare()` 的处理顺序固定：
+
+```text
+1. MessageGroupBuilder 校验全部消息
+2. 把预算中的 output_tokens 写进请求
+3. TokenCounter 计算完整请求
+4. strict 模式检查计数置信度
+5. 找出全部带 context_priority 的消息
+6. 按 (priority, 原始索引) 升序排序
+7. 从低优先级开始逐条删除并重新计数
+8. 达到 input_limit 后返回 ContextDecision
+9. 可选资料删完仍超限则抛 ContextPolicyError
+```
+
+相同输入、配置和 Counter 总会得到相同的 dropped_indices 和请求内容。当前约定数值越小越先删除；同一优先级保持原消息顺序作为稳定 tie-breaker。
+
+裁剪不会修改原始 tuple。它通过 Pydantic `model_copy()` 创建新的 ModelRequest，所以调用者仍能保留原始上下文证据。
+
+### 59.9 `ContextDecision` 和审计事件
+
+策略成功时返回：
+
+```text
+request             最终允许发送的 ModelRequest
+estimate            使用的计数及方法
+dropped_indices     被删除消息在原请求中的索引
+input_limit         本次输入上限
+```
+
+AgentLoop 根据结果写入：
+
+| 事件 | 条件 | 记录内容 |
+|---|---|---|
+| `context.checked` | 已检查但没有裁剪 | estimate、limit、输出上限 |
+| `context.trimmed` | 删除了可选资料 | 上述字段和 dropped_indices |
+| `context.rejected` | 分组、计数可信度或预算失败 | iteration 和 error_code |
+
+事件不保存被删除资料的正文，避免为了可观测性再次扩散敏感或庞大的外部内容。
+
+### 59.10 为什么检查必须放在每次 Provider 请求前
+
+初始上下文合规，不代表后续轮次合规。工具可能返回大结果，assistant 也会不断追加消息。因此 AgentLoop 在每次 iteration 构造 ModelRequest 后立即调用策略：
+
+```text
+messages + registry.definitions()
+→ ModelRequest
+→ ContextPolicy.prepare()
+→ context.checked / trimmed / rejected
+→ model.requested
+→ Provider.stream()
+```
+
+如果策略失败，Loop 返回 `LIMIT_REACHED` 和具体 error_code，`model.requested` 不会产生，Provider 也不会收到请求。
+
+测试中特意让第一轮工具产生超大结果。第一次请求可以发出，第二次请求在 Provider 前被阻止，证明检查不是只在 Runner 启动时执行一次。
+
+### 59.11 错误代码和取消语义
+
+当前主要错误包括：
+
+| error_code | 含义 |
+|---|---|
+| `invalid_context_group` | ToolCall/ToolResult 历史结构已损坏 |
+| `context_count_unverified` | strict 模式下没有可信计数器 |
+| `context_budget_exceeded` | 受保护内容本身超过输入上限 |
+
+这些错误发生在本地请求前，不是 ProviderError。Runner 最终把 Loop 的 `LIMIT_REACHED` 映射为对应终态。
+
+ContextPolicy 是同步纯函数，不吞掉 `asyncio.CancelledError`。Provider 已经开始阻塞时取消 Run，AgentRunner 仍按原有路径生成 CANCELLED 结果，并等待 Provider 异步生成器的 finally 清理。
+
+### 59.12 `bounded` 和 `legacy` 模式
+
+Settings 默认：
+
+```text
+context_policy=bounded
+context_window_tokens=32768
+max_output_tokens=4096
+context_safety_margin=1024
+context_strict=false
+```
+
+`legacy` 显式保留旧行为：不做本地上下文检查，也不强制设置 `ModelRequest.max_output_tokens`。它用于兼容旧 CLI 或隔离运行旧语义，不是推荐的生产默认值。
+
+RunConfigSnapshot 保存 bounded policy 的完整 manifest，包括版本、窗口、输出、余量、counter identity 和 strict。AgentLoop 的 config hash 也包含同一语义。恢复时如果持久化配置与当前 Runtime 不一致，返回 `snapshot_incompatible`，并且不会调用 Provider。
+
+旧 RunConfigSnapshot 没有 `context_policy` 字段。`canonical_dict()` 在字段为 None 时删除它，所以历史配置仍能计算出原来的 hash。这个兼容只保证旧数据可读取；一旦新运行启用 bounded，不能把它冒充成与 legacy 相同的执行条件。
+
+### 59.13 当前边界
+
+模块 2 已完成的是请求前确定性检查和删除可选资料。它尚未实现：
+
+- 使用模型自动生成摘要；
+- 把摘要和覆盖范围保存为 ContextRevision；
+- 将超大 ToolResult 转存 Artifact 后只注入摘要；
+- 长期事实记忆与 Session Archive；
+- 按模型选择精确 tokenizer；
+- 服务端 context-length 错误后的有限再压缩。
+
+因此受保护的任务、工具组或 Schema 本身超限时，系统会明确失败。它不会删除安全规则或悄悄截断 ToolResult 来凑窗口。
+
+### 59.14 推荐阅读顺序
+
+```text
+1. config.py 的 context_* 配置及交叉校验
+2. core/models.py 的 Message.context_priority 和新 EventType
+3. core/context.py 的 external_context 标记
+4. core/context_budget.py 的公式、estimate 和两个 Counter
+5. core/context_policy.py 的 MessageGroupBuilder
+6. BoundedContextPolicy.prepare()
+7. core/loop.py 的请求前 Hook
+8. runtime/run_config.py 的兼容 canonical_dict()
+9. runtime/persistent_runner.py 的 policy manifest 和恢复处理
+10. tests/unit/test_context_policy.py
+11. tests/integration/test_persistent_runtime.py 的配置漂移用例
+```
+
+---
+
+## 60. 阶段四模块 0～2 完整调用链
+
+### 60.1 正常执行链路
+
+```text
+API 创建 QUEUED Task + Run
+→ JobWorker 生成“配置标签:启动 UUID”实例身份
+→ claim_next() 使用数据库时间和 SKIP LOCKED 领取 Task
+→ lease_epoch 递增，返回 JobLease
+→ PersistentAgentRunner 创建 LeaseGuard
+→ Guard 保护 Skill 选择与零命中冻结
+→ Guard 保护 RunConfigSnapshot 与 config hash
+→ 读取可兼容 Snapshot
+→ ContextBuilder 构造 system、可选外部资料、原始任务
+→ AgentLoop 每轮构造完整 ModelRequest
+→ MessageGroupBuilder 验证 ToolCall/ToolResult 结构
+→ TokenCounter 计算消息、参数、工具 Schema 和封装
+→ BoundedContextPolicy 保留受保护内容，必要时裁剪可选资料
+→ 写 context.checked 或 context.trimmed
+→ 写 model.requested，再调用 Provider
+→ 如有工具调用：Guard + ToolEffect=EXECUTING
+→ 事务外执行工具
+→ Guard + ToolEffect=COMMITTED/UNKNOWN + ToolCall 结果
+→ 在完整工具批次后 Guard 保存 Snapshot
+→ Handler 返回 TaskExecutionResult
+→ finalize() 再用 Guard 原子写 Task、Run 与终态事件
+```
+
+### 60.2 Worker 崩溃与接管链路
+
+```text
+Worker A 持有 owner=A:<uuid1>, epoch=7
+→ 心跳停止，租约按数据库时间过期
+→ Worker B 的 recover_expired() 锁 Task/Run
+→ 清空 owner，状态改为 RECOVERING，写 recovery.started
+→ recover_pending() 执行恢复决策
+   ├─ 有任意未决 Effect
+   │  → 全部 UNKNOWN + PENDING Approval
+   │  → WAITING_USER
+   ├─ 无 Effect 且 Snapshot 兼容
+   │  → RESUME + QUEUED
+   ├─ 无 Effect 且无 Snapshot
+   │  → RESTART + QUEUED
+   └─ Snapshot 不兼容
+      → FAILED
+→ B 领取恢复任务，epoch=8
+→ A 的迟到事件、快照、效果、配置、Artifact 元数据和终态写入
+→ LeaseGuard 因 owner/epoch 不匹配统一拒绝
+```
+
+### 60.3 上下文超限链路
+
+```text
+构造完整请求
+→ 校验完整消息组
+→ 计算 estimate
+→ estimate <= input_limit
+   └─ 直接发送
+→ estimate > input_limit
+   → 按 priority 删除可选资料并逐次重算
+   → 已达上限
+      └─ 写 context.trimmed，发送裁剪后请求
+   → 可选资料已空仍超限
+      └─ 写 context.rejected
+         返回 LIMIT_REACHED/context_budget_exceeded
+         Provider 请求次数不增加
+```
+
+### 60.4 三条不能混淆的保证
+
+1. LeaseGuard 保护数据库权威事实，不能撤销已经发出的外部动作。
+2. ContextPolicy 保证不发送超过本地配置输入上限的请求，estimated Counter 不证明服务端真实 Token 上界。
+3. Snapshot 恢复保证从合法边界继续，不保证任意外部系统具有 exactly-once 语义。
+
+---
+
+## 61. 阶段四模块 0～2 测试地图
+
+| 测试或检查 | 主要证明 | 当前环境说明 |
+|---|---|---|
+| `test_worker_process_recovery.py` | API→独立 Worker→强制退出→替代进程的完整链路 | SQLite 进程级行为 |
+| `worker_crash_fixture.py` | 在 Snapshot、COMMITTED、外部写后三个真实边界暂停 | 仅测试辅助进程 |
+| `test_lease_fencing.py::test_old_epoch...` | 同标签新 epoch 接管后，旧 Worker 各写入口全部失败 | SQLite 与 PostgreSQL 参数 |
+| `test_lease_fencing.py::test_recovery_requires...` | 多个 UNKNOWN 全部确认后才重排队 | SQLite 与 PostgreSQL 参数 |
+| `test_lease_fencing.py::test_worker_identity...` | 启动身份唯一，取消会等待 Handler 清理 | SQLite 与 PostgreSQL 参数 |
+| `test_lease_fencing.py::test_zero_hit...` | 零命中在配置提交前也已冻结 | SQLite 与 PostgreSQL 参数 |
+| `test_lease_fencing.py::test_guard_and_write...` | Guard 锁持续到写事务提交 | 仅 PostgreSQL 有效 |
+| `test_context_policy.py` | 中英文裁剪、Schema 计数、分组、优先级、strict、legacy、取消 | 纯内存与 Mock |
+| `test_persistent_runtime.py` | 配置漂移恢复失败且 Provider 未收到请求 | SQLite 集成 |
+| `test_run_config_and_manifest.py` | 旧 hash 兼容、policy 改变不可比较 | 单元测试 |
+| `test_migrations.py` | 0001→0005 升级、metadata check、回退到 base | SQLite；另有 PostgreSQL 参数 |
+| `evoagent --demo` | 默认 bounded 的阶段一 CLI 工具循环 | Mock smoke |
+| `evoagent-phase3-demo` | 阶段三生命周期未回退 | Mock/SQLite smoke |
+
+本次全量本地结果为 228 passed、10 skipped。跳过项包括未配置 PostgreSQL 的参数与迁移用例、SQLite 参数下主动跳过的行锁用例，以及 Windows 普通账户无符号链接权限的 WorkspaceGuard 用例。
+
+Ruff lint、format 和 `git diff --check` 均通过。PostgreSQL、容器和真实模型报告仍是环境验收待办；不能因为测试代码存在或 CI 配置了服务，就声称本次本机已经运行成功。
+
+---
+
+## 62. 阶段四模块 0～2 学习验收
+
+读完这三个模块后，建议结合源码独立回答：
+
+1. 为什么 `recover_expired()` 成功不代表任务会自动恢复？
+2. 为什么要把 RECOVERING 作为持久状态，而不是在过期扫描事务内完成所有决策？
+3. 为什么恢复必须扫描全部未决 ToolEffect？
+4. 过去的 APPROVED 为什么不能证明 UNKNOWN 动作可以直接重试？
+5. COMMITTED 和 UNKNOWN 在进程故障测试中分别怎样产生？
+6. Worker 配置标签、实例 owner 和 lease epoch 各自解决什么问题？
+7. 为什么同标签重启仍不能复用旧 JobLease？
+8. 为什么 lease expiry 要使用数据库时间？
+9. `LeaseGuard.check()` 检查哪些字段，锁顺序是什么？
+10. 为什么租约检查和实际写入必须在同一个事务和 session 中？
+11. 为什么不能在模型请求或外部工具调用期间一直持有 Task 行锁？
+12. 数据库 fencing 为什么不能提供外部 exactly-once？
+13. Artifact 为什么可能留下未登记文件，这是否代表旧 Worker 可以提交数据库事实？
+14. 为什么零命中也需要冻结？
+15. 单轮上下文窗口、输出预留和 Run 累计 Token 预算有什么区别？
+16. 为什么工具 JSON Schema 必须参与输入计数？
+17. `exact_mock` 和 `estimated` 分别能证明什么？
+18. strict 模式为什么会拒绝当前真实兼容 Provider？
+19. 为什么裁剪资格使用 `context_priority`，不能匹配“外部上下文”文本前缀？
+20. 一个包含两个 ToolCall 的消息组满足什么完整性条件？
+21. 为什么 ContextPolicy 必须在每一轮 Provider 请求前运行？
+22. `context.checked`、`context.trimmed` 和 `context.rejected` 各表示什么？
+23. 为什么 bounded 的输出预留必须真正写入 `ModelRequest.max_output_tokens`？
+24. 旧 RunConfigSnapshot 怎样保持 hash 兼容，为什么 bounded Run 又不能与 legacy 混为一谈？
+25. 进程级 SQLite 测试、PostgreSQL 行锁测试和真实模型效果报告各自证明什么？
+
+如果能沿着具体 Task、Run、JobLease、ToolEffect、ModelRequest、事件和测试回答这些问题，就掌握了阶段四前三个模块的核心：先让恢复链路真实可运行，再让旧执行者无法污染数据库，最后让每次模型请求在发送前具备明确、可审计的上下文边界。
+
+以上是模块 0～2 的阶段性边界。压缩、ContextRevision 与记忆基础见第 63～68 章；向量索引和混合检索见第 69～73 章。MCP、Redis 和容器强隔离仍属后续模块。模块 0～2 的部署步骤见[运行说明](阶段四-模块0至2验收与运行说明.md)，设计决策见[ADR-007](ADR-007-租约隔离与请求上下文预算.md)。
+
+---
+
+## 63. 阶段四模块 3：可恢复压缩与完整输出归档
+
+### 63.1 本模块解决什么问题
+
+模块 2 可以回答“这一次请求能否放进窗口”，却不能让很长的工具历史一直保留在窗口内。假设一个任务先后读取五份长文，最后才综合回答：直接继续追加消息会超限，直接截断又会丢掉后面回答所需的证据。
+
+模块 3 把问题拆成两个步骤：完整内容保存到可校验的 Artifact；模型上下文保留较短的摘录和来源引用。与此同时，压缩后的上下文必须成为可恢复状态的一部分，否则进程重启会看到与崩溃前不同的提示词。
+
+这里的“摘要”只描述本次 Run 的工作历史。它不表示用户已经同意保存长期偏好，也不改变副作用或审批的真实状态。
+
+### 63.2 文件职责与阅读入口
+
+| 文件 | 关键对象/方法 | 负责的边界 |
+|---|---|---|
+| `memory/summarization.py` | `ExtractiveSummarizer.summarize()` | 从合法组构造有来源的受限摘录 |
+| `runtime/context_store.py` | `ContextStore.prepare()` | 判断阈值、验证候选、事务提交新上下文 |
+| `core/loop.py` | `AgentLoop.run()` | 每轮请求前准备上下文，再执行预算检查 |
+| `core/models.py` | `LoopState` | 保存 v2 revision、历史截止点和原循环状态 |
+| `runtime/checkpoints.py` | `load_latest()` | 检查快照版本及 revision 归属 |
+| `tools/output_store.py` | `preserve()` / `read()` | 全量脱敏归档、预览、哈希和作用域校验 |
+| `tools/builtin/artifact_read.py` | `ArtifactReadTool` | 模型可见的 ID 分页读取能力 |
+| `tools/executor.py` | `execute()` | 在截断与效果结果登记之前归档 |
+
+建议先看 Executor 的调用位置，再看 ContextStore 的事务，最后回到 AgentLoop。这样可以先分清“工具结果过大”和“整个请求过大”两个不同层次。
+
+### 63.3 为什么先保存全文再生成预览
+
+原来的执行顺序是工具返回字符串，然后 `_truncate()`，再把截断结果写入效果账本。那时即使工具本身成功，运行时也没有完整结果可以回读。
+
+现在持久化 Runner 会传入 `ToolOutputStore`：
+
+```text
+tool.invoke(arguments)
+→ 得到完整字符串
+→ redact(content)
+→ 超过结果预算？
+   ├─ 否：返回脱敏字符串
+   └─ 是：create_unique() 保存全文
+          → 生成 artifact_id/hash/total_chars 引用
+          → 追加预算内的预览
+→ Executor 最终长度检查
+→ middleware.after_success()
+→ ToolResult
+```
+
+“完整”指脱敏后的完整正文。密钥被替换为 `[REDACTED]`，系统不会同时保存一份可恢复密钥的原始副本。
+
+Artifact ID 与文件路径不同。模型得到的是数据库登记的 ID；目录结构和 URI 由受控存储维护。文件写入采用排他创建，已经存在的同名文件不能被重写。
+
+### 63.4 `artifact_read` 怎样读取
+
+工具参数是 `artifact_id`、`offset` 和 `limit`。offset 从 0 开始，单位是 Unicode 字符；limit 默认 2000，最大 8000。它不接受文件路径，也不接受“我要读取另一个 run_id”这样的授权参数。
+
+服务端先取 ArtifactRecord，检查属于当前 Run、没有 erased 标记，再读取字节并复算 SHA-256。通过后返回当前页、总字符数和 next_offset。越界 Run 返回权限错误，内容哈希不匹配返回工具执行错误。
+
+这一步既防止路径穿越，也避免模型把一个已知 UUID 当作跨运行读取权限。以后若要支持显式共享的 Artifact，必须增加服务端授权关系，不能仅放宽工具参数。
+
+### 63.5 保存失败为什么不能伪造引用
+
+如果文件写入出现预期 I/O 错误，预览包含 `artifact_store_failed: full output unavailable`，而不是一个没有对应文件的 ID。若预算连引用本身都放不下，则返回明确的预算不足提示。
+
+工具动作已经成功与输出归档失败是两件事。一个文件写入工具完成外部动作后，不能仅因为归档失败就把动作当作未执行再重试。ToolEffect 仍记录执行事实，输出状态通过预览说明。
+
+大结果每次归档会获得不同 ID。重复调用检测因此对受控归档结果使用内容 hash 作为稳定指纹，否则相同结果会因为 UUID 不同而绕过重复调用上限。
+
+### 63.6 80% 和 60% 各自负责什么
+
+ContextStore 使用模块 2 的 Counter 对完整请求计数，工具 JSON Schema 也在其中。这里的阈值相对于 `input_limit`，不是模型声明的总窗口。
+
+```text
+input_limit = context_window - output_tokens - safety_margin
+trigger = input_limit × 0.8
+target = input_limit × 0.6
+```
+
+低于 trigger 时不压缩。高于 trigger 时构造候选，但只有候选小于原请求且不超过 target 才提交。两个阈值之间留出余量，避免每增加一条工具消息就重复压缩。
+
+达不到目标不会继续无界递归尝试。当前算法记录降级原因，保留原上下文，再让原有 ContextPolicy 判断能否发送。原上下文仍可容纳时任务继续；超限时得到预算错误。
+
+### 63.7 什么消息可以被压缩
+
+先调用 `MessageGroupBuilder.build()`，因此孤立 tool 结果、缺失结果、重复 call ID 会在压缩前失败。候选只来自旧的、以 assistant tool_calls 开头的完整组。
+
+以下内容保留原样：
+
+- system 消息与已经渲染的 Skill；
+- 用户最初的目标及其他 user 消息中的约束；
+- 最近两组消息；
+- 不符合完整工具组条件的消息。
+
+例如第五轮工具刚返回时，旧的第一至第三轮可以转为摘录，第四、第五轮仍保留原始调用和返回。只读第一个 tool 结果而遗漏同一 assistant 请求中的第二个结果，不是合法压缩。
+
+### 63.8 为什么默认采用原文摘录
+
+`ExtractiveSummarizer` 有固定方法版本 `extractive-v1`、输入字符上限、组数上限和单条摘录长度上限。它不调用模型，不调用工具，也不会再次进入 AgentLoop。因此这条默认压缩链路的辅助请求数与辅助 Token 消耗均为零。
+
+结构化结果包括：
+
+| 字段 | 含义 |
+|---|---|
+| `goal_ref` / `constraint_refs` | 原始目标与约束仍在原消息中；引用指向归档上下文 |
+| `observations` | 工具返回的原话片段，以及 source_index、group_id |
+| `covered_group_ids` | 被替换的完整组的内容哈希 |
+| `source_hash` | 候选生成所用原始上下文哈希 |
+| `artifact_refs` | 脱敏完整上下文的数据库 Artifact ID |
+| `completed_steps` / `pending_steps` | 当前留空，不根据摘录虚构执行状态 |
+| `authority` | 明确标识低可信观察，不是工具或审批权威 |
+
+组哈希用于定位来源，不用于证明内容正确。工具返回本身也可能错误，摘录只保证可以追溯到输入。
+
+### 63.9 为什么摘要放在 user 层
+
+摘要内容可能包含网页、文件或工具返回中的指令。把它拼成 system 会将不可信资料提升为最高权限提示；当前实现将它包装成明确标注的低可信 user 消息，并设置可选上下文优先级。
+
+即使摘要里出现“写入已成功”或“用户批准”，Executor 也不能据此跳过 ToolEffect/Approval 检查。后两者仍由数据库事务维护，模型文字不能修改执行权限。
+
+### 63.10 ContextRevision 怎样成为可恢复事实
+
+ContextRevision 保存 Run、revision 序号、parent_id、输入/策略哈希、去重键、Artifact ID、结构化摘要及前后估算值。它不是在内存里修改 messages 的日志，而是“这次运行采用了哪一版上下文”的权威记录。
+
+提交顺序是：
+
+```text
+构造并检查候选
+→ 排他写入 Artifact 文件
+→ 打开 UnitOfWork
+→ LeaseGuard 锁定 Task/Run 并验证租约
+→ 再验证记忆引用
+→ 检查当前 revision 是否仍为预期 parent
+→ 登记 ArtifactRecord
+→ 写 ContextRevision
+→ 写 context.summarized 事件
+→ 写包含新 messages/revision 的 v2 Snapshot
+→ COMMIT
+→ AgentLoop 才采用新的 messages
+```
+
+parent 检查解决“另一个执行者已经提交新上下文”的问题；去重键结合 parent、输入哈希与策略哈希，避免同一转换产生重复 revision。重复提交遇到已保存的同一候选时可复用快照。
+
+### 63.11 两个故障位置有什么差别
+
+在提交之前退出：事务回滚，新 revision 和新 Snapshot 都不存在，旧 Snapshot 仍是恢复入口。已经创建的文件可能成为孤儿，但没有 ArtifactRecord，artifact_read 无法读取它。
+
+在提交之后退出：最新 Snapshot 已经带着新 messages、context_revision_id 和原循环计数。恢复应加载它，而不是重新摘要旧消息、重新执行完成的工具，或把 Usage 清零。
+
+恢复引用了 ContextRevision 时，运行时还会检查 Run 归属和 Artifact 内容哈希。文件丢失、被改动或已擦除，不能静默继续使用旧摘要。
+
+### 63.12 v1/v2 的边界
+
+LoopState v2 新增 schema_version、context_revision_id 和 history_before_sequence，原有 completed_iterations、Usage、usage_is_complete、重复调用指纹与次数继续保存。
+
+RunConfigSnapshot 未显式声明版本时仍解释为 v1，canonical_dict 不加入新的默认字段，从而保持旧哈希。新持久化运行默认 v2，并冻结摘要方法。活动 v1 不自动升级；版本或配置不匹配时返回 `snapshot_incompatible`。
+
+旧终态 Trace 查询不需要继续执行，所以仍可查看。不要把“旧 Trace 可查看”误认为“旧活动任务一定可恢复”。
+
+### 63.13 本模块阅读与验证顺序
+
+```text
+1. ToolExecutor.execute() 中 preserve 的位置
+2. ToolOutputStore.preserve() / read()
+3. MessageGroupBuilder.build()
+4. ExtractiveSummarizer.summarize()
+5. ContextStore.prepare() 的候选检查与提交事务
+6. AgentLoop 的请求前准备和 checkpoint
+7. test_context_failure_before_commit_keeps_old_snapshot()
+8. test_context_revision_snapshot_and_restore_preserve_counters()
+```
+
+纯内存阶段一 CLI 仍只使用预算检查，不隐式创建数据库或 Artifact 服务。自动持久化压缩属于独立 Worker 的运行链路。
+
+---
+
+## 64. 阶段四模块 4：Workspace、消息投影与版本化记忆
+
+### 64.1 为什么 Session 表不等于已有会话记忆
+
+之前的 Session 能把 Task 分组，但任务目标主要在 Task.goal，答案在 Run.final_answer，事件中只保存可能截断的片段。存在一个 Session ID，并不能保证已经有按顺序可读取、可引用的对话。
+
+模块 4 建立权威 Message 投影，为之后的历史加载和事实提取提供稳定输入。当前没有自动将全部历史灌进模型；保存历史和选择历史是两项不同职责。
+
+### 64.2 Workspace 和工作目录的区别
+
+WorkspaceRecord 是数据库中的逻辑归属。Session.workspace_id 指向它，MemoryEntry 的 workspace_id 决定事实可在哪个逻辑空间使用。
+
+`Settings.workspace` 则是文件工具的工作目录。修改路径不应自动改变记忆权限；持有某个目录也不应意味着可以读取另一个 Workspace 的事实。
+
+当前本地服务使用固定默认 Workspace。迁移把已有 Session 归入该 Workspace；测试使用 metadata.create_all 时也创建相同默认记录。没有在请求中让模型填写任意 workspace_id。
+
+### 64.3 新消息字段分别用于什么
+
+| 字段 | 作用 |
+|---|---|
+| `session_id` | 历史所属会话 |
+| `task_id` / `run_id` | 指向产生该消息的执行实体 |
+| `session_sequence` | 会话内稳定顺序，不依赖时间精度 |
+| `kind` | goal、terminal 或 legacy |
+| `role` | user/assistant 等展示与来源身份 |
+| `content_hash` | 复验来源是否被改写 |
+| `backfill` | 明确标记历史迁移记录，不当作完整新来源 |
+
+数据库约束 `(session_id,session_sequence)` 不可重复；`(run_id,kind)` 使重复终态投影无法产生第二份答案。
+
+### 64.4 为什么不能用 `max(sequence)+1`
+
+两个并发请求都可能读到当前最大序号 7，并且都尝试写入 8。唯一约束虽然能拒绝其中一个，却不能让正常并发创建自然成功。
+
+`append_message()` 使用数据库原子 UPDATE：将 Session.next_message_sequence 加一，并通过 RETURNING 获得更新后的值，再减一作为当前消息序号。这个更新也串行化同 Session 的分配。
+
+终态幂等键在持有这次会话写事务时检查。重复调用可能消耗一个序号而不增加消息，因此序号允许空洞；它承诺稳定、不重复、递增，不承诺连续无空缺。
+
+### 64.5 Task 创建为什么必须包含用户消息
+
+普通任务的创建事务现在是：
+
+```text
+检查 Session
+→ INSERT Task
+→ INSERT Run
+→ 原子分配 Session 序号
+→ INSERT goal Message
+→ 设置 Task.history_before_sequence
+→ 写 task.queued 事件
+→ COMMIT
+```
+
+如果中途失败，Task、Run、消息和事件一起回滚，不会出现“任务已经可执行，但找不到用户原话来源”的半成品。EvalCoordinator 创建评测 Run 时也走同一消息投影规则，之后的记忆门禁再明确排除评测来源。
+
+### 64.6 历史截止点怎样防止未来信息泄漏
+
+设已有消息序号 1、2，任务 A 的 goal 分配到 3，于是 A.history_before_sequence 为 3。任务 B 随后分配到 4。
+
+`history_for_task(A)` 使用 `session_sequence < 3`，只返回 1、2。无论 B 提交得多快，或者 A 稍后恢复多少次，都不能突然看到 B 的新目标。
+
+A 自己的目标从 Task.goal 构造，不需要再通过历史加载一遍。严格小于与小于等于不能互换，否则自己的 goal 会重复出现。
+
+### 64.7 终态消息何时写入
+
+Worker.finalize 在 Task/Run 状态与事件提交的同一事务里调用 `project_terminal()`。COMPLETED 投影 final_answer；FAILED、CANCELLED、TIMEOUT、LIMIT_REACHED 投影结构化状态与 error_code。
+
+RETRYING 和 WAITING_USER 不是终态，不投影成最终答案。直接取消路径和恢复判定失败路径也补上相同投影，避免只有正常完成才进入消息历史。
+
+幂等性依靠 Run ID 与 kind，而不是正文相等。两次不同运行即使都回答“已完成”，也是不同来源，不能按正文合并。
+
+### 64.8 迁移为什么只整理已有消息
+
+迁移 `20260919_0006` 先新增可空字段，再按旧 messages 的 created_at/id 确定顺序，计算哈希并标记 backfill，更新每个 Session 的下一个序号，最后加上非空、唯一和外键约束。
+
+旧 Task.history_before_sequence 保持 0。没有足够证据确定历史边界时，返回空历史比读到未来消息更可靠。
+
+迁移不会把 run_events 中的文本增量或截断 tool 结果拼成“完整历史”。数据不足时应该明确保留缺口，而不是让后来提取的事实建立在伪造的来源上。
+
+### 64.9 MemoryEntry 与 MemoryVersion 为什么分开
+
+假设用户先要求“以后用中文”，后来改为“以后用英文”。这不是两个互不相干的事实，也不能覆盖原来那行正文后假装没有发生变化。
+
+MemoryEntry 用 workspace、scope_key、fact_key 表示同一个事实身份，例如 `response.language`。MemoryVersion 保存每次候选正文、revision、内容哈希、类别、来源类型、有效期与 supersedes_version_id。
+
+Entry.current_version_id 指向当前有效版本。复合外键 `(entry.id,current_version_id)` 指向 `(version.entry_id,version.id)`，因此不能把另一条事实的版本挂到这个 Entry 上。
+
+### 64.10 版本里的置信度为什么不是概率证明
+
+当前原话来源候选保存 `confidence=0.5` 和 `confidence_method=verbatim_source_quote_v1`。这个值只是带方法说明的候选元数据，不表示“有 50% 概率为真”，更不能据此自动确认。
+
+真正的使用资格来自当前版本、confirmed 状态、作用域、有效期、正文哈希和来源校验。模型返回一个很高的 confidence 也不会改变这些条件。
+
+### 64.11 Source、Event 和 Job 的职责
+
+MemorySourceRecord 用真实 Message 外键、source_hash 和 locator 指向证据。当前不接受没有类型约束的“某个 source_id”；也没有开放从任意 Artifact 或助手文字建立事实。
+
+MemoryEventRecord 记录 proposed、confirm、reject、revoke、erase 等操作的身份、actor 和原因码，正文不放入审计事件，以免清理事实后日志又保留一份正文。
+
+MaintenanceJobRecord 保存 kind、去重键、冻结 payload、状态、owner、epoch、有效期、尝试次数和结果。它解决的是“这项维护工作由谁在何种租约下完成”，不是事实可信度。
+
+### 64.12 不可变性与锁版本各解决什么
+
+Version 的 ORM 更新监听器拒绝正文与身份字段原地修改；唯一例外是明确 erase，把正文置空并标记 erased。修改偏好必须创建新的 Version。
+
+Entry.lock_version 则用于用户界面的并发决定。两个页面同时看到锁版本 0，只有一个操作可以把它更新为 1；另一个返回冲突，不能无声覆盖已发生的确认或撤销。
+
+这些应用层保护不等同于数据库管理员不可修改数据。读取时仍复算哈希和来源资格，不能只因为记录曾经通过校验就永久信任。
+
+### 64.13 本模块阅读顺序
+
+```text
+1. db/models.py 的 Workspace / Session / Message / Task
+2. sessions/service.py 的 append_message()、history_for_task()
+3. TaskService.create_task() 和 JobLeaseManager.finalize()
+4. MemoryEntry / Version / Source / Event
+5. migration 0006 的旧数据回填
+6. test_message_projection_is_ordered_idempotent_and_history_is_frozen()
+7. test_phase_four_migration_backfills_existing_messages()
+```
+
+---
+
+## 65. 阶段四模块 5：事实提议、人工确认与遗忘
+
+### 65.1 本模块的输入和输出
+
+输入是有权威 Message 记录的用户原话，以及明确的管理操作。输出是 proposed 候选、人工决定后的当前版本、可追溯归档和可查询的维护任务。
+
+它不负责向量检索，也不在每次 Agent 请求里自动加入长期记忆。当前提供词法查询与持久引用接口，自动注入属于模块 7。
+
+### 65.2 为什么先验证来源再调用模型
+
+`source_message()` 要求来源属于目标 Session，role=user、kind=goal、不是 backfill，正文哈希相符，所属 Run 已 completed。随后排除 EvalRun、待处理审批和 UNKNOWN 副作用。
+
+这意味着失败任务中的一句“请记住”不会直接成为可提取来源；HOLDOUT 更不会通过换一个 API 进入普通记忆。当前实现保守排除所有评测来源，而不只排除 HOLDOUT。
+
+提取 API 先做这些验证，再调用候选生成器。否则即使最终拒绝候选，不合格资料也已经被发给外部模型，后置过滤无法收回那次请求。
+
+### 65.3 内容策略检查什么
+
+`memory/policy.py` 检查常见凭据形式、私钥标记、忽略系统指令等注入模式，以及“本次”“这次”“this time”一类一次性意图。它们不能改写长期偏好。
+
+候选正文还必须是来源原文中的真实子串。把“本次用中文”概括成“用户始终偏好中文”既违反一次性规则，也无法通过原文引用检查。
+
+规则是保守入口，不是自然语言安全性的形式化证明。未来扩展新来源时应重新设计来源信任边界，不能简单减少正则规则来提高命中率。
+
+### 65.4 确定性与 Model 生成器有什么不同
+
+默认 `extract_proposals()` 只识别“请记住”“以后都”“always prefer”等明确长期意图，返回原文候选；没有长期意图时返回空集合，不猜测隐含偏好。
+
+可选 `ModelMemoryExtractor` 使用专门的无工具请求。它最多返回 3 条候选，只允许 fact_key/content/kind，来源 Message ID 与 Session scope 由服务端补入。模型不能返回 confirmed、workspace_id 或任意来源 ID。
+
+该调用不进入 AgentLoop，所以不会递归压缩或调用用户工具。它有 8000 字符输入/输出限制、1000 输出 Token、10000 本地估算预算和 10 秒期限；错误或超时不会自动无限重试。
+
+启用方式为配置 `EVOAGENT_MEMORY_EXTRACTOR_MODEL` 及兼容 Provider。默认留空即可离线工作。Mock Provider 可以验证协议和边界，但不证明真实模型提取质量。
+
+### 65.5 `propose()` 为什么不修改当前事实
+
+服务端从 Session 得到 workspace_id，并将 scope 规范化为 `workspace` 或具体 Session ID。首次创建同一事实时通过 Workspace 锁串行化，找到已有 Entry 后再追加 revision。
+
+新 Version 总是 proposed，记录其生成时看到的 supersedes_version_id。若 Entry 已有 confirmed 当前版本，提出新候选不会让旧版立刻消失。
+
+同来源、同事实和同正文的有效候选会复用已有版本，重复点击不会制造无限版本。已 erased 的同一事实正文不会从旧来源直接复活。
+
+### 65.6 人工确认的事务
+
+```text
+读取版本和 Session
+→ 锁住 MemoryEntry
+→ 检查 Workspace/Session scope
+→ 检查状态转换是否合法
+→ CAS expected_lock_version
+→ 重新校验来源
+→ 检查 supersedes_version_id 仍等于当前版本
+→ 旧当前版本标记 superseded
+→ 新版标记 confirmed，更新 current_version_id
+→ 写不含正文的 MemoryEvent
+→ COMMIT
+```
+
+CAS 解决同时操作同一 Entry 的冲突；supersedes 检查解决“这个候选提出之后，当前事实已经被别的版本改变”的冲突。两者不能互相替代。
+
+确认权限只在本地可信管理 API，不作为模型工具注册。模型即使输出“用户已经确认”，也只能得到一个待人工决定的候选。
+
+### 65.7 状态变化怎样理解
+
+```text
+proposed ──confirm──> confirmed ──被新版确认替换──> superseded
+    │                    │
+    ├─reject→ rejected   └─revoke→ revoked
+    └─revoke→ revoked
+
+可删除版本 ──erase 请求──> revoked + pending Job
+pending Job ──清理成功──> erased（正文为空）
+```
+
+reject 表示候选未被接受；revoke 表示停止继续使用；erase 表示另外要求清理正文。这三者不能只用一个“删除”按钮背后的状态来表示。
+
+状态终止后不能直接把同一 Version 改回 confirmed。新的事实应通过新的提议与确认，让来源和版本关系继续可追踪。
+
+### 65.8 查询时为什么还要再次验证
+
+管理列表展示候选及各版本；带 query 的查询只返回当前 confirmed、未过期、内容哈希正确、来源仍可验证的条目。Workspace 事实可在同一 Workspace 的其他 Session 使用，Session 事实不能跨会话。
+
+`verify_version()` 还会检查来源会话属于同一 Workspace，并再次检查原始 Run 的资格。正文或来源被改动，旧 confirmed 标记不能掩盖这种变化。
+
+当前词法匹配是 casefold 后按空白分词，任一词项出现在正文即可命中。它不提供向量召回、语义相似度或 BM25 排序，中文短语按给出的连续文本匹配。
+
+### 65.9 SessionArchive 为什么不是 MemoryVersion
+
+归档总结一段对话中发生了什么，里面可能有助手假设、临时目标或错误结论；长期事实则需要明确类型、scope、证据与人工确认。
+
+`enqueue_archive()` 冻结当前末尾序号、来源消息哈希和配置，使用这些信息建立去重键。Worker 只处理这个范围，之后到达的消息不会被带入旧归档。
+
+默认归档用受限原文摘录，最多处理 1000 条消息和 100 万字符，最终摘要最多 16000 字符。它不调用 MemoryService.propose，也不自动确认任何事实。
+
+### 65.10 为什么维护必须使用持久 Job
+
+如果使用 API 进程里的后台协程，进程重启后就可能永远不知道归档或删除进行到哪一步。MaintenanceJobRecord 把 pending/running/completed/failed 状态写在数据库里。
+
+Worker 领取 pending 或过期 running，分配新的 owner 和递增 epoch，并记录 attempts。执行时检查 owner、epoch、expiry，完成前再次检查期限。旧执行者即使醒来，也不能提交新执行者已经接管的任务。
+
+失败不显示完成。管理者可以读取 error_code，再显式 POST retry；GET 只读状态，不会因为刷新页面重新调用模型或删除文件。
+
+### 65.11 已经装进上下文的记忆怎样撤销
+
+后续检索模块需要调用 `bind_version()`，把实际采用的 version_id/content_hash 与 Run 绑定到 RunMemoryReferenceRecord。引用是持久记录，因此进程重启不会忘记自己采用过哪条记忆。
+
+ContextStore 在每次请求前调用 `check_run_references()`。只要引用已经 revoked、erased、过期、被替代或来源失效，就返回 `context_source_revoked`，不能继续把旧内容交给 Provider。
+
+持久化 Runner 开始恢复前也检查引用；Checkpoint 保存、事件正文、效果结果和终态处理有相应保护，避免撤销后迟到的响应重新写回已清理正文。
+
+这阻止后续发送，不代表能召回已经发送的网络请求。已在外部发生的工具动作仍按效果账本处理，不能因为记忆删除就将 COMMITTED 改为“没有执行”。
+
+### 65.12 erase 删除什么，保留什么
+
+erase API 先提交 revoked 和持久 Job，此时查询已经不再使用该版本。Worker 随后清除指定版本正文、相关归档，以及绑定 Run 的 Snapshot/revision 正文、Artifact 文件和派生 Trace/结果正文。
+
+身份、内容哈希、事件序号、状态与来源关系保留为墓碑，便于解释“这条引用为何不可用”，而不需要恢复被删除的正文。关联原始用户 Message 保留，它属于会话记录；本操作不是整段对话删除。
+
+对包含已擦除来源的归档请求，系统拒绝重新生成，避免一边删除摘要一边又从相同旧来源创建副本。文件删除失败会使 Job failed，之后可重试。
+
+数据库备份、WAL、旧文件备份、远端 Provider 和已发送消息不受本地在线清理控制。这里的 erase 不是物理介质安全擦除保证。
+
+### 65.13 API 与服务的分工
+
+| API | 服务职责 | 是否产生持久写入 |
+|---|---|---|
+| GET messages | 读取有序消息 | 否 |
+| POST memories | 校验来源，创建 proposed 版本 | 是 |
+| GET memories | 管理列表或有效词法查询 | 否 |
+| POST decision | CAS 与人工状态转换 | 是 |
+| POST memory-extractions | 有界候选生成，再执行 propose | 是 |
+| POST archives | 冻结范围并入队 | 是 |
+| GET archives | 读取已有归档 | 否 |
+| GET maintenance-jobs | 查询处理状态 | 否 |
+| POST maintenance-jobs/retry | 将 failed 任务重新入队 | 是 |
+
+路由不自行拼接不受约束的数据库 scope。Service 负责业务事务，Repository 负责来源与资格验证，MaintenanceWorker 负责可恢复的维护执行。
+
+### 65.14 本模块阅读顺序
+
+```text
+1. MemoryProposal / MemoryDecision
+2. source_message() 与 policy.validate_content()
+3. extract_proposals() / ModelMemoryExtractor.generate()
+4. MemoryService.propose() / decide()
+5. verify_version() / bind_version() / check_run_references()
+6. enqueue_archive() 与 MaintenanceWorker.claim()/execute()
+7. api/routes/memory.py
+8. test_memory_api_confirm_query_revoke_archive_and_erase()
+```
+
+---
+
+## 66. 阶段四模块 3～5 完整调用链
+
+### 66.1 一次带大结果的长任务
+
+```text
+POST Task
+→ Task/Run/goal Message 原子创建，冻结历史截止点
+→ Worker 领取 epoch 租约
+→ PersistentAgentRunner 冻结 v2 配置
+→ 加载合法 Snapshot 或构建原始目标
+→ AgentLoop 每轮调用 ContextStore
+   → 验证持久记忆引用
+   → 必要时摘录旧完整工具组
+   → 文件先写，revision/事件/Snapshot 同事务提交
+→ ContextPolicy 对最终请求再次计数
+→ Provider
+→ ToolExecutor
+   → 执行工具
+   → 完整脱敏结果归档
+   → 短预览与 Artifact 引用
+   → ToolEffect 记录结果
+→ 保存工具边界 Snapshot
+→ 下一轮或 final_answer
+→ finalize 同事务投影 terminal Message
+```
+
+ContextStore 负责持久化变换；ContextPolicy 负责最后是否能发；Executor 负责工具执行与输出完整性。三个对象不能互相替代。
+
+### 66.2 从用户原话到已确认事实
+
+```text
+已完成普通 Task 的 user goal Message
+→ scope / hash / run / approval / effect / eval 检查
+→ 内容门禁
+→ 手动提议 / 确定性提取 / 可选 Model 提取
+→ 逐条原文引用检查
+→ proposed Version + Source + Event
+→ 用户阅读候选
+→ expected_lock_version + supersedes 检查
+→ confirmed + current_version_id
+→ 带 query 的 GET 每次重新验证后返回
+```
+
+没有从 Model 提取器直接到 confirmed 的路径，也没有从 Archive 直接到 confirmed 的路径。
+
+### 66.3 从撤销到物理正文清理
+
+```text
+POST decision(action=erase)
+→ 当前版本失效 + revoked
+→ pending erase Job
+→ 新查询不再返回
+→ 已绑定 Run 在请求前检查失败
+→ MaintenanceWorker 领取 owner/epoch
+→ 清理版本正文、归档与绑定 Run 派生内容
+→ 保留哈希/状态/来源墓碑
+→ 成功 completed；失败 failed
+→ POST retry 可恢复未完成清理
+```
+
+查询失效与清理完成有两个不同时间点。API 客户端应展示 revoked 与 Job 状态，而不是把入队成功显示为“所有数据已永久删除”。
+
+---
+
+## 67. 阶段四模块 3～5 测试地图
+
+| 测试文件/场景 | 证明的行为 | 不证明的内容 |
+|---|---|---|
+| `test_memory_foundations.py` 消息投影 | 原子序号、终态幂等、固定历史截止点 | PostgreSQL 实际锁等待 |
+| 同 Session 并发创建 | SQLite 下并发任务得到不同序号 | 高负载部署吞吐 |
+| 候选确认与冲突 | proposed 不查询、CAS 拒绝旧决定、来源改动失效 | 用户输入的客观真实性 |
+| unsafe/one-shot 参数 | 常见秘密、注入、一次性需求和非原话被拒绝 | 任意自然语言攻击均可识别 |
+| Workspace scope | 同 Workspace 共享、跨 Workspace 不返回 | 公网认证/RBAC |
+| revoke/erase | 引用失效、持久 Job、正文清理、禁止归档复活 | 远端及备份擦除 |
+| archive range/dedupe | 固定来源范围、重复入队复用、新消息不混入 | 生成式摘要质量 |
+| maintenance old epoch | 过期接管后旧执行者不能完成 | PostgreSQL 真实行锁证明 |
+| output archive/scope/hash | 全量先归档、秘密脱敏、跨 Run 拒绝、哈希校验 | 未登记孤儿自动清理 |
+| context commit/restore | 原约束与计数保留、v2 恢复、坏 Artifact 拒绝 | 真实 Provider Token 精确计量 |
+| crash before commit | revision/ArtifactRecord/Snapshot 回滚，旧快照有效 | 文件和数据库全局原子性 |
+| `test_memory_api.py` | HTTP 提取→确认→查询→归档→erase 完整链路 | 外部模型效果 |
+| `test_memory_extraction.py` | 无工具请求、输出预留、禁止虚构和自行确认 | 真实服务计费/召回质量 |
+| `test_migrations.py` | 空库往返迁移、metadata 对齐、旧消息回填 | 未配置的 PostgreSQL 实机验收 |
+| 原有 Worker 进程故障测试 | 新默认 v2 下独立进程接管仍可运行 | 外部动作 exactly-once |
+
+当前可重复的命令与最新数字见[模块 3～5 验收说明](阶段四-模块3至5验收与运行说明.md)。历史章节中的旧测试数字不覆盖本次增量。全量回归必须包含原有 Skill/Eval 流程，不能只运行新增记忆测试就认为阶段三没有回退。
+
+---
+
+## 68. 阶段四模块 3～5 学习验收
+
+建议结合具体记录和测试回答以下问题：
+
+1. 为什么保存短 ToolResult 不能替代完整输出归档？
+2. `artifact_read` 为什么接受 ID 而不接受路径和任意 Run ID？
+3. 摘录的 group_id、source_index、source_hash 分别指向什么？
+4. 为什么完成步骤和待办步骤不能从工具文字中自动当作执行事实？
+5. 压缩 80% 触发和 60% 目标分别相对于哪一个预算？
+6. 为什么原始用户约束和最近完整工具组不能随意删除？
+7. 摘录达不到目标时，谁决定原请求能不能继续发？
+8. 文件已写但事务未提交时留下什么，模型为什么不能通过 ID 读到它？
+9. 事务已提交但进程未收到返回时，恢复如何获得同一版上下文？
+10. Usage 和重复调用次数为什么必须随 Snapshot 一起保存？
+11. 大结果归档使用随机 UUID，为什么重复调用指纹仍然需要稳定？
+12. 为什么旧 canonical hash 保持不变仍不意味着活动 v1 可以直接升级？
+13. 逻辑 Workspace 与文件系统工作目录分别限制什么？
+14. `max(sequence)+1` 在两个并发创建请求中会怎样失败？
+15. history_before_sequence 为什么使用严格小于？
+16. 重复 terminal 投影消耗序号但不增加消息，是否违反排序保证？
+17. backfill 为什么不能直接成为新的可靠事实来源？
+18. Entry、Version、Source、Event 分别回答哪一个问题？
+19. composite current-version 外键怎样防止挂错事实？
+20. lock_version 与 supersedes_version_id 各防止哪一种冲突？
+21. 模型输出的 confirmed 字段为什么必须被拒绝？
+22. 先验证来源再调用提取器，与调用后过滤有什么不同？
+23. confirmed 版本在查询时还可能因哪些原因失效？
+24. SessionArchive 为什么不能自动转换成长久事实？
+25. 归档入队之后新到达的消息为什么不进入这个任务？
+26. Maintenance epoch 与状态字段怎样共同拒绝旧执行者？
+27. revoke 成功和 erase Job completed 分别能向用户承诺什么？
+28. 为什么 erase 保留哈希、来源和状态墓碑，但不保留事实正文？
+29. 已经发送给 Provider 的内容是否能被后来的 revoke 收回？
+30. 当前词法查询、未来混合检索与自动注入分别位于哪个模块？
+
+能沿着 Task、Run、Message、ContextRevision、MemoryVersion 和 MaintenanceJob 回答这些问题，才说明理解了三个模块之间的约束：上下文变化必须可恢复，来源必须可复验，记忆必须经过明确决定并可以停止使用。
+
+以上是模块 3～5 的历史完成边界。后续模块 6～7 已实现 Embedding/pgvector 代码、混合召回和显式启用的 Memory 注入，详见下文；MCP、Redis 和 Memory 管理前端仍未实现。
+
+---
+
+## 69. 阶段四模块 6：Embedding 契约、派生索引与代次切换
+
+### 69.1 这一模块解决什么问题
+
+模块 5 能回答“这条事实是否经过确认，当前是否还能使用”，却不能很好地处理词面不同的查询。例如资料里是“交通工具”，查询里是“代步方式”，单靠 BM25 未必能找到。
+
+Embedding 把一段文本映射为定长数值向量，使语义接近的文本有机会在距离上接近。它新增的是召回能力，不改变确认规则。即使某条向量与查询完全相同，来源已经撤销时也不能使用。
+
+这也是本模块把权威正文、索引文档、向量、维护任务分开的原因：模型可以换，索引可以重建，但原始事实的版本和决定不能被重建过程覆盖。
+
+### 69.2 建议按什么顺序阅读
+
+| 文件 | 先读的对象 | 负责什么 |
+|---|---|---|
+| `retrieval/embeddings.py` | `EmbeddingProfile`、`EmbeddingResult`、`validate` | 定义输入输出与模型空间身份 |
+| 同上 | `MockEmbeddingProvider`、`OpenAIEmbeddingProvider` | 离线替身与真实 HTTP 适配 |
+| `retrieval/sources.py` | `Source`、`load_source` | 从权威表读取当前允许的来源 |
+| `db/models.py` | 四个索引模型 | 来源外键、唯一键、活动 generation |
+| `retrieval/vector.py` | `PGVector`、`exact_distances` | 原生向量列和精确距离查询 |
+| `retrieval/indexing.py` | `enqueue_source`、`IndexService` | 失效、入队、计算、复验、切换 |
+| `memory/maintenance.py` | `claim`、`execute`、`run_once` | 维护任务租约与失败落账 |
+| `workers/bootstrap.py` | Worker 装配 | 注入并关闭 EmbeddingProvider |
+| `20260920_0007_embedding_and_frozen_retrieval.py` | upgrade/downgrade | 建表、扩展与测试库迁移 |
+
+先看契约，再看数据关系，最后看 Worker。直接从 HTTP 客户端开始，容易把“接口返回向量”误当成索引系统已经完成。
+
+### 69.3 为什么 EmbeddingProvider 独立于 Chat Provider
+
+Chat Provider 消费消息、工具 Schema，并产生文本和工具调用流；EmbeddingProvider 消费字符串批次，返回数量对应的向量。两个接口的单位、失败方式与计费边界不同。
+
+```python
+EmbeddingProfile(
+    model="mock-hash-v1",
+    dimension=1536,
+    preprocessing="text-v1",
+    metric="cosine",
+)
+
+await provider.embed(("以后都使用中文回答",), profile)
+# EmbeddingResult(vectors=(...), model="mock-hash-v1", usage=0)
+```
+
+`EmbeddingResult.usage=None` 表示服务没有报告用量。维护任务把已知批次用量相加，只要任一批未知，总用量也保持未知。Mock 返回 0，因为没有调用收费服务；不能据此估计真实模型成本。
+
+真实实现请求 `/embeddings`，显式发送 `model`、`input`、`dimensions=1536`、`encoding_format=float`。响应根据 `index` 排序后检查完整序号，再校验整个结果。它使用独立的 Embedding Key/Base URL，不偷偷复用 Chat 凭据。
+
+### 69.4 为什么要整批校验
+
+假设输入 A、B、C，服务只返回两个向量。如果直接 `zip(inputs, vectors)`，程序可能把第二个向量错误绑定给 B，甚至静默丢弃 C。数量对得上也不充分：重复 index 或模型标识不符同样不能接收。
+
+当前依次检查：
+
+1. 输入批次 1～16 条，每条非空且不超过 12000 字符。
+2. Profile 为固定 1536 维、cosine、text-v1。
+3. 返回 model 与请求身份相同，数量完全相等。
+4. 每个向量恰好 1536 项。
+5. 数值不能是 bool、NaN、Infinity 或超出 float32 范围。
+6. 至少有可表示的非零分量，避免余弦分母为零和落库后全零。
+
+所有批次校验完成后才开始最终写事务。这样第二批失败不会留下第一批的半成品；重建也不会把不完整 generation 标成 active。
+
+### 69.5 Mock 到底模拟了什么
+
+Mock 对通用 tokenizer 产生的词做 SHA-256，再把词频放到确定的 1536 个位置。相同输入、相同代码得到相同向量，不需要网络。
+
+它能验证维度、幂等写入、查询排序、预算、冻结与故障处理，但不是训练得到的语义模型。测试中用手工指定的相近向量演示“同义词无词面重合也能进入融合结果”，只证明排序算法支持这种输入，不能证明 Mock 理解同义词。
+
+### 69.6 四张索引表各保存什么
+
+| 表 | 身份或关键约束 | 数据职责 |
+|---|---|---|
+| `embedding_profiles` | model 唯一，dimension=1536 | 模型空间、预处理、距离、active/next generation |
+| `index_generations` | profile_id + generation 唯一 | building/active/retired 与来源 manifest |
+| `retrieval_documents` | source_key 唯一，三个来源 FK 恰好一个非空 | scope、来源 hash、输入 hash、active |
+| `document_embeddings` | document/profile/generation/input_hash 唯一 | 派生向量 |
+
+`source_key` 形如 `memory:<version UUID>`，方便统一调用，但关系完整性依靠显式外键。exactly-one 约束防止一行同时挂到 Skill 和 Memory，或完全没有权威来源。
+
+Profile 的模型、维度、距离和预处理身份受 ORM 不可变保护。只允许活动代次等运行字段更新。数据库外部管理员直接修改表不属于应用层不可变保护的承诺范围。
+
+### 69.7 source_hash 与 input_hash 不能合并
+
+`source_hash` 校验权威正文；`input_hash` 校验实际送入 Embedding 的字符串。
+
+对 Memory，检索文本是事实正文；对 Skill，是 name、description 和 triggers 的组合，最终注入的规程还包括步骤等内容；对 Archive，是摘要文本。首版每个来源一个文档，索引输入取前 12000 字符。
+
+因此同一份来源有至少三种视角：完整权威内容、用于召回的文本、实际渲染的注入文本。模块 7 还会保存第三种文本的 hash。一个“内容哈希”不能含糊地代表这三个对象。
+
+### 69.8 为什么不开放任意向量维度配置
+
+迁移定义的是 `vector(1536)`。如果只把配置改成 3072，却继续写入相同列，数据库会拒绝；若把列改成不定长，又可能将不可比较的向量混在一起。
+
+即使两个模型都是 1536 维，也可能使用完全不同的坐标空间。因此查询必须同时约束 profile 和 generation，不能只比较长度。
+
+当前模型切换需要设置模型身份并为新 Profile 重建。以后支持其他维度，应增加明确迁移和对应数据结构；本次没有用 JSON 列规避 PostgreSQL 的维度约束。
+
+### 69.9 PostgreSQL 与 SQLite 的两条路径
+
+`PGVector` 是 SQLAlchemy 自定义类型，PostgreSQL DDL 为 `VECTOR(1536)`，绑定参数序列化为向量文本。迁移先执行 `CREATE EXTENSION IF NOT EXISTS vector`。
+
+生产查询使用：
+
+```sql
+embedding <=> CAST(:query_vector AS VECTOR(1536))
+```
+
+距离越小越接近。查询还限制允许文档、Profile、generation、Document active 和当前 input_hash；它不负责扩展权限，也不为了填满 Top-K 去掉 WHERE 条件。
+
+SQLite 路径把向量保存为 JSON，由 Python 计算 cosine distance。它验证应用分支和数据生命周期，但没有 PostgreSQL 类型、算子、扩展和真实行锁。测试报告必须把这两类证据分开。
+
+### 69.10 为什么业务事务中只入队
+
+确认事实时，如果先提交 confirmed，再单独入队，进程可能在两个操作之间退出，留下永远没有索引任务的事实。反过来，先入队再提交事实，Worker 可能看到还没确认的数据。
+
+`enqueue_source` 与业务决定处于同一事务。Memory 的 confirm/revoke/erase、Skill 的 publish/rollback/disable、归档完成都会产生维护任务。替换事实还会使旧版本的索引失效。
+
+该函数也立即把现有 Document 标为 inactive 并删除向量。撤销无需等待后台 Worker 才生效；没有向量的合法新事实仍可通过词法路径读取。
+
+### 69.11 IndexService.execute 的三个阶段
+
+```text
+短事务 A
+  验证 Job owner/epoch/expiry
+  读取 Profile、generation 和合法来源
+  冻结本次输入及 hash
+结束事务 A
+
+事务外
+  分批调用 EmbeddingProvider
+  15 秒请求上限
+  校验完整返回结果
+
+短事务 B
+  重新验证 Job owner/epoch/expiry
+  锁定 Profile；来源父记录加锁并刷新
+  重新验证来源状态、source_hash、input_hash
+  幂等写入 Document/Embedding
+  必要时切换 generation
+  提交前再检查租约有效期
+  完成 Job 并提交
+```
+
+网络等待期间不持有数据库事务。事务 B 不能只相信事务 A 中读到的对象，因为调用期间可能发生撤销或新版本发布。
+
+已失效的增量来源不会写入向量；重建则要求整个 manifest 仍满足条件。前者允许单项失效后完成无写入任务，后者不能把缺来源的构建误记为完整成功。
+
+### 69.12 重复、晚返回与旧代次分别怎样处理
+
+重复消费通过向量唯一键避免重复写同一 input；完成的 Job 不再被 claim。不同业务状态变化有不同 Job，不能按 source_key 把所有变化合并成一个永久任务。
+
+旧 Worker 晚返回会遇到 owner/epoch/expiry 校验失败。即使它持有相同来源文本，也没有权利完成已被接管的 Job。
+
+增量任务算向量期间，如果活动 generation 已变化，最终事务拒绝向旧代提交。显式重试会重新读取活动代。旧 rebuild 的 generation 若已经落后于当前活动代，同样拒绝倒退切换。
+
+### 69.13 重建为什么先保存 manifest
+
+`queue_rebuild` 在 Profile 锁下分配新代，并把当时合法来源的 key/hash 保存到 IndexGeneration。重复提交会复用同 Profile 的 pending/running rebuild。
+
+构建开始验证 manifest，计算结束再验证来源。只有完整结果和活动指针一起提交，查询才读到新代。失败时旧代继续可用，不会先清空旧索引再等待新向量。
+
+首版重建最多 64 个合法来源，每批 16 个。超限返回 `index_batch_limit`，需要未来实现分页重建后再扩大规模；不能取前 64 个却宣称全量完成。构建期间检测到来源集合变化时，重新排一个 rebuild，而不是修改原 manifest。
+
+该策略面向小规模受控数据。重建后的新发布仍由同事务增量 Job 跟进；索引是最终一致的，查询层必须能处理 `partial_index`。
+
+### 69.14 失败如何留痕与重试
+
+MaintenanceWorker 保存 failed、error_code、attempts 和 `next_attempt_at`。后者当前是建议的重试时间，不是已经安装了自动重试调度器。
+
+`POST /maintenance-jobs/{id}/retry` 只接受 failed，清除旧错误和建议时间后重新排队。网络恢复等临时故障可重试；`rebuild_manifest_changed` 需要重新提交 rebuild，重复旧任务不会自动更新 manifest。
+
+取消向上传播，未完成 running 任务在租约到期后可接管。索引完成不代表普通 Run 已开启混合检索，读取策略是下一模块单独控制的开关。
+
+---
+
+## 70. 阶段四模块 7：混合检索、分区预算与选择冻结
+
+### 70.1 本模块新增了哪一层
+
+`ContextResolver` 位于持久化 Runner 与检索算法之间。它接收 Task/Run，负责获得允许候选、召回、预算选择、持久化冻结结果，并返回实际可构造上下文的文本。
+
+算法文件 `lexical.py` 和 `hybrid.py` 不读取业务表，也不决定权限。来源层负责“允许使用什么”，算法负责“允许集合里什么更相关”，Resolver 负责“本次到底注入什么”。
+
+### 70.2 新旧链路如何选择
+
+| Run 与配置 | 执行路径 |
+|---|---|
+| retrieval，lexical，Memory/Archive 都关闭 | 原 SkillRetrievalService |
+| retrieval，hybrid | ContextResolver，Skill 两路召回 |
+| retrieval，Memory 开启 | ContextResolver，允许已确认事实；backend 决定是否向量召回 |
+| retrieval，Archive 开启 | ContextResolver，同会话历史归档候选 |
+| baseline | 不自动注入 Skill/Memory/Archive |
+| pinned_skill | 原内部固定 Skill 路径，不自动加入长期记忆 |
+
+配置默认不改变旧任务的词法 Skill 行为。新的选择冻结链路要求 Snapshot v2；纯内存 CLI 没有持久化 Batch，不承担这里的恢复保证。
+
+### 70.3 先过滤有什么实际意义
+
+设当前会话允许的事实向量距离为 0.2，另一会话的私有事实距离为 0.0。如果先在全库取最近一条，再检查权限，会丢掉唯一候选；开发者容易为了填满结果继续扩大无权限检索。
+
+当前实现先得到允许的 source 集合，再把对应的 Document ID 传给向量 SQL。另一会话的私有事实不会进入召回集合，也不会作为“被过滤的高分候选”暴露在审计 API 中。
+
+### 70.4 三类来源的硬条件
+
+| 来源 | 初次选择必须满足 |
+|---|---|
+| Skill | enabled、当前 active 指针、active 版本、定义 hash、DSL 校验、工具集合和风险兼容 |
+| Memory | 同 Workspace，可见 Session 或 workspace scope，confirmed、current、未到期、正文及原话来源有效 |
+| Archive | active，同 Session，end_sequence 严格小于 Task.history_before_sequence，来源 hash 有效，来源不是 Eval |
+
+缺少来源、状态不允许等记录不会进入候选。对于当前作用域下已经确认的正文 hash 损坏，检索直接失败；它不是“向量服务不可用”，不能通过 BM25 降级掩盖。
+
+Archive 只是低可信历史，不能自动变成 confirmed Memory。Eval 来源也不能通过先归档再索引绕过普通记忆的来源限制。
+
+### 70.5 通用 BM25 为什么仍保留旧 tokenizer
+
+`lexical.py` 抽出原 Skill 检索的分词和 BM25，`skills/retrieval.py` 保留生命周期选择和结果包装。这样增加 Memory 候选无需复制另一套打分公式。
+
+英文按词，中文保留单字和相邻双字特征；同分按稳定 ID 排序。`k1=1.5`、`b=0.75` 控制词频饱和与文档长度归一化。它没有新增分词模型，也不声称能进行中文语义理解。
+
+### 70.6 RRF 如何把两路结果放到一起
+
+BM25 分数与余弦距离单位不同，不能直接相加。RRF 使用各自名次，默认两路等权：
+
+```text
+score(d) = 1 / (60 + lexical_rank(d))
+         + 1 / (60 + vector_rank(d))
+```
+
+只在某一路出现时只加该项。比如 A 的词法名次 1、向量名次 2，得分为 `1/61 + 1/62`；B 只在向量路名次 1，得分为 `1/61`。这是相对排序信号，不是 A 的事实准确概率。
+
+每路先过门槛：默认 BM25 ≥ 0.1、向量距离 ≤ 0.35，然后各取 Top-100。没有任何一路达标就不会入选，避免低相关资料仅靠“总有一个第一名”进入上下文。
+
+同分按来源键排序，其中包含稳定版本 ID。阈值、RRF k、Top-N 与算法版本都记录到 Batch config，不能只保存最终分数而丢掉产生它的条件。
+
+### 70.7 相同 scope 的 BM25 降级
+
+| degraded | 触发条件 | 后续行为 |
+|---|---|---|
+| `index_not_ready` | 缺 Profile 或合法索引文档 | 使用已过滤的词法候选 |
+| `vector_unavailable` | Query Embedding/向量查询失败或超时 | 使用已过滤的词法候选 |
+| `partial_index` | 活动代只有部分候选向量 | 已有向量参与，其他候选仍可走词法 |
+| 空值 | 正常或没有候选而无需向量 | 按当前配置冻结 |
+
+初始来源验证在降级处理之外。SQL 降级也只包围向量查询阶段，不把读取权限表失败当成“可以忽略权限”。
+
+事件使用 `retrieval.degraded` 或 `retrieval.frozen`，记录 Batch ID、数量和原因。正式性能/效果比较必须单独识别降级运行；本模块没有交付检索效果评测器。
+
+### 70.8 召回命中为什么不等于实际注入
+
+Resolver 对排序结果逐条复验，再依次执行三个门槛：
+
+1. 所属分区的 Top-K。
+2. 所属分区的 Token 预算。
+3. 包含 system、用户目标、Skill、Memory 和工具 Schema 的完整请求预算。
+
+Skill 默认预算 4000、Top-K 1；Memory 与 Archive 共用记忆分区，默认预算 2000、Top-K 3。预算使用保守计数器，默认 bounded 下完整请求还受 ContextPolicy 的输入上限约束；显式 legacy 只保留分区预算，不提供完整窗口保证。
+
+例如已经选择两条 Memory，累计估算 1600，第三条估算 600，而预算为 2000，则记录 `partition_budget`，不保存其可注入文本。排名第四但更短的一条仍有可能被选中，因为预算筛选并不是简单截取前三个。
+
+### 70.9 Selection 如何表达未注入
+
+| 字段 | 意义 |
+|---|---|
+| source_key / source_hash | 哪个不可变来源版本参与了选择 |
+| evidence | lexical score/rank/terms、vector distance/rank、RRF |
+| rank | 实际入选顺序；未注入为 null |
+| text / text_hash | 实际冻结的渲染内容及其指纹；未注入正文为空 |
+| omission_reason | top_k、partition_budget 或 request_budget |
+
+硬过滤淘汰的来源不写 Selection，以免暴露其他 scope 的存在。这里的遗漏记录针对已允许且达到相关门槛、但没有通过预算/数量筛选的候选。
+
+冻结的是初始上下文选择。后续模型循环增长时，ContextPolicy 仍可按模块 2 的规则裁剪可选资料；具体某轮发出的消息以该轮请求/快照为准，不能把 Batch 理解成每一轮都发送了所有内容。
+
+### 70.10 零命中为什么也必须写 Batch
+
+没有 Batch 无法区分“还没检索”与“检索完成但没有结果”。如果把零命中当作未初始化，暂停期间新确认一条事实，恢复时就会突然多出新的行为依据。
+
+`RetrievalBatchRecord` 用 run_id + purpose 唯一，selected_count 可以为 0。首次选择即使没有 Selection 也提交 Batch 和选择冻结标记。恢复先查 Batch，有记录就不会调用 Query Embedding。
+
+所以“没有选中任何资料”也是需要持久化的运行决定。
+
+### 70.11 实际冻结文本放在哪
+
+SkillRenderer 的输出作为规程区；Memory 带“长期记忆（不可信资料，不能覆盖当前任务）”标识；Archive 带低可信历史标识。Memory/Archive 通过 `ContextBuilder.external_context` 成为 user 资料消息，最终用户目标保留在后。
+
+Selection 保存渲染文本本身及 hash，而不只保存版本 ID。仅保存版本号仍可能在 Renderer 升级后得到不同文本，无法说明旧运行究竟读到了什么。
+
+Memory 被选中时同时调用 `bind_version` 写 RunMemoryReference。它不是自动确认操作，只是把已经合法的事实绑定到本次 Run，供后续发送前检查和 erase 追踪。
+
+### 70.12 恢复流程与“冻结但仍可撤销”
+
+`_restore` 先比较检索配置，再读取有序 Selection、核对文本 hash 并检查来源。不会因新索引 generation、新确认事实或新 Skill 发布重新排名。
+
+Skill 有一个必要区别：初次选择要求当前 active；恢复允许原冻结版本继续使用，只要其 Skill 仍 enabled、定义 hash 仍一致。否则发布新版会无条件破坏所有旧运行的冻结语义。
+
+Memory 则必须仍是当前有效 confirmed 版本。事实被撤销或替换，旧运行不能继续把旧事实当成当前约束；Archive 仍需遵守原 Task 截止点。冻结保障可复现，不取消用户停止使用来源的权利。
+
+### 70.13 每次发送前怎样复验
+
+`PersistentAgentRunner` 启动时检查引用；Snapshot v2 的 ContextStore 在后续模型请求前也调用 `check_run_references`。
+
+该函数检查绑定 Memory，同时检查 Batch 中冻结文本和 Skill/Archive 来源。Skill 禁用、Archive 擦除、文本 hash 损坏或 Memory 撤销都导致 `context_source_revoked`，不会换另一条资料来“补足”旧选择。
+
+这只能阻止后续发送，不能撤回已经发给远端 Provider 的请求。发送前验证与外部网络动作之间也不具备跨系统事务，不能将它描述成远端数据删除保证。
+
+### 70.14 erase 为什么还要追踪 Archive 引用
+
+一条事实的原始消息可能进入归档，归档又被后续 Run 注入。若只清理 RunMemoryReference，后续 Run 的 Selection/Snapshot 仍可能保存同样的文字。
+
+维护 Worker 从直接绑定的 Run 和原始消息出发，寻找覆盖这些消息的 Archive，再寻找选中了这些 Archive 的 Run，沿引用关系扩展到没有新归档为止。所有受影响 Run 的派生正文采用保守清理。
+
+被清理对象包括冻结文本和证据、向量、终态答案、请求/响应摘要、快照、上下文 revision 和 Artifact 正文。状态、hash、关联 ID 等墓碑保留用于解释为什么内容不可恢复。
+
+原始用户消息、已发往外部服务的内容和外部备份仍不属于此 API 的物理擦除范围。文件清理失败保留 failed Job，可重新执行；不要将入队响应当成全部删除完成。
+
+### 70.15 完整 Skill 列表怎样进入运行指纹
+
+旧 RunConfigSnapshot 的单个 skill_version_id 只能表达第一条 Skill。现在新增有序 `selected_skills`，保存每个版本 ID 和 content_hash；retrieval 保存算法、预算、profile/generation、降级状态和 selection_hash。
+
+第二条 Skill 改变或顺序改变都会改变 content_hash。原单 ID 字段保留，便于历史记录读取和既有报告显示，但不再承担完整选择的唯一身份。
+
+新字段为 None 时从 canonical_dict 省略，历史 hash 不因升级自动变化。新 Runner 保存完整列表，旧活动配置与新语义不一致时仍返回 snapshot_incompatible，不偷偷回填一个看似兼容的列表。
+
+原配对评测的 comparison hash 排除 Skill 实验变量，包括完整列表；其他配置仍要一致。新 retrieval 条件不被随意排除，因此混合与词法不自动成为同一实验条件。
+
+### 70.16 只读证据接口与显式维护接口
+
+`GET /retrieval/profiles` 查看模型身份和活动代；`GET /runs/{id}/retrieval` 查看批次、数量、排名、hash 与遗漏原因，不回传冻结正文，也不触发 Embedding 或写 Job。
+
+`POST /retrieval/rebuild` 才会创建维护任务，返回 Job ID；任务状态和重试复用 `/maintenance-jobs`。原 `/memories?query=` 保留简单查询语义，不在 GET 请求中悄悄确认或索引事实。
+
+接口仍用于项目现有的本地受控服务，没有在本模块新增公网认证/RBAC。检索内部 scope 过滤不能替代 API 的用户身份认证。
+
+---
+
+## 71. 阶段四模块 6～7 完整调用链
+
+### 71.1 从确认事实到可检索向量
+
+```text
+MemoryService.decide(confirm)
+→ CAS / 来源与版本检查
+→ current_version 指向 confirmed
+→ enqueue_source（同事务；替换时旧版立即失效）
+→ MaintenanceWorker.claim（owner / epoch / expiry）
+→ IndexService.execute：读合法正文、冻结本次输入
+→ 结束读取事务
+→ EmbeddingProvider.embed + 整批 validate
+→ 新事务复验 Job、Profile 和来源
+→ Document + Embedding 幂等写入
+→ Job completed
+```
+
+如果 Provider 故障，事实仍已确认，只是向量索引未就绪。查询不能把“缺少向量”解释为“事实不存在”。
+
+### 71.2 从任务到冻结上下文
+
+```text
+Task 固定 session / history_before_sequence
+→ Worker 领取 Run 租约
+→ PersistentAgentRunner 检查 run_mode 和配置
+→ ContextResolver：优先读取已有 Batch
+→ 初次选择：load_source 硬过滤
+→ BM25 + 可选 Query Embedding / 精确向量距离
+→ 各路阈值 + Top-100 + RRF
+→ Guard 检查 + 来源加锁复验
+→ 分区 Top-K / Token / 完整请求预算
+→ Batch + Selection + Memory 引用 + Skill 选择 + Event 同事务提交
+→ RunConfigSnapshot 保存完整配置指纹
+→ ContextBuilder：Skill 规程，Memory/Archive 低可信 user 资料
+→ 每轮 ContextStore / ContextPolicy 复验与预算
+→ ModelProvider
+```
+
+### 71.3 从失败恢复到继续使用同一选择
+
+```text
+RecoveryService / 新 owner 与 epoch
+→ Runner 读取旧 Run
+→ 找到 Batch（包括 selected_count=0）
+→ config / text hash / 来源状态复验
+→ 不调用 Embedding、不重新排名
+→ 校验 RunConfigSnapshot 与原 Snapshot
+→ 复用冻结上下文与执行进度
+```
+
+新发布影响下一次初始选择；撤销影响当前选择能否继续使用。这两个方向不能混为一谈。
+
+### 71.4 从显式重建到原子切换
+
+```text
+POST rebuild
+→ Profile 锁下分配 generation
+→ 保存来源 manifest + pending Job
+→ Worker 领取，旧 generation 继续可读
+→ 事务外分批生成向量
+→ 检查 manifest、来源状态、租约与活动代
+→ 写新代 + 改 active_generation + 完成 Job，同事务提交
+```
+
+失败时活动指针不动；构建期间已冻结的 Run 也不重新选择。索引更新改变未来召回，不改写过去的运行依据。
+
+---
+
+## 72. 阶段四模块 6～7 测试地图与故障定位
+
+### 72.1 新增测试分别证明什么
+
+| 测试文件/场景 | 证明的行为 | 证据边界 |
+|---|---|---|
+| `test_embeddings_and_hybrid.py` 非法向量参数 | 数量、模型、维度、有限值、零向量、float32 边界拒绝 | 没有真实服务质量结论 |
+| HTTP MockTransport | 完整 index 校验、部分失败、取消传播 | 不是外网调用或真实计费 |
+| 人工同义向量/RRF | 词法未命中仍可由合法向量路进入，噪声被阈值排除 | 不代表 Mock 能理解同义词 |
+| 通用 tokenizer/BM25 | 中文特征和稳定同分顺序 | 不引入新的语言模型 |
+| `test_hybrid_retrieval.py` 索引与恢复 | 后续恢复不再次调用 Provider | SQLite 生命周期测试 |
+| 零命中后新增事实 | 负选择不会漂移 | 不能证明外部数据库行锁 |
+| 撤销发生在 embed 内 | 返回的旧向量不能复活来源 | 模拟竞态交错 |
+| 跨 Session 候选 | 私有事实不进入 Query Embedding 路径 | API 身份认证不在范围内 |
+| 重建成功/失败 | 成功切代，失败保留旧代 | 本地事务行为 |
+| 旧 maintenance epoch | 接管后旧执行者无权完成 | PostgreSQL 并发还需实机 |
+| 分区预算 | 未注入候选有 omission_reason，正文不保存 | 估算 Token 不等于真实用量 |
+| Runner retrieval/baseline | 真实构造的请求只在 opt-in 普通 Run 包含低可信 user 记忆 | 使用 Mock Chat Provider |
+| Archive erase | 冻结文本、向量和派生快照清理，发送前复验失败 | 不覆盖远端及备份删除 |
+| `test_run_config_and_manifest.py` | 第二条 Skill、顺序和完整列表影响运行身份；旧 hash 稳定 | 配置读取兼容不等于自动续跑 |
+| `test_migrations.py` | SQLite upgrade/downgrade/check、旧数据迁移 | PostgreSQL 项未配置时跳过 |
+| `test_pgvector.py` | 真实 vector(1536)、余弦算子、generation 过滤、错误维度拒绝 | 本机未执行；需 PostgreSQL+vector |
+
+完整结果见[模块 6～7 验收与运行说明](阶段四-模块6至7验收与运行说明.md)。新增测试之外，还要运行原有 Skill 发布/评测、上下文恢复和 Worker 故障测试，确认公共 tokenizer 与配置指纹没有破坏旧闭环。
+
+### 72.2 出问题先看哪张表
+
+| 现象 | 首先检查 | 常见解释 |
+|---|---|---|
+| 确认成功但没有向量 | maintenance_jobs | Worker 未运行、Provider 失败、旧 epoch |
+| 向量存在却没有结果 | profile/generation、来源状态 | 查的是其他模型空间，或来源已失效 |
+| 命中但没有注入 | retrieval_selections | top_k/partition_budget/request_budget |
+| 恢复仍是零命中 | retrieval_batches | 这是冻结结果，需新 Task 才重新选择 |
+| 重建一直失败 | manifest、error_code | 来源已变，应该重新排 rebuild |
+| 配置改动后不能恢复 | RunConfigSnapshot | 可复现性保护触发 snapshot_incompatible |
+| 撤销后运行失败 | Memory/Archive/Skill 状态 | context_source_revoked 是预期拒绝 |
+| PostgreSQL 迁移报 vector 不存在 | 镜像、扩展权限 | 普通 PostgreSQL 安装不自带此扩展 |
+
+不要通过改 active 指针、手工删 Batch 或改来源 hash 来“修复”上述现象。这会破坏审计与恢复依据；正常操作是修复外部故障、显式重试或创建新的 Task/重建代。
+
+---
+
+## 73. 阶段四模块 6～7 学习验收
+
+结合源代码与测试回答以下问题：
+
+1. 为什么距离为零的 Memory 仍可能不能进入候选？
+2. EmbeddingProvider 与 Chat Provider 的批次、输出和取消语义有什么不同？
+3. 为什么返回数量正确还要校验响应 index？
+4. 全零向量和 float32 下溢分别会造成什么问题？
+5. 相同维度为什么不能跨模型直接比较？
+6. source_hash、input_hash、text_hash 分别对应哪段内容？
+7. source_key 已有类型前缀，为什么还需要显式外键和 exactly-one？
+8. 为什么确认事实和 index Job 要在同一事务？
+9. 为什么不能在 Embedding 网络调用期间一直持有数据库锁？
+10. 撤销发生在网络等待期间，哪个检查阻止向量复活？
+11. Job 唯一键、向量唯一键与 epoch 各解决哪一类重复？
+12. 增量任务生成期间切换 generation，应如何处理？
+13. rebuild manifest 为什么不能在重试时自动替换成最新来源？
+14. 64 个来源上限为何必须失败而不是截断后成功？
+15. SQLite JSON 测试不能证明 PostgreSQL 的哪些能力？
+16. 普通任务在什么配置下继续走旧 SkillRetrievalService？
+17. 为什么硬过滤要发生在向量 Top-N 之前？
+18. Archive 为什么必须使用 Task 原来的历史截止点？
+19. 为什么 BM25 分数与余弦距离不能直接相加？
+20. RRF 两路都排第一，是否说明该事实更可信？
+21. 阈值若放到融合后，会产生哪一种低相关入选问题？
+22. Top-N、分区 Top-K 和 Token 预算分别限制哪个阶段？
+23. 为什么排在后面的短资料可能比前面的长资料更适合注入？
+24. selected_count=0 与不存在 Batch 有什么不同？
+25. 为什么冻结文本而不仅冻结版本 ID？
+26. 新 Skill 发布与 Skill 禁用对恢复分别有什么影响？
+27. Memory 被选中为什么还需要 RunMemoryReference？
+28. 一条事实经 Archive 被另一 Run 使用，erase 如何找到这个派生引用？
+29. 为什么第二条 Skill 与列表顺序也必须进入运行指纹？
+30. 历史 canonical hash 兼容为什么不等于旧活动快照能自动续跑？
+31. baseline/pinned Skill 为什么不受普通记忆开关影响？
+32. next_attempt_at 与自动重试调度之间有什么区别？
+33. 何时可以 BM25 降级，何时必须直接拒绝？
+34. Batch 为什么不能证明每一轮都发出了全部初始资料？
+35. 要证明真实同义召回有改善，还缺哪些数据与执行证据？
+
+能沿来源生命周期、索引 generation、冻结 Batch 和模型请求四个层次解释这些问题，才说明理解了两个模块的协作方式。后续从模块 8 的 MCP 连接与目录发现开始；当前仍需补齐 PostgreSQL、容器和真实检索效果验收。

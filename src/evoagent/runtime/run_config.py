@@ -21,6 +21,10 @@ class RunConfigSnapshot(BaseModel):
     """只包含非敏感、可用于复现实验的运行配置。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+    schema_version: int = Field(default=1, ge=1, le=2)
+    summarizer: str | None = None
+    selected_skills: list[dict[str, str]] | None = None
+    retrieval: dict[str, Any] | None = None
 
     provider: str = Field(min_length=1, max_length=64)
     model: str = Field(min_length=1, max_length=256)
@@ -32,6 +36,7 @@ class RunConfigSnapshot(BaseModel):
     max_repeated_tool_calls: int = Field(default=3, ge=1)
     max_tool_result_chars: int = Field(default=20_000, ge=1)
     temperature: float | None = Field(default=None, ge=0, le=2)
+    context_policy: dict[str, Any] | None = None
     max_output_tokens: int | None = Field(default=None, ge=1)
     model_timeout_seconds: float = Field(gt=0)
     task_timeout_seconds: float = Field(gt=0)
@@ -58,11 +63,23 @@ class RunConfigSnapshot(BaseModel):
 
     def canonical_dict(self, *, comparison: bool = False) -> dict[str, Any]:
         value = self.model_dump(mode="json")
+        if self.schema_version == 1:
+            value.pop("schema_version")
+        if self.summarizer is None:
+            value.pop("summarizer")
+        if self.context_policy is None:
+            value.pop("context_policy")
+        if self.selected_skills is None:
+            value.pop("selected_skills")
+        if self.retrieval is None:
+            value.pop("retrieval")
         if comparison:
             value["run_mode"] = "experiment_variable"
             value["skill_version_id"] = None
             value["skill_content_hash"] = None
             value["skill_context_hash"] = None
+            if "selected_skills" in value:
+                value["selected_skills"] = None
         return value
 
     def content_hash(self, *, comparison: bool = False) -> str:

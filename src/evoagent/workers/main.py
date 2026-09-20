@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import suppress
 from typing import Protocol
+from uuid import uuid4
 
 from evoagent.tasks.lease import (
     JobLease,
@@ -30,8 +31,12 @@ class JobWorker:
         handler: TaskHandler,
         heartbeat_seconds: float,
         poll_seconds: float,
+        snapshot_schema_version: int = 1,
+        maintenance_worker=None,
     ) -> None:
-        self._worker_id = worker_id
+        self._worker_id = f"{worker_id[:95]}:{uuid4().hex}"
+        self._maintenance_worker = maintenance_worker
+        self._snapshot_schema_version = snapshot_schema_version
         self._lease_manager = lease_manager
         self._handler = handler
         self._heartbeat = LeaseHeartbeat(
@@ -48,14 +53,20 @@ class JobWorker:
 
     async def run_forever(self) -> None:
         while not self._stopping.is_set():
-            handled = await self.run_once()
+            try:
+                handled = await self.run_once()
+            except LeaseLostError:
+                handled = False
             if not handled:
                 with suppress(TimeoutError):
                     await asyncio.wait_for(self._stopping.wait(), timeout=self._poll_seconds)
 
     async def run_once(self) -> bool:
+        if self._maintenance_worker is not None:
+            await self._maintenance_worker.run_once()
         await self._lease_manager.promote_due_retries()
         await self._lease_manager.recover_expired()
+        await self._lease_manager.recover_pending(schema_version=self._snapshot_schema_version)
         lease = await self._lease_manager.claim_next(self._worker_id)
         if lease is None:
             return False
@@ -109,3 +120,4 @@ class JobWorker:
             for task in (heartbeat_task, handler_task):
                 if not task.done():
                     task.cancel()
+            await asyncio.gather(heartbeat_task, handler_task, return_exceptions=True)
