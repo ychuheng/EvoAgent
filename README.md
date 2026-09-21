@@ -10,7 +10,7 @@ EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目
 
 模块 9 通过统一 ToolExecutor 接入已审核并显式激活的 MCP 目录，支持动态参数验证、审批绑定、写入 UNKNOWN 和安全卸载。模块 9 的迁移为 `20260921_0009`；操作步骤见[模块 9 运行说明](docs/阶段四-模块9验收与运行说明.md)，详细源码见[手册第 78～81 章](docs/EvoAgent-源码讲解与学习手册.md)，设计取舍见[ADR-011](docs/ADR-011-MCP工具契约冻结与统一安全执行.md)。默认不启用执行，历史 Run 和 baseline/pinned 评测不自动增加 MCP 工具。
 
-模块 10 新增独立 sandbox-controller、固定 digest 容器规格、租约与取消清理、受控 Artifact 输入输出、MCP 容器 stdio，以及 web_fetch 的 DNS/IP 绑定。最新迁移为 `20260921_0010`；详见[模块 10 运行说明](docs/阶段四-模块10验收与运行说明.md)、[手册第 82～85 章](docs/EvoAgent-源码讲解与学习手册.md)和[ADR-012](docs/ADR-012-独立执行容器与受控网络出口.md)。Shell 默认关闭，无宿主 fallback；容器固定禁网。Windows 本地契约回归通过，真实 Linux Docker 验收待补，不能据此宣称隔离已实机通过。
+模块 10 新增独立 sandbox-controller、固定 digest 容器规格、租约与取消清理、受控 Artifact 输入输出、MCP 容器 stdio，以及 web_fetch 的 DNS/IP 绑定。最新迁移为 `20260921_0010`；详见[模块 10 运行说明](docs/阶段四-模块10验收与运行说明.md)、[手册第 82～85 章](docs/EvoAgent-源码讲解与学习手册.md)和[ADR-012](docs/ADR-012-独立执行容器与受控网络出口.md)。Shell 默认关闭，无宿主 fallback；容器固定禁网。Windows 契约回归通过，并已在 Docker Desktop Linux Engine 中完成 11 项真实容器资源、网络、清理与文件边界验收。
 
 记忆提议、确认和归档操作见[模块 3～5 运行说明](docs/阶段四-模块3至5验收与运行说明.md)。Redis 与 Memory 管理前端仍属后续模块。
 

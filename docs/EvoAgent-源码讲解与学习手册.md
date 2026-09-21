@@ -6998,7 +6998,7 @@ PostgreSQL 实机并发、公网 TLS、第三方业务回执与真实模型效�
 
 ## 82. 阶段四模块 10：独立控制器、固定规格与权限边界
 
-第 35 章的宿主 ShellSandbox 和第 74～81 章的受信 stdio fixture 保留历史教学用途。模块 10 开始，持久化 Worker 的 Shell 装配改为 ControllerExecutor；未配置容器 Profile 时拒绝执行。旧白名单不会重新启用宿主命令。本章解释代码已建立的边界；真实 Linux Docker 验收结果必须另外记录，不能用本地 FakeDriver 的成功替代。
+第 35 章的宿主 ShellSandbox 和第 74～81 章的受信 stdio fixture 保留历史教学用途。模块 10 开始，持久化 Worker 的 Shell 装配改为 ControllerExecutor；未配置容器 Profile 时拒绝执行。旧白名单不会重新启用宿主命令。本章解释代码已建立的边界；FakeDriver 只提供契约证据，另有 Docker Desktop Linux Engine 的 11 项实机结果证明声明范围内的资源、网络、清理与文件限制。
 
 ### 82.1 为什么需要第三个进程
 

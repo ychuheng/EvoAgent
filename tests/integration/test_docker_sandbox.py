@@ -90,8 +90,13 @@ async def test_real_resource_exhaustion_and_process_tree_cleanup(real_sandbox, k
     try:
         result = await service.run(script(request, programs[kind]))
         assert result["return_code"] != 0
-    except SandboxError:
-        pass
+    except SandboxError as error:
+        assert error.code in {
+            "sandbox_container_failed",
+            "sandbox_guest_failed",
+            "sandbox_output_limit",
+            "sandbox_timeout",
+        }
     assert not await driver.managed()
 
 
