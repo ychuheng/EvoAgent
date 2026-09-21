@@ -14,6 +14,9 @@ from evoagent.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from evoagent.config import ProviderName, Settings
 from evoagent.db.repositories.base import RecordNotFoundError
 from evoagent.db.session import Database
+from evoagent.mcp.connections import ConnectionManager
+from evoagent.mcp.schema import MCPError
+from evoagent.mcp.service import MCPService
 from evoagent.memory.extraction import ModelMemoryExtractor
 from evoagent.memory.schema import MemoryError
 from evoagent.providers.openai_compatible import OpenAICompatibleProvider
@@ -84,9 +87,14 @@ def create_app(
         app.state.candidate_generator = resolved_candidate_generator
         app.state.skill_tool_registry = resolved_skill_registry
         app.state.trace_sanitizer = TraceSanitizer(resolved_settings.workspace)
+        app.state.mcp_manager = ConnectionManager(resolved_settings)
+        app.state.mcp_service = MCPService(
+            resolved_database.session_factory, resolved_settings, app.state.mcp_manager
+        )
         try:
             yield
         finally:
+            await app.state.mcp_manager.aclose()
             if owned_memory_provider is not None:
                 await owned_memory_provider.aclose()
             if owned_extractor_provider is not None:
@@ -96,8 +104,9 @@ def create_app(
 
     app = FastAPI(title="EvoAgent API", version="0.4.0.dev0", lifespan=lifespan)
     app.include_router(memory.router, prefix="/api/v1")
-    from evoagent.api.routes import retrieval
+    from evoagent.api.routes import mcp, retrieval
 
+    app.include_router(mcp.router, prefix="/api/v1")
     app.include_router(retrieval.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")
@@ -120,6 +129,13 @@ def create_app(
         return JSONResponse(
             status_code=404 if error.code.endswith("not_found") else 409,
             content={"error": {"code": error.code, "message": str(error)}},
+        )
+
+    @app.exception_handler(MCPError)
+    async def handle_mcp_error(_request: Request, error: MCPError) -> JSONResponse:
+        return JSONResponse(
+            status_code=404 if error.code.endswith("not_found") else 409,
+            content={"error": {"code": error.code, "message": error.code}},
         )
 
     @app.exception_handler(TaskServiceError)

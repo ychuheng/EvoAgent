@@ -77,6 +77,10 @@
 71. 阶段四模块 6～7 完整调用链
 72. 阶段四模块 6～7 测试地图与故障定位
 73. 阶段四模块 6～7 学习验收
+74. 阶段四模块 8：MCP 连接、发现与目录版本
+75. 阶段四模块 8 完整调用链
+76. 阶段四模块 8 测试地图与故障定位
+77. 阶段四模块 8 学习验收
 
 ## 1. 阅读说明
 
@@ -90,7 +94,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～7 已实现；PostgreSQL+vector、容器和真实模型效果证据待补。本手册原有章节保留历史学习脉络，最新增量见第 69～73 章；第 57～68 章的完成范围和测试数字保留对应交付时间点。
+`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～8 已实现；PostgreSQL+vector、容器和真实模型效果证据待补。本手册原有章节保留历史学习脉络，最新增量见第 74～77 章；第 57～73 章的完成范围和测试数字保留对应交付时间点。
 
 已经完成：
 
@@ -6295,4 +6299,394 @@ POST rebuild
 34. Batch 为什么不能证明每一轮都发出了全部初始资料？
 35. 要证明真实同义召回有改善，还缺哪些数据与执行证据？
 
-能沿来源生命周期、索引 generation、冻结 Batch 和模型请求四个层次解释这些问题，才说明理解了两个模块的协作方式。后续从模块 8 的 MCP 连接与目录发现开始；当前仍需补齐 PostgreSQL、容器和真实检索效果验收。
+能沿来源生命周期、索引 generation、冻结 Batch 和模型请求四个层次解释这些问题，才说明理解了两个模块的协作方式。模块 8 的 MCP 连接与目录发现现已实现，见第 74～77 章；PostgreSQL、容器和真实检索效果验收仍待补。
+
+---
+
+## 74. 阶段四模块 8：MCP 连接、发现与目录版本
+
+### 74.1 为什么先实现发现，再实现调用
+
+此前 EvoAgent 的工具由本地 Python 类提供：参数模型、风险和实现来自当前仓库。MCP Server 则可以在运行时告诉客户端“我提供了哪些工具”，工具名称、描述和 Schema 都可能由远端改变。
+
+如果把 `tools/list` 的返回值直接放进 ToolRegistry，远端的一次目录更新就可能改变模型可调用的能力，甚至把原先审核过的同名工具换成另一种行为。
+
+本模块先建立连接和目录证据。它能回答“连接到哪一个预设 Server、看到哪一版目录、谁审核过什么”，不提供 tools/call API，不修改 AgentLoop，也不向普通 Run 注册新工具。后续模块 9 才将审核后的目录接入统一执行链。
+
+### 74.2 源码阅读地图
+
+| 文件 | 重点对象 | 对应问题 |
+|---|---|---|
+| `mcp/schema.py` | LaunchProfile、HTTPProfile、MCPServerConfig | 部署配置与 API 配置怎样分开 |
+| `mcp/transports.py` | open_transport、PinnedTransport | 实际启动什么、实际连接到哪里 |
+| `mcp/connections.py` | Connection、ConnectionManager | 谁拥有 SDK 会话，何时关闭 |
+| `mcp/discovery.py` | discover、check_schema、catalog_diff | 什么条件下才算完整目录 |
+| `mcp/service.py` | create/update/publish/review/observe | 网络结果怎样安全落库 |
+| `db/models.py` | 四个 MCP Record | 配置、证据和健康各存什么 |
+| `api/routes/mcp.py` | 管理接口 | 哪些操作写入，哪些只查询 |
+| `api/app.py` | lifespan | API 进程如何持有与关闭 Manager |
+| `mcp/fixture.py` | build_server、serve_stdio | 如何运行真实协议的受信测试 Server |
+| `20260920_0008_mcp_discovery_catalogs.py` | upgrade/downgrade | 如何增加与撤销持久化结构 |
+
+阅读顺序建议为 schema → transports → connections → discovery → service → API。先理解连接的所有权，再看目录事务，可以避免把数据库状态误当成进程内连接对象。
+
+### 74.3 为什么锁定 SDK 与协议两种版本
+
+依赖固定为官方 `mcp==1.30.0`，本项目接受的协商协议固定为 `2025-11-25`。前者是 Python API 与实现版本，后者是线上双方交换消息的契约版本。
+
+SDK 自身还支持其他历史协议；EvoAgent 不因此自动承诺所有协议都已经测试。initialize 返回版本不匹配时拒绝建立 ready 状态。
+
+上游主线已进入 v2，本模块采用维护中的 v1 系列并按实际安装源码核对接口。不能将 v2 的 `Client` 示例直接复制到使用 v1 `ClientSession` 的连接管理器里。相关选择记录在 [ADR-010](ADR-010-MCP发现连接与目录版本.md)。
+
+### 74.4 部署 Profile 与 ServerConfig 的职责
+
+部署 Profile 定义“允许连什么”：stdio 的绝对可执行文件、固定 argv、可选 cwd，或 HTTP 的固定 URL。它们来自 Settings 的部署配置。
+
+MCPServerConfig 定义“这个 Server 使用哪个预设”：展示名称、transport、profile ID、secret_ref、超时、enabled。服务通过 profile ID 查部署配置，API 请求无法临时传入 shell 命令或任意 URL。
+
+```text
+部署者配置：fixture → 绝对 Python 路径 + 固定 -m 参数
+API 保存：server UUID → launch_profile_id="fixture"
+连接时：配置引用 → 部署 Profile → 官方 stdio_client
+```
+
+Server UUID 是稳定身份，可编辑的展示名不是身份。修改配置需要 expected_lock_version；启用与否是持久配置，不等于某个进程此刻已经连接。
+
+### 74.5 为什么 stdio 只允许受信 fixture
+
+stdio 传输会在宿主机启动子进程。MCP 协议不会自动把这个进程放进容器，也不会限制它读取文件或访问网络。
+
+当前 LaunchProfile 要求绝对可执行文件，并拒绝直接把 `.bat`、`.cmd`、`.ps1`、`.sh` 当启动文件；参数是部署者预先给定的数组，不做 shell 字符串拼接。`trusted_fixture=true` 是部署者对受信启动配置的声明，不是系统自动证明程序安全。
+
+本地 fixture 是项目自带模块，只提供目录。任意第三方 Server、动态下载的包和运行中自动安装依赖，都不属于本阶段启动范围。模块 10 的隔离完成前不能把该入口当作任意程序平台。
+
+### 74.6 secret_ref 怎样工作
+
+API 只提交类似 `fixture-auth` 的别名。部署者把别名映射到一个 `EVOAGENT_MCP_SECRET_*` 环境变量名，连接时再从环境读取值。
+
+```text
+ServerConfig.secret_ref
+→ Settings.mcp_secret_refs[别名]
+→ 检查环境变量名白名单
+→ 读取非空、限长、无换行的秘密
+→ stdio: MCP_AUTH_TOKEN
+   HTTP: Authorization Bearer Header
+```
+
+数据库和 Server DTO 只保存别名。没有把秘密写入 command args、URL、健康错误文本或配置 JSON。stdio 继续使用 SDK 的基础环境白名单，应用只额外注入必要 Token，不复制全部父进程环境。
+
+秘密缺失或引用不合法时连接失败；创建配置成功并不代表密钥已经可用。密钥更新需要断开并重新连接，当前连接不会在每条消息里重新读取环境变量。
+
+### 74.7 HTTP 端点检查为什么还不够
+
+只做“DNS 解析后判断是公网”仍有窗口：校验时是公网地址，真正连接时再次解析可能得到内网地址。
+
+`endpoint_address` 先解析并要求所有结果都是公网地址，再选择一个地址交给 PinnedTransport。后者实际使用固定 IP 连接，同时保留原 Host 与 TLS SNI，证书仍按原主机名校验。
+
+每条 HTTP 请求必须与预设 endpoint 完全一致；重定向一律拒绝，关闭 httpx 的环境代理继承。远端不能用 Location 把已附带凭据的请求带到另一个目标。
+
+### 74.8 本地 HTTP fixture 的例外有多大
+
+默认远端 profile 必须是 HTTPS，拒绝 URL 中的用户名、密码、query 和 fragment，DNS 结果也不能是私网。
+
+测试时可为一个明确命名的 profile 设置 `local_fixture=true`，但主机必须是字面 `127.0.0.1` 或 `::1`。这不允许 `localhost` 的任意解析结果，也不放开 `10.*` 等私网段。
+
+HTTP 响应流累计上限 2 MiB，并请求 identity 编码；返回压缩编码会被拒绝，避免原始流大小合格但解压后无限膨胀。长期通知流达到上限可能重连或降级，这是当前有限资源策略的一部分。
+
+### 74.9 Connection 为什么必须有专属任务
+
+官方 Session 和 transport 内部使用 AnyIO task group/cancel scope。这些资源通常必须由进入它们的任务退出；在请求 A 创建 AsyncExitStack、请求 B 里随手 `aclose()`，可能造成跨任务退出错误。
+
+Connection 自己创建一个长期运行的 asyncio 任务。该任务进入 transport、进入 ClientSession、initialize、分页发现、处理通知，然后在同一任务里退出全部上下文。
+
+Manager 不把 SDK Session 交给 API。API 只等待初始化 Future 或刷新 Future，关闭时取消连接任务并等待清理完成。这样资源生命周期跟随明确的所有者，而不是碰巧最后一个访问对象的 HTTP 请求。
+
+### 74.10 连接状态与数据库健康为什么分开
+
+```text
+connecting → ready
+          ↘ degraded
+ready → draining → disabled
+```
+
+这些状态描述当前进程内的连接。数据库 mcp_servers.config.enabled 则表达用户是否允许发现，两个状态不能互相替代。
+
+例如 API 进程退出后，配置仍可能 enabled，但 Python Session 已不存在。mcp_health 保存 instance_id、配置版本、观察时间和到期时间；读取时到期或版本不一致返回 stale，不把旧 ready 记录当成活连接。
+
+### 74.11 API lifespan 怎样装配
+
+应用启动时创建 ConnectionManager 和 MCPService，关闭时先关闭 Manager，再释放数据库。默认没有部署 profile，不建立外部连接；即使配置记录 enabled，也要显式 POST discover 才连接。
+
+Manager 使用每次实例化生成的 UUID 区分进程。当前调用方是管理 API 进程，普通任务 Worker 尚未接入。后续 Worker 可以各自实例化 Manager，不能跨进程共享或把 ClientSession 序列化到数据库。
+
+首次连接及人工刷新由 Manager 串行管理，连接数量默认上限 8；每个连接的发现并发固定为 1。后台 list_changed 刷新属于连接自己的任务，不改变普通 Agent 的并发工具执行策略。
+
+### 74.12 握手失败与受限重连
+
+建立传输并 initialize 受 connection_timeout 限制，发现受 call_timeout 限制，默认各 10 秒。协商必须得到接受的协议版本和 tools 能力。
+
+首次发生传输故障或超时，最多再尝试一次，中间等待 0.1 秒；错误目录、能力不支持等确定性问题不重试。SDK 自身的 HTTP 流恢复仍属于其实现，项目不会据此重试远端业务写操作。
+
+稳定连接每 15 秒无通知时发送 ping，并刷新 60 秒健康观察；发现断线后进入 degraded。下一次显式 discover 会重新握手，当前没有无限后台重连循环。
+
+取消向外传播并关闭当前资源。若旧任务已结束，Manager 会回收其槽位，避免长期把 degraded 连接算作可用容量。
+
+### 74.13 为什么错误记录只留代码
+
+SDK 异常可能包含报文、URL 或 Server 任意输出。Connection 把它映射为 mcp_transport_failed、mcp_timeout 或明确的 MCPError 代码；不会将 ExceptionGroup 的完整字符串存入数据库。
+
+stdio stderr 当前全部丢弃，保留大小为零；SDK 原始日志，包括其少量直接使用根 logger 的报文日志，也被过滤。代价是管理接口不能浏览远端 stderr，排查时应使用受控 fixture 和稳定错误码。
+
+不能为了“日志方便”把含 Token 的环境、原始请求 Header 或远端异常正文写进 Trace。后续若引入诊断尾部，需要单独定义大小限制、脱敏和读取权限。
+
+### 74.14 为什么必须完整分页后提交
+
+一个 Server 可以分多次返回工具目录。第一页成功、第二页断开时，第一页不是完整目录，也不应被标记为新版本。
+
+`discover` 暂存在内存里累积工具，检查重复名称、游标循环和每页结果，直到 nextCursor 为 null。只有整个目录合法后才调用 publish。
+
+游标不被当作 URL 或命令，只作为下一页参数原样交给 SDK；它有 2048 字符上限，重复、空但未终止、超过页数都失败。
+
+### 74.15 目录大小和 Schema 边界
+
+| 对象 | 当前限制 |
+|---|---|
+| 页数 | 16 |
+| 工具数 | 128 |
+| 工具名称 | 非空、最多 128 字符、无控制字符、跨页唯一 |
+| 描述 | 最多 4096 字符 |
+| 每份 Schema | 64 KiB、遍历深度不超过 16 |
+| 整个工具目录 | 1 MiB |
+| 初始化身份/能力元数据 | 16 KiB |
+
+inputSchema、outputSchema（存在时）根类型必须是 object，按 Draft 2020-12 做 Schema 结构检查。禁止远程 `$ref`/`$dynamicRef`，拒绝改变引用基址的 `$id` 和未支持的方言。
+
+这一层是目录结构检查，尚不承担 tools/call 的参数实例验证。模块 9 必须继续实现本地引用处理、动态参数校验和统一错误映射，不能把“目录存储成功”当成任意参数都能安全发送。
+
+### 74.16 annotations 为什么只保存为提示
+
+fixture_health 自报 `readOnlyHint=true`，测试仍要求它的本地初始审核为 approved=false、risk=R3、effect=non_idempotent_write。
+
+远端声明只读，最多帮助审核者理解意图，不能成为降级风险或跳过审批的依据。本模块也不会因为 description 写了“安全工具”就自动批准。
+
+本地人工审核可以在明确了解工具后记录 R0/read_only，但这是绑定特定目录版本的审核证据，尚未赋予执行权限。
+
+### 74.17 四张新表怎样关联
+
+| 表 | 唯一身份 | 主要内容 |
+|---|---|---|
+| mcp_servers | 稳定 UUID | config、lock_version、latest_revision |
+| mcp_catalogs | server_id + revision | config_version、协议、Server 信息、capabilities、工具、hash、diff |
+| mcp_tool_reviews | catalog_id + tool_name + lock_version | 本地批准、风险、副作用分类、审核者和原因 |
+| mcp_health | server_id + instance_id | 配置版本、状态、稳定错误码、观察及到期时间 |
+
+Catalog 与 Review 有显式外键，历史对象不在原行改写。Review 的 lock_version 是审核链上的序号，与 Server 配置的 lock_version 是两个不同计数器。
+
+Python 的 Session、socket、子进程句柄不进入任何表。进程退出后应重新建立这些资源，而不是把一条 health.ready 当作可恢复句柄。
+
+### 74.18 目录 hash 和 diff 包含什么
+
+工具按原始名称排序，保存 description、input/output Schema、各 Schema hash 和 annotations。目录 hash 同时包括工具集合、Server 身份、能力和协商协议。
+
+相同配置版本且完整身份相同，重复发现复用同一个 revision；没有变化也不重复初始化审核。配置版本改变，即使远端工具文字一样，也建立新的目录版本，避免把旧端点/凭据配置下的审核带到新的连接身份。
+
+diff 分 added、removed、changed。例如 echo 改名为 renamed，表现为删除 echo、增加 renamed；同名工具的 Schema 或描述变化则进入 changed。
+
+Server 元数据变化也能改变目录 hash，此时工具级 diff 可以为空。这不矛盾：目录身份不只包含工具列表。
+
+### 74.19 list_changed 怎样避免半旧半新
+
+每收到一次通知，Connection 的 notification_epoch 加一并唤醒刷新任务。分页开始记住 epoch，结束时比较；若期间发生变化，就丢弃刚读到的批次并从第一页重读。
+
+最多重读三次，持续变化返回 mcp_catalog_unstable。通知只表示“可能变了”，不直接给出新目录，也不能直接替换旧表内容。
+
+通知发生在提交附近时，新目录仍可能短暂成为一个已观察版本，然后紧接着产生下一版；由于本模块没有激活执行，这些版本都只是审核证据。未来运行注册仍须绑定明确目录和撤销规则。
+
+### 74.20 网络等待与目录事务如何隔离
+
+网络调用期间不持有数据库事务。MCPService 先读取 config/lock_version，连接任务完成发现后再开启短写事务。
+
+写事务重新检查 Server 仍 enabled、配置版本与最初相同，分配下一个 revision，再一次性写 Catalog 和每个工具的初始 Review。失败则全部回滚，不留下半目录或缺少审核的工具。
+
+如果管理员在发现期间禁用 Server，旧结果最终看到不同 lock_version 或 enabled=false，返回 mcp_config_changed；它不能把旧目录重新发布为当前配置的目录。
+
+### 74.21 行锁之外为什么还要 CAS
+
+PostgreSQL 行锁使同一 Server 的配置和目录事务按顺序执行；SQLite 不提供同样的 `FOR UPDATE` 语义，因此还使用带旧版本条件的 UPDATE。
+
+配置更新必须命中 expected_lock_version；目录修订分配必须命中原 latest_revision。没有命中就返回冲突，不让两个读取相同旧值的事务都宣称成功。
+
+审核先检查当前配置和最新目录，再用条件 UPDATE 固定此判断的写边界，最后追加审核记录；唯一键也防止相同审核版本被写入两次。测试包含两个请求同时修改同一配置版本，只有一个成功。
+
+### 74.22 为什么审核要追加而不是覆盖
+
+初始版本 0 表示等待本地审核，之后每个决定新增一行。这样可以看到先批准、后撤销的时间和原因，旧证据仍然存在。
+
+POST review 必须给出 expected_lock_version、tool_name、reviewer 和 reason。写入型 effect 不允许标成 R0/R1；风险不能仅靠 Server 注解自动设置。
+
+新目录会为所有工具重新创建未审核记录，包括文字未变化的工具。旧审核绑定旧目录，不能在不知道目录/连接条件变化的情况下自动继承。读取 reviews 接口返回完整有序历史，最后一个版本才是该目录下该工具的最新本地决定。
+
+### 74.23 关闭到底关闭了什么
+
+人工 disconnect 或应用 shutdown 会使连接进入 draining，取消专属任务，等待 SDK Session、HTTP 流或 stdio 子进程退出，再将本地状态置为 disabled。
+
+真实 stdio 测试记录 fixture PID，在连接期间确认进程存在，disconnect 后确认该 PID 已退出。HTTP 测试则经过真实 loopback TCP、SDK SessionManager 和关闭流程。
+
+disconnect 不修改持久配置的 enabled，所以之后显式 discover 可以重新建立连接。要持久停止发现，应通过配置更新设置 enabled=false；两个动作的语义需要在客户端界面区分。
+
+### 74.24 模块 8 尚未改变什么
+
+普通 Task 的 ToolRegistry、Skill 工具白名单、Approval、ToolEffect 和 RunConfigSnapshot 没有因为 MCP 目录出现而增加远端工具。目录 DTO 明确返回 execution_enabled=false，即使本地 review.approved=true 也一样。
+
+这使模块 8 可以单独验收连接和发现，同时保持既有任务执行闭环。模块 9 必须完成参数契约、稳定工具名、目录冻结、目录撤销和副作用身份后才能接通 tools/call。
+
+---
+
+## 75. 阶段四模块 8 完整调用链
+
+### 75.1 从部署配置到第一版目录
+
+```text
+Settings：受信 launch / HTTP profiles，secret_ref 映射
+→ POST /mcp/servers：保存稳定 UUID 与配置引用
+→ POST /mcp/servers/{id}/discover
+→ MCPService 读取 enabled/config_version
+→ ConnectionManager 检查容量、旧连接与配置身份
+→ Connection 专属任务
+   → 解析秘密
+   → 官方 stdio 或 Streamable HTTP transport
+   → ClientSession.initialize
+   → 协议/tools 能力核对
+   → tools/list 完整分页、结构与大小校验
+→ MCPService.publish 短事务
+   → 复验启用与配置版本
+   → Catalog + 初始 Review 同事务提交
+→ health.ready（60 秒有效期）
+→ 返回目录证据，不注册 Agent 工具
+```
+
+### 75.2 从目录变更到重新审核
+
+```text
+Server notifications/tools/list_changed
+→ notification_epoch + 1，合并唤醒
+→ 从第一页发现完整目录
+→ 发现过程中再次变更则整批重读，最多三次
+→ 比较 hash/config_version
+→ 相同：复用旧 revision
+→ 变化：新 revision + added/removed/changed
+→ 为新目录所有工具建立未批准/R3 审核版本 0
+→ 人工提交带 expected_lock_version 的审核决定
+→ 追加审核版本，不改变 execution_enabled=false
+```
+
+### 75.3 禁用与迟到结果
+
+```text
+发现正在等待远端
+→ 管理员 PUT enabled=false，配置 CAS 成功并先提交
+→ 旧发现返回
+→ publish 检查失败，拒绝提交旧目录
+→ Manager disconnect 等待清理
+→ 后续 discover 直接拒绝 disabled
+```
+
+“先提交禁用，再等待网络关闭”很重要。若反过来先等待旧连接结束，期间返回的旧结果仍可能认为配置允许发布。
+
+### 75.4 失败与重新连接
+
+```text
+传输初始化失败 / 超时
+→ 清理本次资源
+→ 只保存稳定错误码
+→ 首次可恢复错误最多再尝试一次
+→ 仍失败则 degraded
+→ 后续显式 discover 重新读取配置、握手、发现
+```
+
+重新连接要重新确认目录身份，不是拿旧 Session ID 继续相信上一轮的能力。目录未变化时可以复用版本，但这个判断必须在新的完整发现之后做。
+
+---
+
+## 76. 阶段四模块 8 测试地图与故障定位
+
+### 76.1 各类测试提供什么证据
+
+| 测试文件/场景 | 已证明行为 | 不证明的内容 |
+|---|---|---|
+| `test_mcp_discovery.py` 分页 | 多页合并、游标传递、稳定排序 | 第三方目录业务语义 |
+| 重复名/游标循环/页数/工具数 | 不完整或无界目录拒绝 | 无限大原始 stdio 流的宿主隔离 |
+| Schema/描述限制 | 远程 ref、超大、非法方言和结构拒绝 | tools/call 参数实例验证 |
+| HTTP profile 与 PinnedTransport | 私网默认拒绝、固定 IP/Host/SNI、重定向拒绝 | 公网 TLS 服务实机联调 |
+| secret_ref / 本地审核默认值 | 配置不保存秘密值，远端只读提示不能自行批准 | 通用 OAuth 登录 |
+| `test_mcp_connections.py` 故障传输 | 尝试次数有界，取消清理，错误码不包含原始秘密 | 真实第三方网络故障类型全集 |
+| 官方 SDK 内存握手 | tools 能力缺失时拒绝 | 其他协议版本的兼容承诺 |
+| `test_mcp_catalogs.py` 真实 stdio | SDK 启动子进程、两页发现、稳定目录复用 | 敌对程序隔离 |
+| PID 关闭断言 | disconnect 后 fixture 进程退出 | 第三方任意进程树的容器清理 |
+| list_changed | 通知触发新目录，旧批准不继承 | Run 目录冻结，属于模块 9 |
+| 配置 CAS/迟到 publish | 一个旧配置版本只能成功更新一次，禁用阻止迟到目录 | 未执行的 PostgreSQL 实机并发 |
+| 本地审核/不可变证据 | 旧决定拒绝重复写，Catalog 正文不能原地改写 | 审核内容的客观正确性 |
+| 真实 loopback HTTP + API | SDK Streamable HTTP、管理路由、健康和 disconnect | 公网代理、OAuth、第三方服务 |
+| 无 call 路由 | 管理发现 API 没有 tools/call 快捷入口 | 模块 9 的执行安全已完成 |
+| `test_migrations.py` | SQLite 新旧迁移往返、metadata 对齐 | 跳过的 PostgreSQL 项 |
+
+最新测试数字见[模块 8 验收说明](阶段四-模块8验收与运行说明.md)。本次本地 HTTP fixture 是真实 TCP/协议调用，和纯 Mock 不同；它仍不能替代公网 TLS、容器或第三方服务验收。
+
+### 76.2 看见错误时从哪里检查
+
+| 错误/现象 | 检查位置 | 正确处理 |
+|---|---|---|
+| mcp_profile_not_found | Settings profile ID 与 ServerConfig | 修复部署配置引用 |
+| mcp_secret_unavailable | secret_ref 映射与环境变量 | 在部署环境补齐秘密，重新连接 |
+| mcp_endpoint_forbidden | HTTP profile、DNS/IP | 核对可信端点，不全局放开私网 |
+| mcp_redirect_forbidden | 真实服务最终路径 | 将审核过的最终 endpoint 明确配置 |
+| mcp_tools_unsupported | initialize capabilities | 使用提供 tools 的 Server |
+| mcp_protocol_unsupported | 协商协议 | 使用已支持协议或单独完成升级验收 |
+| mcp_tool_name_invalid | 全部分页名称 | 修复重复、过长或控制字符名称 |
+| mcp_catalog_unstable | 通知频率与分页 | 等目录稳定后重新发现 |
+| mcp_config_changed | 配置 lock_version | 旧结果失效；根据新配置重新 discover |
+| mcp_catalog_stale | 审核绑定目录/config_version | 读取最新目录后重新审核 |
+| mcp_review_conflict | 最新审核 lock_version | 读取最新决定，不覆盖他人审核 |
+| health=stale | expires_at、config_version | 发起显式发现或核对进程状态 |
+| approved=true 但不能调用 | 模块边界 | 模块 9 尚未接入，不绕过 Executor |
+
+不要通过手工修改目录 hash、重写旧审核行、临时放开任意 argv 或 URL 来处理错误。正常操作是修改受控部署配置、读取新版本、显式重连或重新审核。
+
+---
+
+## 77. 阶段四模块 8 学习验收
+
+结合源码、数据库记录与测试回答：
+
+1. SDK 版本与协商协议版本为什么要分别锁定？
+2. Server 提供 tools 能力，为什么仍不能直接进入 ToolRegistry？
+3. LaunchProfile 与 MCPServerConfig 分别由谁控制？
+4. 为什么启动配置必须是 argv 数组而不是 shell 字符串？
+5. trusted_fixture=true 能证明宿主隔离已经完成吗？
+6. secret_ref、环境变量名和秘密值分别出现在哪一层？
+7. HTTP 在 DNS 检查后为什么还要绑定实际连接 IP？
+8. 固定 IP 连接时，Host 与 TLS SNI 为什么必须保留原主机名？
+9. 明确的 loopback fixture 例外与“允许私网”有什么差别？
+10. 为什么限制响应流大小后还要处理压缩编码？
+11. AnyIO cancel scope 为什么影响连接任务的设计？
+12. API 请求取消后，谁负责关闭 SDK Session 和子进程？
+13. enabled、ready、degraded、stale 各表达哪一种事实？
+14. 为什么健康状态需要 instance_id 和 expires_at？
+15. 两次重连尝试为什么不能扩展成写工具的自动重试？
+16. stderr 丢弃和稳定错误码带来哪些诊断取舍？
+17. 第一页成功、第二页失败，为什么不能保存第一页？
+18. 游标循环与目录变更期间的分页分别如何限制？
+19. Schema 结构检查和参数实例验证有什么区别？
+20. Server 的 readOnlyHint 为什么不会改变默认 R3？
+21. 目录 hash 为什么包含 Server 信息与协议，而不只包含工具名？
+22. 工具 diff 为空但目录 hash 变化，是否一定是错误？
+23. 配置 lock_version 与目录 revision 为什么不能共用一个字段？
+24. 为什么所有新目录工具都重新初始化未批准状态？
+25. 审核记录为什么要追加，如何读取当前决定？
+26. PostgreSQL 行锁之外，条件 UPDATE 对 SQLite 测试有何意义？
+27. 禁用与发现同时发生时，哪个事务条件拒绝迟到结果？
+28. disconnect 与 enabled=false 为什么是两种操作？
+29. PID 退出测试证明了什么，又没有证明什么？
+30. 模块 9 接入工具之前，还缺哪几条运行时保护链？
+
+能够从部署 Profile、进程内 Connection、持久化 Catalog、人工 Review 四个层次回答这些问题，才说明理解了模块 8 的完成边界。下一模块继续建立 MCPToolAdapter 与统一安全执行，不能跳过参数、目录、审批和副作用身份的一致性检查。

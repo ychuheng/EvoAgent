@@ -809,6 +809,65 @@ class SkillEventRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class MCPServerRecord(Base):
+    __tablename__ = "mcp_servers"
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON)
+    lock_version: Mapped[int] = mapped_column(Integer, default=0)
+    latest_revision: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MCPCatalogRecord(Base):
+    __tablename__ = "mcp_catalogs"
+    __table_args__ = (UniqueConstraint("server_id", "revision"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    server_id: Mapped[UUID] = mapped_column(ForeignKey("mcp_servers.id", ondelete="RESTRICT"))
+    revision: Mapped[int] = mapped_column(Integer)
+    config_version: Mapped[int] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(String(71))
+    protocol_version: Mapped[str] = mapped_column(String(32))
+    server_info: Mapped[dict[str, Any]] = mapped_column(JSON)
+    capabilities: Mapped[dict[str, Any]] = mapped_column(JSON)
+    tools: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    diff: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MCPToolReviewRecord(Base):
+    __tablename__ = "mcp_tool_reviews"
+    __table_args__ = (UniqueConstraint("catalog_id", "tool_name", "lock_version"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    catalog_id: Mapped[UUID] = mapped_column(ForeignKey("mcp_catalogs.id", ondelete="RESTRICT"))
+    tool_name: Mapped[str] = mapped_column(String(128))
+    lock_version: Mapped[int] = mapped_column(Integer, default=0)
+    approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    risk: Mapped[str] = mapped_column(String(8), default="R3")
+    effect: Mapped[str] = mapped_column(String(32), default="non_idempotent_write")
+    reviewer: Mapped[str | None] = mapped_column(String(128))
+    reason: Mapped[str] = mapped_column(Text, default="awaiting local review")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MCPHealthRecord(Base):
+    __tablename__ = "mcp_health"
+    __table_args__ = (UniqueConstraint("server_id", "instance_id"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    server_id: Mapped[UUID] = mapped_column(ForeignKey("mcp_servers.id", ondelete="RESTRICT"))
+    instance_id: Mapped[str] = mapped_column(String(128))
+    config_version: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(32))
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+@event.listens_for(MCPCatalogRecord, "before_update")
+@event.listens_for(MCPToolReviewRecord, "before_update")
+def protect_mcp_evidence(_mapper, _connection, _record):
+    raise ValueError("MCP catalog and review evidence is immutable")
+
+
 def _reject_changed_fields(record: object, field_names: tuple[str, ...]) -> None:
     state = inspect(record)
     changed = [name for name in field_names if state.attrs[name].history.has_changes()]

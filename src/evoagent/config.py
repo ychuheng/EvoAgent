@@ -8,6 +8,7 @@ from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_valida
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from evoagent.core.models import ToolRisk
+from evoagent.mcp.schema import HTTPProfile, LaunchProfile
 
 
 class ProviderName(StrEnum):
@@ -118,6 +119,11 @@ class Settings(BaseSettings):
     eval_poll_seconds: float = Field(default=1.0, gt=0, le=60)
     eval_lease_seconds: float = Field(default=60.0, gt=0, le=3_600)
     frontend_dist: Path = Path("./frontend/dist")
+    mcp_launch_profiles: dict[str, LaunchProfile] = Field(default_factory=dict)
+    mcp_http_profiles: dict[str, HTTPProfile] = Field(default_factory=dict)
+    # alias -> 环境变量名，不包含密钥值。
+    mcp_secret_refs: dict[str, str] = Field(default_factory=dict)
+    mcp_max_connections: int = Field(default=8, ge=1, le=32)
 
     @field_validator("database_url", mode="before")
     @classmethod
