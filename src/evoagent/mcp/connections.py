@@ -9,10 +9,13 @@ from uuid import uuid4
 
 import mcp
 from mcp import ClientSession, types
+from mcp.shared.exceptions import McpError as SDKError
 
 from evoagent.mcp.discovery import discover
 from evoagent.mcp.schema import PROTOCOL_VERSION, MCPError
 from evoagent.mcp.transports import open_transport
+from evoagent.tasks.lease import LeaseLostError
+from evoagent.tools.base import ToolExecutionError
 
 
 class SDKDiagnosticFilter(logging.Filter):
@@ -23,8 +26,12 @@ class SDKDiagnosticFilter(logging.Filter):
 
 
 def error_code(error):
-    if isinstance(error, MCPError):
+    if isinstance(error, (MCPError, ToolExecutionError)):
         return error.code
+    if isinstance(error, SDKError):
+        return {-32000: "mcp_connection_closed", -32001: "mcp_timeout"}.get(
+            error.error.code, "mcp_protocol_error"
+        )
     if isinstance(error, TimeoutError):
         return "mcp_timeout"
     if isinstance(error, BaseExceptionGroup):
@@ -39,6 +46,7 @@ class Connection:
         self.publish, self.observe, self.transport = publish, observe, transport
         self.wakeup = asyncio.Event()
         self.pending = []
+        self.calls = []
         self.notification_epoch = 0
         self.state = "connecting"
         self.ready = asyncio.get_running_loop().create_future()
@@ -57,6 +65,15 @@ class Connection:
             raise MCPError("mcp_connection_closed")
         future = asyncio.get_running_loop().create_future()
         self.pending.append(future)
+        self.wakeup.set()
+        return await future
+
+    async def call(self, operation):
+        await asyncio.shield(self.ready)
+        if self.task.done() or self.state != "ready":
+            raise MCPError("mcp_connection_closed")
+        future = asyncio.get_running_loop().create_future()
+        self.calls.append((future, operation))
         self.wakeup.set()
         return await future
 
@@ -106,6 +123,8 @@ class Connection:
                         await self.observe("ready", None)
                         continue
                     self.wakeup.clear()
+                    if self.state == "draining":
+                        return
                     waiting, self.pending = self.pending, []
                     try:
                         catalog = await self.scan(session, initialization)
@@ -115,6 +134,24 @@ class Connection:
                     for future in waiting:
                         if not future.done():
                             future.set_result(catalog)
+                    while self.calls:
+                        future, operation = self.calls[0]
+                        if not future.done():
+                            try:
+                                async with asyncio.timeout(self.config.call_timeout):
+                                    result = await operation(session, catalog, future)
+                                if not future.done():
+                                    future.set_result(result)
+                            except Exception as error:
+                                if not future.done():
+                                    future.set_exception(
+                                        error
+                                        if isinstance(error, LeaseLostError)
+                                        else MCPError(error_code(error))
+                                    )
+                        self.calls.pop(0)
+                        if self.state == "draining":
+                            return
                     await self.observe("ready", None)
         except asyncio.CancelledError:
             raise
@@ -129,7 +166,7 @@ class Connection:
         finally:
             if not self.ready.done():
                 self.ready.set_exception(MCPError("mcp_connection_closed"))
-            for future in self.pending:
+            for future in self.pending + [item[0] for item in self.calls]:
                 if not future.done():
                     future.set_exception(MCPError("mcp_connection_closed"))
 
@@ -196,6 +233,17 @@ class ConnectionManager:
                     await connection.close()
                     self.connections.pop(identity, None)
                     raise
+
+    async def drain(self, identity):
+        async with self.lock:
+            existing = self.connections.get(identity)
+            if existing:
+                connection = existing[1]
+                connection.state = "draining"
+                connection.wakeup.set()
+                await asyncio.shield(connection.task)
+                self.connections.pop(identity, None)
+                await connection.observe("disabled", None)
 
     async def disconnect(self, identity):
         async with self.lock:

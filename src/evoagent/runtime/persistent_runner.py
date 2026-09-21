@@ -11,6 +11,10 @@ from evoagent.core.context_policy import policy_from_settings
 from evoagent.core.loop import AgentLoop
 from evoagent.core.models import AgentLoopStatus, EventType
 from evoagent.db.models import RunRecord, TaskRecord
+from evoagent.mcp.adapter import register_run_tools
+from evoagent.mcp.connections import ConnectionManager
+from evoagent.mcp.schema import MCPError
+from evoagent.mcp.service import MCPService
 from evoagent.memory.repository import check_run_references
 from evoagent.memory.schema import MemoryError
 from evoagent.providers.base import ModelProvider
@@ -53,6 +57,7 @@ class PersistentAgentRunner:
         self._context_builder = context_builder
         self._provider = provider
         self._registry = registry
+        self._base_registry = registry
         self._retry_policy = retry_policy or RetryPolicy(
             max_attempts=settings.max_retry_attempts,
             base_seconds=settings.retry_base_seconds,
@@ -63,7 +68,17 @@ class PersistentAgentRunner:
         self._permission_policy = permission_policy or PermissionPolicy()
 
     async def handle(self, lease: JobLease) -> TaskExecutionResult:
+        self._registry = ToolRegistry(
+            self._base_registry.get(name) for name in self._base_registry.names
+        )
+        manager = ConnectionManager(self._settings)
         try:
+            await register_run_tools(
+                MCPService(self._session_factory, self._settings, manager),
+                self._registry,
+                lease.run_id,
+                LeaseGuard(lease),
+            )
             return await self._handle_owned(lease)
         except SnapshotCompatibilityError:
             return TaskExecutionResult(
@@ -71,12 +86,15 @@ class PersistentAgentRunner:
                 error_code="snapshot_incompatible",
                 error_message="stored snapshot/config does not match this runtime",
             )
-        except MemoryError as error:
+        except (MemoryError, MCPError) as error:
             return TaskExecutionResult(
                 status=PersistentRunStatus.FAILED,
                 error_code=error.code,
-                error_message="memory source is no longer available",
+                error_message="frozen execution context is no longer available",
             )
+
+        finally:
+            await manager.aclose()
 
     async def _handle_owned(self, lease: JobLease) -> TaskExecutionResult:
         guard = LeaseGuard(lease)

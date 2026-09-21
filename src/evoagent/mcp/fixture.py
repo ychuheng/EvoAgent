@@ -1,4 +1,4 @@
-"""受信任的本地协议 fixture，仅提供目录，不提供任何远端工具调用。"""
+"""受信任的本地协议 fixture，提供目录、回显与可控故障注入。"""
 
 import argparse
 import asyncio
@@ -47,6 +47,22 @@ def build_server(state_path=None):
         next_cursor = str(cursor + 1) if cursor + 1 < len(rows) else None
         return types.ListToolsResult(
             tools=[types.Tool.model_validate(tool) for tool in page], nextCursor=next_cursor
+        )
+
+    @server.call_tool(validate_input=False)
+    async def call_tool(name, arguments):
+        data = read()
+        if data.get("call_log"):
+            with Path(data["call_log"]).open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"name": name, "arguments": arguments}) + "\n")
+        if data.get("call_delay"):
+            await asyncio.sleep(data["call_delay"])
+        if data.get("disconnect_after_call"):
+            os._exit(23)
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=arguments.get("text", "ok"))],
+            structuredContent=data.get("structured_content"),
+            isError=data.get("is_error", False),
         )
 
     async def watch():

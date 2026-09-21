@@ -81,6 +81,10 @@
 75. 阶段四模块 8 完整调用链
 76. 阶段四模块 8 测试地图与故障定位
 77. 阶段四模块 8 学习验收
+78. 阶段四模块 9：MCP 工具适配、目录冻结与执行身份
+79. 阶段四模块 9 完整调用、恢复与卸载链
+80. 阶段四模块 9 测试地图与故障定位
+81. 阶段四模块 9 学习验收
 
 ## 1. 阅读说明
 
@@ -94,7 +98,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～8 已实现；PostgreSQL+vector、容器和真实模型效果证据待补。本手册原有章节保留历史学习脉络，最新增量见第 74～77 章；第 57～73 章的完成范围和测试数字保留对应交付时间点。
+`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～9 已实现；PostgreSQL+vector、容器和真实模型效果证据待补。本手册原有章节保留历史学习脉络，最新增量见第 78～81 章；第 57～77 章的完成范围和测试数字保留对应交付时间点。
 
 已经完成：
 
@@ -6690,3 +6694,297 @@ Server notifications/tools/list_changed
 30. 模块 9 接入工具之前，还缺哪几条运行时保护链？
 
 能够从部署 Profile、进程内 Connection、持久化 Catalog、人工 Review 四个层次回答这些问题，才说明理解了模块 8 的完成边界。下一模块继续建立 MCPToolAdapter 与统一安全执行，不能跳过参数、目录、审批和副作用身份的一致性检查。
+
+---
+
+## 78. 阶段四模块 9：MCP 工具适配、目录冻结与执行身份
+
+第 74～77 章保留模块 8 交付时的边界。模块 9 开始，已审核目录可以显式激活并进入普通持久化 Run；发现本身仍不授权执行。阅读本章时，请区分连接是否启用、工具是否批准、目录是否激活，以及当前 Run 是否已经冻结选择这四件事。
+
+### 78.1 为什么不能把 SDK call_tool 直接交给模型
+
+模块 8 已经得到原工具名、inputSchema、outputSchema 和 annotations，但这些仍只是远端声明。模型可能产生错误参数；远端可能在审批后修改同名工具；Worker 可能在外部写入成功后失联。仅封装一次 `session.call_tool()` 无法处理这些情况。
+
+本模块复用原有 ToolExecutor、PermissionPolicy、Approval 和 ToolEffect。MCPToolAdapter 只承担固定契约的协议翻译，不自行批准动作，不替代副作用账本，不创建第二套 AgentLoop。
+
+推荐先读下列文件，再沿第 79 章追踪完整调用：
+
+| 文件 | 负责的事实 | 不负责的事项 |
+|---|---|---|
+| `mcp/adapter.py` | 命名、参数、结果、调用和 Run 目录装配 | 审批决定、直接修改效果状态 |
+| `mcp/bindings.py` | Server、目录、审核的实时有效性 | 建立连接、访问远端 |
+| `mcp/connections.py` | SDK 会话所有权、请求排队、取消与关闭 | 判断业务是否允许写入 |
+| `mcp/service.py` | 审核和目录管理、执行状态 CAS | 从 API 直接执行工具 |
+| `tools/base.py` | 规范参数与执行绑定的公共契约 | 理解具体 MCP Schema |
+| `tools/registry.py` | 模型定义和 manifest 的一致性 | 执行模型请求 |
+| `tools/executor.py` | 校验、错误映射、调用顺序和输出存储 | 推断远端是否已提交事务 |
+| `tools/effects.py` | 审批复用、幂等账本与受保护提交 | 把 request ID 当业务幂等键 |
+| `tools/approvals.py` | 人工决定及决定时的绑定复查 | 给失效目录重新授权 |
+| `runtime/persistent_runner.py` | 每个 Run 装配与关闭 Manager | 热更新已运行 Registry |
+
+### 78.2 一种工具有两种身份
+
+第一种是业务工具身份。Server UUID 与原始工具名决定它是谁，展示名改变不应产生一个新的外部动作。`mapped_name()` 生成：
+
+```text
+mcp_<Server UUID 前 8 位>_<安全 slug>_<16 位 hash>
+```
+
+slug 只保留字母、数字、下划线，最长 29 字符；哈希输入包含完整 UUID 和未经截断的原名。因此两个名字前 100 个字符相同，尾部不同，仍得到不同映射名。最终长度不超过 ToolDefinition 的 64 字符限制。若极端情况下仍重名，Registry 抛出重复工具错误，不覆盖已有工具。
+
+第二种是执行契约身份。同一个业务工具可以有不同 Schema、风险审核和目录版本。`execution_binding()` 保存这些证据，审批不能跨契约复用。
+
+理解这个区别，才能理解为什么目录 revision 必须出现在审批绑定中，却不应加入副作用语义键：修改契约不能使昨日未查清的外部写入凭空消失。
+
+### 78.3 ValidatedMCPArguments 是内部承载对象
+
+内置工具事先定义 Pydantic 参数类；MCP 工具的参数结构到发现阶段才能确定。适配器继续继承 BaseTool，使用：
+
+```python
+class ValidatedMCPArguments(BaseModel):
+    payload: dict[str, JsonValue]
+```
+
+这不是模型看到的参数结构。`definition()` 返回冻结的 input_schema；`validate_arguments()` 深拷贝调用参数，按该 Schema 校验，通过后才创建包装对象。`canonical_arguments()` 返回其 payload 的副本。
+
+例如模型生成 `{"text":"hello"}`，实际审批参数、ToolCall.arguments、效果语义键及 SDK arguments 都仍是这个对象。任何一层若改用 `{"payload":{"text":"hello"}}`，都会破坏 Schema 和语义身份一致性。
+
+内置 BaseTool 的 canonical_arguments 使用 model_dump(mode="json")，保留 Pydantic 规范化后的值和默认值。Executor 同时捕获原有 ValidationError 与新增 ToolArgumentValidationError，统一返回 invalid_arguments。动态参数校验失败不会创建远端请求。
+
+### 78.4 Schema 定义检查与实例检查分别在哪里
+
+`discovery.check_schema()` 在保存目录前检查定义本身。根必须为 object；仅支持 Draft 2020-12，拒绝远程引用和改变引用基址。原有 Schema 大小 64 KiB、结构深度 16 的限制继续生效。
+
+模块 9 增加本地引用展开检查：仅允许可解析的 JSON Pointer，拒绝循环、缺失目标和不支持的引用形式，展开深度最多 32，最多访问 10000 个节点。这样不能用很短的递归引用构造无限验证链。
+
+`adapter.validate_payload()` 检查实际实例。参数最多 1 MiB，实例深度最多 32，不能含 NaN/Infinity；随后由 Draft202012Validator 验证字段类型、required、additionalProperties 等规则。失败只返回稳定说明，不把完整参数和 SDK 堆栈回显给模型。
+
+首版是有界子集，不支持的 Schema 在发现时拒绝。拒绝某个合法但复杂的 JSON Schema 不等于整个规范无效，而是项目没有承诺支持它。
+
+### 78.5 为什么修改 manifest 的参数来源
+
+以前 Registry.manifest() 从 arguments_model.model_json_schema() 生成参数定义。对于适配器，这会错误地记录 payload 包装，而模型看到的是远端 inputSchema。
+
+现在 manifest 读取 `tool.definition().parameters`，并在 execution_binding 非空时追加 binding。内置工具的空绑定不额外序列化，已有内置 manifest 哈希保持兼容。implementation_version 为 MCP 适配器实现自身提供版本身份；目录和审核变化则反映在 binding 内。
+
+模型定义、manifest 和实际校验共同读取冻结工具定义，这是恢复一致性的基础。manifest_hash 只是一份证据摘要，不能替代每次调用前的撤销检查。
+
+### 78.6 发现、审核、激活的三个提交点
+
+Server 的 config.enabled 允许进程建立连接；Review.approved 允许某个固定目录中的工具被选择；Server.execution_state=active 与 active_catalog_id 明确选择候选目录。三者缺一都不能让新 Run 注册工具。
+
+新目录工具仍默认未批准、R3、non_idempotent_write。annotations 保存在目录中供人审核，但不会自动降低风险，也不会令工具并行执行。所有 MCP 适配器 parallel_safe=False。
+
+新增 execution_version 用于管理操作 CAS。调用 `/mcp/servers/{id}/execution` 必须提交 expected_lock_version 和 expected_execution_version。连接配置版本与执行状态版本分离：激活目录不会改变其 config_version，使刚激活目录立即过期。
+
+激活要求目录属于当前 Server、当前配置和最新 revision。即使目录已激活，未批准工具仍被过滤；一个目录中可以只开放经过审核的那部分工具。
+
+### 78.7 RunToolCatalog 为什么使用 Run 上的 JSON 列
+
+迁移 `20260921_0009` 在 runs 增加 tool_catalog_snapshot，首版不另建选择明细表。每个 Run 只有一次工具目录选择，完整 JSON 保存的是该次选择的证据，不是共享的可变工具列表。
+
+| 快照字段 | 恢复时的用途 |
+|---|---|
+| server_id | 稳定 Server 身份与连接查找 |
+| catalog_id / revision / catalog_hash | 目录证据、漂移判断 |
+| config_version | 拒绝使用旧配置的调用 |
+| review_id | 锁定批准这份契约的具体审核记录 |
+| risk / effect | 本地权限与副作用分类 |
+| tool | 原名、描述、Schema、Schema hash 和 annotations |
+
+NULL 表示尚未选择，[] 表示已经选择且没有 MCP 工具。这个区分避免首次无命中时在恢复阶段突然新增工具。ORM 事件拒绝覆盖已写入快照；首次写入仍在 LeaseGuard 保护下进行。
+
+`register_run_tools()` 先读取快照。没有快照时，只为尚未保存配置的 retrieval Run 选择 active、配置匹配、仍为最新 revision 的目录；随后保存，包括空选择。已有 config_snapshot 的历史 Run 冻结空 MCP 选择，避免升级给旧运行增加权限。baseline 和 pinned_skill 路径不自动注册 MCP。
+
+### 78.8 Worker 在哪里接入
+
+PersistentAgentRunner.handle() 创建本次执行使用的 ConnectionManager，克隆基础 Registry，再装配该 Run 的冻结 MCP 工具。之后才进入原有 Skill 选择、RunConfigSnapshot 和 AgentLoop。
+
+恢复时重新实例化适配器，但使用的是旧快照正文；不根据当前最新目录重新挑选。Manager 的关闭放在 finally 中，成功、失败和审批暂停都不会把本次 Run 的 SDK 会话永久留在 Worker 中。
+
+API 进程发现连接和 Worker 执行连接属于不同进程内对象，通过数据库目录与状态关联。不能把 API 返回 ready 误认为 Worker 已经持有相同的 Python Session。
+
+---
+
+## 79. 阶段四模块 9 完整调用、恢复与卸载链
+
+### 79.1 从模型调用到远端请求
+
+以批准的只读 echo 工具为例：
+
+```text
+ModelRequest.tool_definitions 使用冻结 Schema
+  → 模型产生稳定映射名 + {text: "hello"}
+  → ToolExecutor 查找并校验参数
+  → preflight 检查租约、启用状态、目录与审核
+  → PersistentToolMiddleware 执行 PermissionPolicy
+  → 必要时创建 Approval；写调用建立 Effect 占位
+  → Adapter 重新发现并比较整个目录 hash
+  → Connection.call 排队，由连接任务处理
+  → 请求发出前再次检查绑定
+  → SDK tools/call 使用原始工具名和解包参数
+  → 返回类型、outputSchema 和大小检查
+  → ToolOutputStore 保留大正文，生成模型预览
+  → after_success 在提交事务中复查租约和绑定
+```
+
+Executor 在缺少持久化中间件时拒绝 MCP 工具，避免把独立演示执行器当成跳过审批的入口。管理路由没有 tools/call；Provider 仍只生成工具请求。
+
+### 79.2 连接任务为什么使用请求队列
+
+SDK transport 与 ClientSession 内部包含 AnyIO 上下文，创建和关闭必须由同一任务负责。模块 8 的 Connection.run() 已经承担这个所有权；模块 9 增加 calls 队列与结果 Future，不把会话交给路由直接使用。
+
+调用唤醒连接任务，任务先完成目录扫描，再串行执行操作。实际 SDK 请求在子任务中等待，以便约每 100ms 检查 Future 是否取消以及数据库绑定是否撤销；子任务不进入或退出 SDK 上下文。
+
+连接关闭时，尚未完成的等待者获得 mcp_connection_closed。Executor 超时取消 Future 后，连接任务取消 SDK 请求，避免调用者离开后队列继续无声执行。远端是否已经提交仍由效果账本处理，取消消息不具备业务回滚语义。
+
+### 79.3 审批如何绑定目录和规范参数
+
+ToolCallRecord 新增 execution_binding。中间件把适配器绑定与 PermissionPolicy.manifest_hash() 一同保存；Approval 通过 tool_call_id 关联它。
+
+同 Task 的新 provider call_id 可以复用决定，但必须同时匹配工具名、规范参数和完整绑定。review_id 变化，即使风险字符串仍为 R3，也表示一次新的本地决定；旧批准不自动继续有效。相同 call_id 携带另一份绑定则直接拒绝，而不是覆盖原调用证据。
+
+ApprovalService.decide() 也检查当前绑定。用户点批准时，如果 Server 已禁用、目录已变更或 Review 已被替代，返回 tool_manifest_changed。仅在执行入口校验而允许界面“批准失效契约”，会产生误导性的管理状态，因此决定入口同样复查。
+
+### 79.4 写入去重为何不加入目录 hash
+
+PersistentToolMiddleware.semantic_key() 对稳定工具名与 canonical_arguments 做哈希，effect_scope 为 Task UUID。稳定工具名又绑定完整 Server UUID 和原始工具名。
+
+如果把 catalog_hash 加入这个键，Server 升级后同一个转账或写文件动作会生成新键，绕过旧 UNKNOWN。当前实现保留旧语义键，ToolEffect 通过关联 ToolCall 保存目录证据。
+
+同契约 COMMITTED 返回旧结果，不再次调用。另一契约遇到 COMMITTED 返回 tool_manifest_changed，避免把旧输出伪装成符合新 Schema 的结果。EXECUTING/UNKNOWN 进入人工核查，不因目录变化自动生成第二个效果。
+
+### 79.5 外部成功、本地未确认的时间线
+
+```text
+本地提交 Effect=EXECUTING
+  → fixture 写入调用日志，模拟外部动作已发生
+  → fixture 在返回前退出
+  → SDK 报连接关闭
+  → Executor 记录失败
+  → Effect=UNKNOWN
+  → 同语义请求再次出现
+  → 创建或重开确认请求，不发送第二次写入
+```
+
+fixture 的调用日志是本地故障实验中的外部证据，不代表第三方系统已经具备业务查询接口。isError 同样不能证明未执行，因此写调用返回 isError 也进入 UNKNOWN。
+
+当前所有写分类最多调用一次，包括本地声明 idempotent_write 的工具。真正启用写入自动重试，需要以后明确接入远端业务幂等键或回执查询；MCP request ID 不满足该条件。
+
+### 79.6 只读重试与结果检查
+
+只有本地审核为 read_only 的工具，遇到连接关闭、超时或传输失败时最多重试一次。重试先关闭旧连接，再重新握手和发现；业务错误、协议错误、目录漂移、输出不合约不重试。整个 Adapter 仍受 Executor 的总工具超时限制。
+
+SDK 已验证 outputSchema，Adapter 还按被冻结的 output_schema 校验 structuredContent。返回格式为包含 text 数组以及可选 structuredContent 的 JSON 字符串，继续适配现有文本 ToolResult。
+
+图片、音频、资源链接和嵌入资源返回 unsupported_mcp_content，不下载 URL，不读取 file URI。规范结果最多 2 MiB；预算内的大正文沿用 ToolOutputStore。模型预览被截断不等于完整正文丢失，Artifact 访问仍走原有受控工具。
+
+### 79.7 成功提交前为什么还要检查一次
+
+远端返回成功之后，输出存储或其他异步操作期间仍可能发生禁用。仅在请求前校验会留下“撤销后仍 COMMITTED”的窗口。
+
+after_success 在同一提交事务中执行 check_binding(lock=True)，锁住 Server 并复查状态、目录与 Review。绑定失效时，将调用标记失败，未确认效果转 UNKNOWN，然后抛出稳定错误；不会发出成功完成事件。
+
+如果是 LeaseGuard 失败，旧 Worker 无权修改任何权威状态；它不能自行写 UNKNOWN。恢复协调负责接管并处理遗留 EXECUTING，这是租约保护和业务状态修复各自的职责。
+
+### 79.8 list_changed 后旧 Run 怎样处理
+
+通知生成新 Catalog 和默认未批准 Review，不改 Registry，也不覆盖 Run 快照。当前项目不支持让远端按旧目录 revision 执行，所以一旦发现 latest_revision 改变，旧绑定就失败。
+
+这是一种保守的完整目录策略：即使远端仅新增另一个工具，也可能令旧 Run 无法继续调用。它用明确拒绝换取可解释的契约边界，后续若要允许旧版本继续执行，需要 Server 提供可验证的版本契约，不能单凭原工具名称未变推断。
+
+新 Run 也不会自动选择未激活的新目录。管理者需要重新审核并激活，随后新 Run 才能冻结新契约。
+
+### 79.9 draining、disabled 与 disconnect 的区别
+
+| 操作 | 新 Run / 新调用 | 已发出的调用 | 连接处理 |
+|---|---|---|---|
+| draining | 停止选择和调用 | 允许完成并提交 | 本进程等待结束后关闭；其他执行进程检查后关闭 |
+| disabled | 禁止 | 尽可能取消，写结果未知保留 UNKNOWN | 本进程立即关闭；其他进程检查撤销 |
+| disconnect | 不改变数据库执行授权 | 关闭本管理进程连接可能中断调用 | 以后仍可重连，不是全局禁用 |
+
+execution 状态先持久化，再操作进程内连接。因此另一个 Worker 无需共享内存也能看到撤销。100ms 是轮询等待间隔，不是分布式撤销延迟承诺，真实延迟还受数据库、调度及网络影响。
+
+---
+
+## 80. 阶段四模块 9 测试地图与故障定位
+
+### 80.1 每组测试证明什么
+
+| 场景 | 断言重点 | 证据边界 |
+|---|---|---|
+| 真实 stdio 完整调用 | SDK tools/call、规范参数、Trace、结果 | 受信 fixture，不是第三方服务 |
+| 动态参数错误 | invalid_arguments，外部日志不存在 | Schema 子集验证 |
+| 缺少持久化中间件 | mcp_persistence_required | 防止普通 Executor 装配绕过 |
+| 只读提示与本地 R3 | 仍创建 Approval | 不自动相信 annotations |
+| Review 替换 | 旧适配器拒绝、新绑定重新审批 | 审核身份而非只比较风险字符串 |
+| 待批目录失效 | ApprovalService 拒绝批准 | 决定时实时校验 |
+| isError / 写后退出 | UNKNOWN，重复请求不再写 | 外部成功、本地不确定的故障模拟 |
+| 成功写重复调用 | 一条调用日志、一条 Effect | 同 Task 同语义去重 |
+| 只读断连 | 两次尝试后停止 | 有界重试，不承诺网络恢复 |
+| 正常卸载 | 在途完成，新调用被拒，连接关闭 | 单进程真实 SDK 生命周期 |
+| 紧急禁用 | 调用中断、写效果 UNKNOWN | 远端事务不承诺回滚 |
+| 远端成功到提交间撤销 | 不提交成功，效果 UNKNOWN | 本地提交窗口保护 |
+| 目录变更与恢复 | Registry hash 不变，调用拒绝 | 不发生热更新 |
+| 空选择及 baseline | 激活后仍保持旧空快照 | 不污染既有 Run 和基线 |
+| PersistentAgentRunner | 模型定义、真实工具调用、运行完成 | 模型使用 Mock 脚本 |
+| 本地 ref | 非循环引用验证，缺失与递归拒绝 | 不支持全部 JSON Schema 特性 |
+| 执行状态 CAS | 旧 execution_version 被拒 | SQLite 行为；PostgreSQL 实机另验 |
+| migration 往返 | 新列、旧版本升级与降级 | 临时数据库，不建议生产丢弃绑定 |
+
+主体为 `tests/integration/test_mcp_execution.py`；Schema 限制扩展在 `tests/unit/test_mcp_discovery.py`。原有审批、副作用故障恢复、API/Worker、模块 8 连接和迁移测试仍参与全量回归。最终数字与环境边界见[运行说明](阶段四-模块9验收与运行说明.md)。
+
+### 80.2 按层排查
+
+模型看不到工具时，先查 config.enabled、execution_state、active_catalog_id、最新目录及 approved，而不是修改 Provider；再检查该 Run 是否已经冻结空快照，或属于 baseline/pinned_skill。
+
+出现 tool_manifest_changed 时，对照 Run 快照、ToolCall.execution_binding、Server.lock_version/latest_revision 和最新 Review.id。不要直接改旧 JSON、旧 hash 或账本状态。原来能调用但新目录未审核，是正常的拒绝状态。
+
+出现 UNKNOWN 时，先查外部结果，再决定 retry 或 committed。不要将重启 Worker、重新激活目录、换 call_id 当成业务撤销手段。
+
+发现成功而执行失败时，还要确认 Worker 拥有相同的部署 Profile 和秘密引用。API 进程健康记录有自己的 instance_id，不代表另一个执行进程连接正常。
+
+### 80.3 本次边界
+
+模块 9 没有扩大 Skill 低风险白名单，没有增加公网第三方 Server 的 OAuth 产品，也没有完成敌对可执行程序的隔离。受信 stdio fixture 是开发验收条件；独立执行容器和网络出口策略仍属于模块 10。
+
+PostgreSQL 实机并发、公网 TLS、第三方业务回执与真实模型效果需单独提供证据。本地通过数量不能替代这些验收。
+
+---
+
+## 81. 阶段四模块 9 学习验收
+
+结合源码和数据库回答以下问题：
+
+1. 为什么 Server enabled、Review approved、Catalog active 和 Run 已冻结是四个不同事实？
+2. 同一原名在两个 Server 中如何得到不同工具身份？
+3. 名称截断后如何保留原始名字的区分信息？
+4. 为什么目录 revision 不应进入副作用语义键？
+5. ValidatedMCPArguments.payload 为什么不能出现在模型 Schema 和远端参数中？
+6. Registry manifest 为什么改读 definition.parameters？
+7. 空 binding 如何保持内置工具的旧 manifest 兼容？
+8. Schema 定义检查与参数实例检查分别发生在哪一步？
+9. 为什么循环本地引用必须拒绝，局部引用还需要展开预算？
+10. 只读 annotations 为什么无法绕过本地 R3 审批？
+11. execution_version 为什么不能复用 config lock_version？
+12. tool_catalog_snapshot 的 NULL 与 [] 各代表什么？
+13. 升级前已有 config_snapshot 的 Run 为什么不会新增 MCP 能力？
+14. Runner 为什么必须先装配目录，再选择 Skill 和保存配置？
+15. 新 call_id 可以复用哪些批准，哪些变化必须重新审批？
+16. 用户点击批准时，为什么仍要检查目录是否有效？
+17. 一个 UNKNOWN 动作改变目录后，为什么不会自动得到第二条可执行效果？
+18. 已提交效果属于旧契约时，为什么不能直接返回新契约成功？
+19. SDK request ID 与外部业务幂等键有什么区别？
+20. isError 为什么仍可能对应已发生的外部写入？
+21. 只读重试为何先关闭旧连接，为什么最多一次？
+22. Adapter 的请求子任务与 Session 所有者任务分别负责什么？
+23. 正常 draining 如何允许在途完成，又阻止新调用？
+24. disabled 与 disconnect 为什么不是同一种撤销？
+25. 为什么成功回执之后还需要提交事务中的绑定复查？
+26. 失去租约的 Worker 为什么不能自行把效果改为 UNKNOWN？
+27. Unsupported content 为何不能通过自动下载变成支持内容？
+28. 长正文的完整存储和模型预览分别在哪里？
+29. list_changed 后模型的 Registry、Run 快照与数据库最新目录会如何变化？
+30. 哪些本地证据已经成立，哪些需要 PostgreSQL、第三方系统和模块 10 的环境验证？
+
+学习时先运行一次只读调用，再观察 R3 审批、写后断连和 draining 三条测试的数据库变化。能够逐一解释工具身份、授权身份、业务动作和连接所有权，才算理解了模块 9 的执行边界。

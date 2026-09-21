@@ -128,3 +128,25 @@ def test_secret_reference_and_deny_by_default_review(monkeypatch):
     config = MCPServerConfig(name="fixture", transport="stdio", launch_profile_id="fixture")
     assert not config.enabled
     assert "private-token" not in json.dumps(config.model_dump())
+
+
+@pytest.mark.parametrize("reference", ["#", "#/$defs/missing", "#/$defs/loop"])
+def test_recursive_or_unresolved_local_refs_rejected(reference):
+    schema = {"type": "object", "$ref": reference, "$defs": {"loop": {"$ref": "#/$defs/loop"}}}
+    with pytest.raises(MCPError, match="reference_invalid"):
+        check_schema(schema)
+
+
+def test_bounded_local_reference_validation():
+    from evoagent.mcp.adapter import validate_payload
+    from evoagent.tools.base import ToolArgumentValidationError
+
+    schema = {
+        "type": "object",
+        "properties": {"count": {"$ref": "#/$defs/count"}},
+        "$defs": {"count": {"type": "integer", "minimum": 1}},
+    }
+    check_schema(schema)
+    validate_payload(schema, {"count": 1})
+    with pytest.raises(ToolArgumentValidationError):
+        validate_payload(schema, {"count": 0})

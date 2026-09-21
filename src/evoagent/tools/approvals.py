@@ -16,6 +16,8 @@ from evoagent.db.models import (
     ToolEffectStatus,
 )
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.mcp.bindings import check_binding
+from evoagent.mcp.schema import MCPError
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
 
@@ -71,6 +73,11 @@ class ApprovalService:
             call = await unit.session.get(ToolCallRecord, approval.tool_call_id)
             if call is None:
                 raise ApprovalServiceError("approval tool call does not exist")
+            if call.execution_binding:
+                try:
+                    await check_binding(unit.session, call.execution_binding, lock=True)
+                except MCPError:
+                    raise ApprovalServiceError("tool_manifest_changed") from None
             normalized_response = response.strip() if response and response.strip() else None
             if approved and call.tool_name == "ask_user" and normalized_response is None:
                 raise ApprovalServiceError("ask_user approval requires a response")

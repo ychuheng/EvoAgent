@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -23,10 +24,13 @@ def server_dto(row):
         "config": row.config,
         "lock_version": row.lock_version,
         "latest_revision": row.latest_revision,
+        "execution_state": row.execution_state,
+        "execution_version": row.execution_version,
+        "active_catalog_id": row.active_catalog_id,
     }
 
 
-def catalog_dto(row):
+def catalog_dto(row, server=None):
     return {
         "id": row.id,
         "server_id": row.server_id,
@@ -39,7 +43,14 @@ def catalog_dto(row):
         "tools": row.tools,
         "diff": row.diff,
         "created_at": row.created_at,
-        "execution_enabled": False,
+        "execution_enabled": bool(
+            server
+            and server.execution_state == "active"
+            and server.config.get("enabled")
+            and server.active_catalog_id == row.id
+            and server.lock_version == row.config_version
+            and server.latest_revision == row.revision
+        ),
     }
 
 
@@ -151,7 +162,7 @@ class MCPService:
                 )
             )
             if previous and previous.content_hash == digest and previous.config_version == version:
-                return catalog_dto(previous)
+                return catalog_dto(previous, server)
             next_revision = server.latest_revision + 1
             changed = await session.execute(
                 update(MCPServerRecord)
@@ -180,7 +191,7 @@ class MCPService:
             for tool in tools:
                 session.add(MCPToolReviewRecord(catalog_id=row.id, tool_name=tool["name"]))
             await session.commit()
-            return catalog_dto(row)
+            return catalog_dto(row, server)
 
     async def observe(self, identity, version, state, error):
         async with self.factory() as session:
@@ -253,3 +264,51 @@ class MCPService:
             except IntegrityError:
                 raise MCPError("mcp_review_conflict") from None
             return review_dto(row)
+
+    async def set_execution(self, identity, request):
+        async with self.factory() as session:
+            server = await session.scalar(
+                select(MCPServerRecord).where(MCPServerRecord.id == identity).with_for_update()
+            )
+            if server is None:
+                raise MCPError("mcp_server_not_found")
+            if server.lock_version != request.expected_lock_version:
+                raise MCPError("mcp_config_conflict")
+            catalog_id = server.active_catalog_id
+            if request.state == "active":
+                try:
+                    catalog_id = UUID(request.catalog_id or "")
+                except ValueError:
+                    raise MCPError("mcp_catalog_not_found") from None
+                catalog = await session.get(MCPCatalogRecord, catalog_id)
+                if (
+                    catalog is None
+                    or catalog.server_id != identity
+                    or catalog.config_version != server.lock_version
+                    or catalog.revision != server.latest_revision
+                    or not server.config.get("enabled")
+                ):
+                    raise MCPError("mcp_catalog_stale")
+            # 激活状态独立于连接配置版本；切换 active catalog 不重写旧 Run 契约。
+            changed = await session.execute(
+                update(MCPServerRecord)
+                .where(
+                    MCPServerRecord.id == identity,
+                    MCPServerRecord.lock_version == request.expected_lock_version,
+                    MCPServerRecord.execution_version == request.expected_execution_version,
+                )
+                .values(
+                    execution_state=request.state,
+                    active_catalog_id=catalog_id,
+                    execution_version=request.expected_execution_version + 1,
+                )
+            )
+            if changed.rowcount != 1:
+                raise MCPError("mcp_execution_conflict")
+            await session.commit()
+            result = server_dto(server)
+        if request.state == "disabled":
+            await self.manager.disconnect(identity)
+        elif request.state == "draining":
+            await self.manager.drain(identity)
+        return result

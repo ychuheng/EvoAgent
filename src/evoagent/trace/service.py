@@ -139,6 +139,7 @@ class TraceService:
                     "provider_call_id": item.provider_call_id,
                     "tool_name": item.tool_name,
                     "arguments": item.arguments,
+                    "execution_binding": item.execution_binding,
                     "risk": item.risk,
                     "status": item.status.value,
                     "result_summary": item.result_summary,

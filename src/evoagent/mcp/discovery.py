@@ -40,6 +40,32 @@ def check_schema(schema):
                 walk(item, depth + 1)
 
     walk(schema)
+    visits = 0
+
+    def expand(value, references=(), depth=0):
+        nonlocal visits
+        visits += 1
+        if visits > 10000 or depth > 32:
+            raise MCPError("mcp_schema_reference_limit")
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"$ref", "$dynamicRef"}:
+                    if item in references or not item.startswith("#/"):
+                        raise MCPError("mcp_schema_reference_invalid")
+                    target = schema
+                    try:
+                        for part in item[2:].split("/"):
+                            target = target[part.replace("~1", "/").replace("~0", "~")]
+                    except (KeyError, TypeError):
+                        raise MCPError("mcp_schema_reference_invalid") from None
+                    expand(target, (*references, item), depth + 1)
+                else:
+                    expand(item, references, depth + 1)
+        elif isinstance(value, list):
+            for item in value:
+                expand(item, references, depth + 1)
+
+    expand(schema)
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError:

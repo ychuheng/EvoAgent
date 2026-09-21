@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from evoagent.core.events import RuntimeEventSink
 from evoagent.core.models import EventType, ToolCall, ToolResult, ToolResultStatus
-from evoagent.tools.base import ToolExecutionError, ToolPermissionError
+from evoagent.tools.base import ToolArgumentValidationError, ToolExecutionError, ToolPermissionError
 from evoagent.tools.execution import ToolExecutionMiddleware
 from evoagent.tools.registry import ToolNotFoundError, ToolRegistry
 
@@ -55,9 +55,19 @@ class ToolExecutor:
 
         try:
             arguments = tool.validate_arguments(call.arguments)
-        except ValidationError as error:
+        except (ValidationError, ToolArgumentValidationError) as error:
             return await self._failed_result(call, "invalid_arguments", str(error))
 
+        if getattr(tool, "requires_persistent_execution", False) and self._middleware is None:
+            return await self._failed_result(
+                call, "mcp_persistence_required", "mcp_persistence_required"
+            )
+        preflight = getattr(tool, "preflight", None)
+        if preflight is not None:
+            try:
+                await preflight()
+            except ToolExecutionError as error:
+                return await self._failed_result(call, error.code, str(error))
         token = None
         if self._middleware is not None:
             directive = await self._middleware.before(call, tool, arguments)
@@ -86,8 +96,8 @@ class ToolExecutor:
             )
         except ToolExecutionError as error:
             if self._middleware is not None:
-                await self._middleware.after_failure(token, "tool_execution_error", str(error))
-            return await self._failed_result(call, "tool_execution_error", str(error))
+                await self._middleware.after_failure(token, error.code, str(error))
+            return await self._failed_result(call, error.code, str(error))
         except Exception as error:
             if self._middleware is not None:
                 await self._middleware.after_failure(

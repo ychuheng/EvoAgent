@@ -71,11 +71,12 @@ class ToolRegistry:
             {
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.arguments_model.model_json_schema(),
+                "parameters": tool.definition().parameters,
                 "risk": tool.risk.value,
                 "has_side_effects": tool.has_side_effects,
                 "parallel_safe": tool.parallel_safe,
                 "implementation_version": tool.implementation_version,
+                **({"binding": tool.execution_binding()} if tool.execution_binding() else {}),
             }
             for tool in (self._tools[name] for name in self.names)
         )

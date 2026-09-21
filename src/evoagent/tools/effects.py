@@ -62,15 +62,26 @@ class PersistentToolMiddleware:
         async with UnitOfWork(self._session_factory) as unit:
             if self._lease_guard is not None:
                 await self._lease_guard.check(unit.session)
-            record = await self._get_or_create_call(unit, call, decision.effective_risk.value)
+            binding = tool.execution_binding()
+            if binding:
+                binding = {**binding, "policy_hash": self._policy.manifest_hash()}
+            record = await self._get_or_create_call(
+                unit,
+                call,
+                decision.effective_risk.value,
+                binding,
+                tool.canonical_arguments(arguments),
+            )
             approval = await unit.session.scalar(
                 select(ToolApprovalRecord).where(ToolApprovalRecord.tool_call_id == record.id)
             )
+            if approval is not None and (record.execution_binding or {}) != binding:
+                approval = None
             if approval is None:
                 # Worker 重新排队后，Provider 可能为同一语义调用生成新的 call_id。
                 # 审批决定因此按“任务 + 工具 + 参数”复用，call_id 只负责 Trace 关联。
                 approval = await self._find_semantic_approval(
-                    unit, tool.name, arguments.model_dump(mode="json")
+                    unit, tool.name, tool.canonical_arguments(arguments), binding
                 )
             if decision.action is PolicyAction.DENY or (
                 approval is not None and approval.status is ApprovalStatus.REJECTED
@@ -130,9 +141,22 @@ class PersistentToolMiddleware:
 
             effect_id = None
             if tool.has_side_effects:
-                semantic_key = self.semantic_key(tool.name, arguments.model_dump(mode="json"))
+                semantic_key = self.semantic_key(tool.name, tool.canonical_arguments(arguments))
                 effect = await unit.effects.find(str(self._task_id), semantic_key)
                 if effect is not None and effect.status is ToolEffectStatus.COMMITTED:
+                    origin = await unit.session.get(ToolCallRecord, effect.tool_call_id)
+                    if binding and (origin is None or origin.execution_binding != binding):
+                        record.status = ToolCallStatus.DENIED
+                        await unit.commit()
+                        return ToolExecutionDirective(
+                            result=ToolResult(
+                                tool_call_id=call.call_id,
+                                name=call.name,
+                                status=ToolResultStatus.ERROR,
+                                content="tool_manifest_changed",
+                                error_code="tool_manifest_changed",
+                            )
+                        )
                     content = effect.result_content or "副作用已提交"
                     record.status = ToolCallStatus.SUCCEEDED
                     record.result_summary = content
@@ -230,6 +254,23 @@ class PersistentToolMiddleware:
                     content = "[context_source_revoked: output body removed]"
             call = await unit.session.get(ToolCallRecord, token.tool_call_id)
             if call is not None:
+                if call.execution_binding:
+                    from evoagent.mcp.bindings import check_binding
+                    from evoagent.mcp.schema import MCPError
+
+                    try:
+                        await check_binding(
+                            unit.session, call.execution_binding, in_flight=True, lock=True
+                        )
+                    except MCPError as error:
+                        call.status = ToolCallStatus.FAILED
+                        call.error_code = error.code
+                        if token.effect_id is not None:
+                            effect = await unit.session.get(ToolEffectRecord, token.effect_id)
+                            if effect is not None:
+                                effect.status = ToolEffectStatus.UNKNOWN
+                        await unit.commit()
+                        raise
                 call.status = ToolCallStatus.SUCCEEDED
                 call.result_summary = content
             if token.effect_id is not None:
@@ -259,7 +300,7 @@ class PersistentToolMiddleware:
             await unit.commit()
 
     async def _get_or_create_call(
-        self, unit: UnitOfWork, call: ToolCall, risk: str
+        self, unit: UnitOfWork, call: ToolCall, risk: str, binding: dict, canonical: dict
     ) -> ToolCallRecord:
         existing = await unit.session.scalar(
             select(ToolCallRecord).where(
@@ -268,6 +309,12 @@ class PersistentToolMiddleware:
             )
         )
         if existing is not None:
+            if (existing.execution_binding or {}) != binding or (
+                binding and existing.arguments != canonical
+            ):
+                from evoagent.mcp.schema import MCPError
+
+                raise MCPError("tool_manifest_changed")
             return existing
         next_sequence = (
             await unit.session.scalar(
@@ -284,8 +331,9 @@ class PersistentToolMiddleware:
             turn_id=turn.id,
             provider_call_id=call.call_id,
             tool_name=call.name,
-            arguments=dict(call.arguments),
+            arguments=canonical,
             risk=risk,
+            execution_binding=binding,
         )
         unit.session.add(record)
         await unit.session.flush()
@@ -296,6 +344,7 @@ class PersistentToolMiddleware:
         unit: UnitOfWork,
         tool_name: str,
         arguments: dict[str, Any],
+        binding: dict,
     ) -> ToolApprovalRecord | None:
         rows = await unit.session.execute(
             select(ToolApprovalRecord, ToolCallRecord)
@@ -307,7 +356,7 @@ class PersistentToolMiddleware:
             .order_by(ToolApprovalRecord.requested_at.desc())
         )
         for approval, call in rows:
-            if call.arguments == arguments:
+            if call.arguments == arguments and (call.execution_binding or {}) == binding:
                 return approval
         return None
 

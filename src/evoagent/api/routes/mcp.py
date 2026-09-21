@@ -1,4 +1,4 @@
-"""MCP 仅发现与本地审核入口，无 tools/call API。"""
+"""MCP 发现、审核与执行状态管理入口，无 tools/call API。"""
 
 from datetime import UTC, datetime
 from uuid import UUID
@@ -13,7 +13,7 @@ from evoagent.db.models import (
     MCPServerRecord,
     MCPToolReviewRecord,
 )
-from evoagent.mcp.schema import MCPError, MCPServerConfig, ServerUpdate, ToolReview
+from evoagent.mcp.schema import ExecutionUpdate, MCPError, MCPServerConfig, ServerUpdate, ToolReview
 from evoagent.mcp.service import catalog_dto, review_dto, server_dto
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
@@ -48,8 +48,9 @@ async def disconnect_server(server_id: UUID, request: Request):
 @router.get("/servers/{server_id}/catalogs")
 async def catalogs(server_id: UUID, database: DatabaseDependency):
     async with database.session_factory() as session:
+        server = await session.get(MCPServerRecord, server_id)
         return [
-            catalog_dto(row)
+            catalog_dto(row, server)
             for row in await session.scalars(
                 select(MCPCatalogRecord)
                 .where(MCPCatalogRecord.server_id == server_id)
@@ -103,3 +104,8 @@ async def reviews(catalog_id: UUID, database: DatabaseDependency):
 @router.post("/catalogs/{catalog_id}/reviews")
 async def review(catalog_id: UUID, body: ToolReview, request: Request):
     return await request.app.state.mcp_service.review(catalog_id, body)
+
+
+@router.post("/servers/{server_id}/execution")
+async def execution(server_id: UUID, body: ExecutionUpdate, request: Request):
+    return await request.app.state.mcp_service.set_execution(server_id, body)

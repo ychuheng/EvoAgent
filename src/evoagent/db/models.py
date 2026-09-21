@@ -200,6 +200,7 @@ class RunRecord(Base):
         Boolean, default=False, server_default="false"
     )
     config_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    tool_catalog_snapshot: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     config_hash: Mapped[str | None] = mapped_column(String(71))
     next_event_sequence: Mapped[int] = mapped_column(Integer, default=1)
     lock_version: Mapped[int] = mapped_column(Integer, default=0)
@@ -241,6 +242,7 @@ class ToolCallRecord(Base):
     provider_call_id: Mapped[str] = mapped_column(String(256))
     tool_name: Mapped[str] = mapped_column(String(64))
     arguments: Mapped[dict[str, Any]] = mapped_column(JSON)
+    execution_binding: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     risk: Mapped[str] = mapped_column(String(2))
     status: Mapped[ToolCallStatus] = mapped_column(
         enum_column(ToolCallStatus, "tool_call_status"), default=ToolCallStatus.PENDING
@@ -815,6 +817,11 @@ class MCPServerRecord(Base):
     config: Mapped[dict[str, Any]] = mapped_column(JSON)
     lock_version: Mapped[int] = mapped_column(Integer, default=0)
     latest_revision: Mapped[int] = mapped_column(Integer, default=0)
+    execution_state: Mapped[str] = mapped_column(
+        String(16), default="disabled", server_default="disabled"
+    )
+    active_catalog_id: Mapped[UUID | None] = mapped_column(Uuid)
+    execution_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -957,3 +964,10 @@ def protect_skill_source(_mapper: object, _connection: object, _record: SkillSou
     """来源血缘创建后不可被改写。"""
 
     raise ValueError("skill sources are immutable")
+
+
+@event.listens_for(RunRecord, "before_update")
+def protect_tool_catalog_snapshot(_mapper, _connection, record):
+    history = inspect(record).attrs.tool_catalog_snapshot.history
+    if history.has_changes() and any(value is not None for value in history.deleted):
+        raise ValueError("run tool catalog snapshot is immutable")

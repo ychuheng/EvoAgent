@@ -111,3 +111,10 @@ class ToolReview(Contract):
         if self.effect != "read_only" and self.risk in {"R0", "R1"}:
             raise ValueError("write effects require at least R2")
         return self
+
+
+class ExecutionUpdate(Contract):
+    expected_execution_version: int = Field(default=0, ge=0)
+    expected_lock_version: int = Field(ge=0)
+    state: Literal["active", "draining", "disabled"]
+    catalog_id: str | None = None

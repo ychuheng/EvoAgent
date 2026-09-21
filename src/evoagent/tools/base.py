@@ -38,6 +38,12 @@ class BaseTool[ArgumentsT: BaseModel](ABC):
 
         return self.arguments_model.model_validate(dict(arguments))
 
+    def canonical_arguments(self, arguments: ArgumentsT) -> dict[str, Any]:
+        return arguments.model_dump(mode="json")
+
+    def execution_binding(self) -> dict[str, Any]:
+        return {}
+
     @abstractmethod
     async def invoke(self, arguments: ArgumentsT) -> str:
         """使用已经校验的参数执行工具功能。"""
@@ -47,8 +53,14 @@ class ToolError(Exception):
     """工具实现主动抛出的预期失败的基类。"""
 
 
+class ToolArgumentValidationError(ToolError):
+    """动态 Schema 与类型化参数共享的校验失败。"""
+
+
 class ToolExecutionError(ToolError):
     """工具选择正确，但无法产生有效结果。"""
+
+    code = "tool_execution_error"
 
 
 class ToolPermissionError(ToolError):
