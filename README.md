@@ -2,7 +2,7 @@
 
 EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目标是在可靠任务执行的基础上，建立可验证、可版本化、可回滚的 Skill 生命周期。
 
-当前版本 `0.4.0.dev0`：阶段一模块 0～9、阶段二模块 0～12、阶段三模块 0～12 已完成；阶段四已实现模块 0～10 的代码与本地契约验收，PostgreSQL、容器与真实模型效果验收待补。已具备向量索引、混合检索、上下文选择冻结，以及 MCP 受控连接、工具发现、目录版本、本地审核、Run 工具契约冻结与统一安全执行。
+当前版本 `0.4.0.dev0`：阶段一模块 0～9、阶段二模块 0～12、阶段三模块 0～12 已完成；阶段四已实现模块 0～10，并已补齐真实 PostgreSQL/pgvector、应用容器和模块 10 Linux Docker 验收，真实模型效果报告仍待补。已具备向量索引、混合检索、上下文选择冻结，以及 MCP 受控连接、工具发现、目录版本、本地审核、Run 工具契约冻结与统一安全执行。
 
 阶段四最新部署与验收见[模块 6～7 运行说明](docs/阶段四-模块6至7验收与运行说明.md)，源码讲解见[学习手册第 69～73 章](docs/EvoAgent-源码讲解与学习手册.md)。升级需执行 migration `20260920_0007`，PostgreSQL 必须安装 vector 扩展；Compose/CI 已使用 pgvector 镜像。SQLite 使用 JSON 向量替身，不证明向量 SQL 通过。默认仍为词法 Skill 检索，`EVOAGENT_RETRIEVAL_BACKEND=hybrid` 开启混合检索，`EVOAGENT_MEMORY_RETRIEVAL_ENABLED=true` 开启已确认记忆注入；新链路要求快照 v2。旧活动配置不自动改写，配置不兼容时拒绝恢复。
 
@@ -160,7 +160,7 @@ $env:EVOAGENT_DATABASE_URL="postgresql+asyncpg://evoagent:evoagent@127.0.0.1:543
 
 打开 `http://127.0.0.1:8000/docs` 查看 OpenAPI，打开 `http://127.0.0.1:8000/viewer` 查看 Trace。Task API 只负责提交和控制任务；后台执行由 `JobWorker` 完成，不会在 HTTP 请求中运行 Agent。Worker 的默认 Mock 模式会离线执行“搜索—生成 report.md—最终回答”闭环。事件流位于 `/api/v1/tasks/{task_id}/events`，完整运行记录位于 `/api/v1/runs/{run_id}/trace`。
 
-SQLite 只用于本地快速测试；PostgreSQL 迁移、跨连接事件序号和 Worker 租约竞争由 CI 的真实 PostgreSQL 服务验证。
+SQLite 只用于本地快速测试；PostgreSQL 迁移、跨连接事件序号和 Worker 租约竞争由 CI 及 Docker Desktop 中的真实 PostgreSQL 服务验证。
 
 详细设计见：
 
