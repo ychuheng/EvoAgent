@@ -971,3 +971,20 @@ def protect_tool_catalog_snapshot(_mapper, _connection, record):
     history = inspect(record).attrs.tool_catalog_snapshot.history
     if history.has_changes() and any(value is not None for value in history.deleted):
         raise ValueError("run tool catalog snapshot is immutable")
+
+
+class SandboxExecutionRecord(Base):
+    __tablename__ = "sandbox_executions"
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    run_id: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
+    server_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("mcp_servers.id", ondelete="RESTRICT")
+    )
+    lease_epoch: Mapped[int | None] = mapped_column(Integer)
+    profile_hash: Mapped[str] = mapped_column(String(71))
+    container_id: Mapped[str | None] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(32), default="starting")
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

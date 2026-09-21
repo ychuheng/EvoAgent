@@ -73,7 +73,7 @@ class ApprovalService:
             call = await unit.session.get(ToolCallRecord, approval.tool_call_id)
             if call is None:
                 raise ApprovalServiceError("approval tool call does not exist")
-            if call.execution_binding:
+            if call.execution_binding and "server_id" in call.execution_binding:
                 try:
                     await check_binding(unit.session, call.execution_binding, lock=True)
                 except MCPError:

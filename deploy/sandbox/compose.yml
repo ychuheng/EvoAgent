@@ -1,0 +1,47 @@
+# 显式叠加：docker compose -f docker-compose.yml -f deploy/sandbox/compose.yml up --build
+# staging root 必须为 Linux 宿主绝对路径，且容器内外路径相同。
+services:
+  sandbox-controller:
+    build:
+      context: .
+      dockerfile: deploy/sandbox/Dockerfile.controller
+    environment:
+      EVOAGENT_DATABASE_URL: postgresql+asyncpg://evoagent:evoagent@postgres:5432/evoagent
+      EVOAGENT_WORKSPACE: /app/workspace
+      EVOAGENT_ARTIFACT_ROOT: /app/workspace/artifacts
+      EVOAGENT_SANDBOX_CONTROLLER_TOKEN: ${EVOAGENT_SANDBOX_CONTROLLER_TOKEN:?set a random token of at least 32 characters}
+      EVOAGENT_SANDBOX_PROFILES: ${EVOAGENT_SANDBOX_PROFILES:?set reviewed digest profiles}
+      EVOAGENT_MCP_LAUNCH_PROFILES: ${EVOAGENT_MCP_LAUNCH_PROFILES:?set launch profiles JSON, use an empty object if unused}
+      EVOAGENT_SANDBOX_STAGING_ROOT: ${EVOAGENT_SANDBOX_STAGING_ROOT:?set absolute Linux host path}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - evoagent-workspace:/app/workspace
+      - ${EVOAGENT_SANDBOX_STAGING_ROOT}:${EVOAGENT_SANDBOX_STAGING_ROOT}
+    networks: [default, sandbox-control]
+    read_only: true
+    tmpfs: [/tmp:size=16m]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE] # 仅可信 controller 读写共享 Artifact 卷；执行容器不添加能力
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # 不映射端口；控制器是受信计算基，不对公网开放。
+  worker:
+    environment:
+      EVOAGENT_SANDBOX_CONTROLLER_TOKEN: ${EVOAGENT_SANDBOX_CONTROLLER_TOKEN}
+      EVOAGENT_SANDBOX_CONTROLLER_URL: http://sandbox-controller:8090
+      EVOAGENT_SANDBOX_PROFILES: ${EVOAGENT_SANDBOX_PROFILES}
+      EVOAGENT_SHELL_SANDBOX_PROFILE: ${EVOAGENT_SHELL_SANDBOX_PROFILE:-}
+      EVOAGENT_MCP_LAUNCH_PROFILES: ${EVOAGENT_MCP_LAUNCH_PROFILES:?set launch profiles JSON, use an empty object if unused}
+    networks: [default, sandbox-control]
+  api:
+    environment:
+      EVOAGENT_SANDBOX_CONTROLLER_TOKEN: ${EVOAGENT_SANDBOX_CONTROLLER_TOKEN}
+      EVOAGENT_SANDBOX_CONTROLLER_URL: http://sandbox-controller:8090
+      EVOAGENT_SANDBOX_PROFILES: ${EVOAGENT_SANDBOX_PROFILES}
+      EVOAGENT_MCP_LAUNCH_PROFILES: ${EVOAGENT_MCP_LAUNCH_PROFILES:?set launch profiles JSON, use an empty object if unused}
+    networks: [default, sandbox-control]
+networks:
+  sandbox-control:
+    internal: true

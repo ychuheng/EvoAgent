@@ -80,6 +80,10 @@ class MCPService:
         key = config.launch_profile_id or config.endpoint_profile_id
         if key not in profiles:
             raise MCPError("mcp_profile_not_found")
+        if config.transport == "stdio" and profiles[key].sandbox_profile_id:
+            spec = self.settings.sandbox_profiles.get(profiles[key].sandbox_profile_id)
+            if spec is None or spec.mode != "stdio" or not spec.stdio_command or config.secret_ref:
+                raise MCPError("mcp_sandbox_profile_invalid")
         if config.secret_ref and config.secret_ref not in self.settings.mcp_secret_refs:
             raise MCPError("mcp_secret_ref_invalid")
 
@@ -141,12 +145,20 @@ class MCPService:
         capabilities = initialization.capabilities.model_dump(mode="json", exclude_none=True)
         if len(json.dumps([info, capabilities]).encode()) > 16384:
             raise MCPError("mcp_initialization_limit")
+        async with self.factory() as session:
+            source = await session.get(MCPServerRecord, identity)
+            launch = self.settings.mcp_launch_profiles.get(source.config.get("launch_profile_id"))
+        profile_evidence = {}
+        if launch and launch.sandbox_profile_id:
+            spec = self.settings.sandbox_profiles[launch.sandbox_profile_id]
+            profile_evidence = {"sandbox_profile_hash": content_hash(spec.model_dump(mode="json"))}
         digest = content_hash(
             {
                 "tools": tools,
                 "server_info": info,
                 "capabilities": capabilities,
                 "protocol": initialization.protocolVersion,
+                **profile_evidence,
             }
         )
         async with self.factory() as session:

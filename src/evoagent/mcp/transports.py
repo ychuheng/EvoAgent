@@ -89,13 +89,25 @@ async def endpoint_address(profile):
 
 
 @asynccontextmanager
-async def open_transport(config, settings):
+async def open_transport(config, settings, *, server_id=None, config_version=None, lease=None):
     secret = resolve_secret(settings, config.secret_ref)
     async with AsyncExitStack() as stack:
         if config.transport == "stdio":
             profile = settings.mcp_launch_profiles.get(config.launch_profile_id)
             if profile is None:
                 raise MCPError("mcp_profile_not_found")
+            if profile.sandbox_profile_id:
+                from evoagent.sandbox.stdio import controller_stdio
+
+                if server_id is None or config.secret_ref:
+                    raise MCPError("mcp_sandbox_context_invalid")
+                streams = await stack.enter_async_context(
+                    controller_stdio(
+                        settings, server_id, config_version, profile.sandbox_profile_id, lease
+                    )
+                )
+                yield streams
+                return
             # stderr 全部丢弃（上限 0 字节），避免第三方任意输出泄露环境秘密。
             errlog = stack.enter_context(open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115
             streams = await stack.enter_async_context(

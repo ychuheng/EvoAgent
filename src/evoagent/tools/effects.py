@@ -254,7 +254,7 @@ class PersistentToolMiddleware:
                     content = "[context_source_revoked: output body removed]"
             call = await unit.session.get(ToolCallRecord, token.tool_call_id)
             if call is not None:
-                if call.execution_binding:
+                if call.execution_binding and "server_id" in call.execution_binding:
                     from evoagent.mcp.bindings import check_binding
                     from evoagent.mcp.schema import MCPError
 

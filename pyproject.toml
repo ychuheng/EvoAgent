@@ -21,6 +21,7 @@ dependencies = [
     "python-dotenv>=1.0,<2",
     "sqlalchemy[asyncio]>=2.0.52,<2.1",
     "uvicorn>=0.35,<1",
+    "websockets>=15,<16",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +36,7 @@ dev = [
 
 [project.scripts]
 evoagent = "evoagent.cli:main"
+evoagent-sandbox-controller = "evoagent.sandbox.controller:main"
 evoagent-api = "evoagent.api.main:main"
 evoagent-worker = "evoagent.workers.bootstrap:main"
 evoagent-eval-worker = "evoagent.evals.worker:main"
@@ -50,6 +52,7 @@ asyncio_mode = "auto"
 pythonpath = ["src"]
 testpaths = ["tests"]
 markers = [
+    "docker: requires opt-in Linux Docker sandbox integration environment",
     "postgres: 需要真实 PostgreSQL 服务的集成测试",
 ]
 

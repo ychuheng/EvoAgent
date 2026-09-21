@@ -24,6 +24,7 @@ from evoagent.providers.openai_compatible import OpenAICompatibleProvider
 from evoagent.retrieval.embeddings import provider_from_settings
 from evoagent.retrieval.indexing import IndexService
 from evoagent.runtime.persistent_runner import PersistentAgentRunner
+from evoagent.sandbox.client import ControllerExecutor, DisabledSandboxExecutor
 from evoagent.tasks.lease import JobLease, JobLeaseManager, TaskExecutionResult
 from evoagent.tasks.lease_guard import LeaseGuard
 from evoagent.tools.builtin.artifact_read import ArtifactReadTool
@@ -43,7 +44,7 @@ from evoagent.tools.builtin.web_search import (
 from evoagent.tools.guards import URLGuard
 from evoagent.tools.output_store import ToolOutputStore
 from evoagent.tools.registry import ToolRegistry
-from evoagent.tools.sandbox import RunSandbox, ShellSandbox
+from evoagent.tools.sandbox import RunSandbox
 from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
 from evoagent.workers.main import JobWorker
 
@@ -137,11 +138,9 @@ class ConfiguredTaskHandler:
                 web_fetch,
                 AskUserTool(),
                 ShellTool(
-                    ShellSandbox(
-                        self._settings.workspace,
-                        allowed_executables=self._settings.shell_allowed_executables,
-                        timeout_seconds=self._settings.tool_timeout_seconds,
-                    )
+                    ControllerExecutor(self._settings, lease)
+                    if self._settings.shell_sandbox_profile
+                    else DisabledSandboxExecutor()
                 ),
             ]
         )

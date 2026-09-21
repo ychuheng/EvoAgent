@@ -85,6 +85,10 @@
 79. 阶段四模块 9 完整调用、恢复与卸载链
 80. 阶段四模块 9 测试地图与故障定位
 81. 阶段四模块 9 学习验收
+82. 阶段四模块 10：独立控制器、固定规格与权限边界
+83. 阶段四模块 10 完整执行、文件发布与故障恢复
+84. 阶段四模块 10 网络出口、MCP 通道与测试地图
+85. 阶段四模块 10 学习验收
 
 ## 1. 阅读说明
 
@@ -98,7 +102,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～9 已实现；PostgreSQL+vector、容器和真实模型效果证据待补。本手册原有章节保留历史学习脉络，最新增量见第 78～81 章；第 57～77 章的完成范围和测试数字保留对应交付时间点。
+`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～10 已实现代码与本地契约验收；PostgreSQL+vector、容器和真实模型效果证据待补。本手册原有章节保留历史学习脉络，最新增量见第 82～85 章；第 57～81 章的完成范围和测试数字保留对应交付时间点。
 
 已经完成：
 
@@ -6988,3 +6992,260 @@ PostgreSQL 实机并发、公网 TLS、第三方业务回执与真实模型效�
 30. 哪些本地证据已经成立，哪些需要 PostgreSQL、第三方系统和模块 10 的环境验证？
 
 学习时先运行一次只读调用，再观察 R3 审批、写后断连和 draining 三条测试的数据库变化。能够逐一解释工具身份、授权身份、业务动作和连接所有权，才算理解了模块 9 的执行边界。
+
+
+---
+
+## 82. 阶段四模块 10：独立控制器、固定规格与权限边界
+
+第 35 章的宿主 ShellSandbox 和第 74～81 章的受信 stdio fixture 保留历史教学用途。模块 10 开始，持久化 Worker 的 Shell 装配改为 ControllerExecutor；未配置容器 Profile 时拒绝执行。旧白名单不会重新启用宿主命令。本章解释代码已建立的边界；真实 Linux Docker 验收结果必须另外记录，不能用本地 FakeDriver 的成功替代。
+
+### 82.1 为什么需要第三个进程
+
+API 负责管理任务，Worker 负责持有租约和执行工具，sandbox-controller 负责创建与回收容器。Docker socket 只交给 controller，因为能操作该 socket 的进程可以影响宿主。把它挂进 Worker，再要求 Worker 自觉不传危险参数，无法构成独立的权限边界。
+
+controller 是受信计算基：它持有 Docker 控制权、数据库连接和 Artifact 卷访问权。运行模型生成代码的执行容器只拿到经过筛选的输入。Bearer token 用于内部控制接口认证，不能将 controller 当作可公开的多用户服务。
+
+```text
+Model ToolCall
+  → ToolExecutor → Policy / Approval / ToolEffect
+  → ShellTool → ControllerExecutor（携带 Run 与租约代次）
+  → 私有控制接口 → SandboxService → DockerDriver
+  → 无网络执行容器 → guest.py → 有界结果
+  → 确认容器移除 → 再查租约 → ArtifactService → ToolResult
+```
+
+### 82.2 源码导航与阅读顺序
+
+| 文件 | 主要职责 | 推荐观察点 |
+|---|---|---|
+| `sandbox/schema.py` | 固定规格与请求契约 | 哪些字段由部署者决定，哪些能由调用方提交 |
+| `sandbox/client.py` | Worker 控制器客户端 | 不提供镜像、挂载、网络和环境变量覆盖 |
+| `sandbox/controller.py` | HTTP/stdio 认证与生命周期 | 启动回收、退出取消、私有通道 |
+| `sandbox/ownership.py` | 单实例文件锁 | 与清理器的所有权假设对应 |
+| `sandbox/docker.py` | Docker 参数、预检、限流读取与移除确认 | 操作的是整个容器 |
+| `sandbox/service.py` | 租约、输入、记录、输出发布 | 提交之前反复验证执行权 |
+| `sandbox/guest.py` | 容器内部命令与输出扫描 | 仅依赖标准库，可单独复制进镜像 |
+| `sandbox/egress.py` | 公网请求的实际 IP 绑定 | Host 和 TLS SNI 保留原站点身份 |
+| `sandbox/stdio.py` | MCP 私有控制通道适配 | 官方 SDK 仍处理 JSON-RPC 会话 |
+| `workers/bootstrap.py` | 持久化 Worker 装配 | 无 Profile 时使用 DisabledSandboxExecutor |
+| `trace/service.py` | Run 执行证据 | 容器 ID、epoch、状态和错误码 |
+
+先读 Schema，再沿一次 run() 阅读服务与 Driver，最后看取消、回收和 MCP 分支。直接从 Docker 命令行开始，容易遗漏审批、租约和 Artifact 的提交约束。
+
+### 82.3 SandboxSpec 与 SandboxRequest 为什么分开
+
+SandboxSpec 是部署配置，禁止额外字段并冻结实例。镜像必须是 `name@sha256:...`，不能填写可变 tag；Profile 的规范 JSON 参与 content_hash。job 模式规定允许的绝对可执行路径；stdio 模式规定整条启动命令。资源上限由类型模型限制，调用请求不能放大它们。
+
+SandboxRequest 只包含 execution_id、Task/Run、owner、epoch、profile、profile_hash、argv 和 input_artifact_ids。argv 最多 64 项、UTF-8 总量最多 16384 字节，拒绝 NUL；输入 Artifact 最多 32 个。模型既不能添加 bind mount，也不能提交 `privileged=true` 或 `network=host`。
+
+例如 Worker 冻结了 Profile A 的 hash，部署者随后调整了镜像或内存。即使名字仍是 A，controller 也会因 hash 不同拒绝旧请求。ShellTool 的 implementation_version 和 execution_binding 同样携带规格身份，避免把旧批准解释为新规格的授权。
+
+### 82.4 默认资源限制具体限制什么
+
+| 限制 | 默认值或固定值 | 生效位置 |
+|---|---|---|
+| 用户 | UID/GID 10001 | Docker create |
+| CPU | 1 核配额 | Docker cgroup，规格最大 2 核 |
+| 内存与 swap 总量 | 都设为 256 MiB | Docker；规格最大 512 MiB |
+| 进程数量 | 64 | pids-limit，规格最大 128 |
+| 执行时限 | 30 秒 | controller，规格最大 300 秒 |
+| stdout + stderr | 1 MiB | guest 与 controller 双层检查 |
+| `/tmp`、`/output` | 各 16 MiB tmpfs，各 128 inode | Docker 挂载参数 |
+| 输出文件 | 最多 32 个；每个 1 MiB；合计 8 MiB | guest 扫描及 controller 二次校验 |
+| 根文件系统 | 只读 | Docker readonly |
+| capability / 提权 | drop ALL / no-new-privileges | Docker security options |
+| 网络 | none | 所有执行 Profile 固定 |
+| Docker 日志 | none | 防止 attach 输出上限之外的日志落盘 |
+
+超时、文件数、字节数和 inode 数解决不同问题。一个程序可以输出极少文本，却不断 fork；也可以只创建空文件，把文件系统元数据用完。因此不能把“读取输出最多 1 MiB”当作资源隔离的全部。
+
+默认 seccomp 保留，AppArmor 可由部署者指定固定 Profile；并非每台 Linux 都安装 AppArmor。预检要求 Linux daemon 及内存、swap、CPU、PIDs、seccomp 支持，镜像已在本地且 RepoDigest 匹配，并拒绝镜像声明的 VOLUME。运行阶段不自动 pull 或安装软件。
+
+### 82.5 创建之后还要核对什么
+
+DockerDriver 使用 create 而非把任意字符串交给 shell。随后 inspect 核对网络、只读根、非 privileged、capability、no-new-privileges、日志驱动、资源与用户。如果创建阶段只执行到一半，持久化记录仍可帮助重启后的清理器定位命名容器。
+
+Driver 固定本地 Unix Docker socket，并使用独立空 DOCKER_CONFIG，避免继承操作者 Docker context、代理或认证配置。可选输入挂载必须来自 controller 生成的目录；路径中的逗号拒绝，避免进入 Docker mount 参数的另一层语法。
+
+### 82.6 为什么此版本只允许单 controller
+
+ownership.py 在 staging 根持有操作系统文件锁，第二个实例无法取得同一根目录的所有权。service.active 只记录本进程在途任务，reap 会停止不在 active 中的遗留执行，所以它依赖单实例假设。
+
+部署时必须对一个 Docker daemon 使用一个 controller 和一个固定 staging 根。更换 staging 根不能用来绕过单实例限制，否则两个清理器会把对方的容器视为孤儿。本模块没有分布式 controller 选主；多 Worker 可以调用同一个 controller，但 controller 本身不是高可用集群。
+
+---
+
+## 83. 阶段四模块 10 完整执行、文件发布与故障恢复
+
+### 83.1 以一个生成文件的调用为例
+
+模型提出 `/usr/local/bin/python -c ...`，脚本读取 `/input/<Artifact UUID>`，在当前目录写 `answer.txt`。ShellArguments 校验 argv 和输入 ID 后，既有 R2 权限流程决定是否需要审批。通过权限与效果账本后，ControllerExecutor 为这一次发送分配 execution_id，并附上当前租约。
+
+controller 校验 Bearer、Profile hash、允许的可执行路径和数据库租约，再占用执行槽。槽上限为 4，不等于全局外部 API 限流；模块 11 的分布式协调尚未完成。执行记录在创建容器之前写入，随后输入准备、创建、运行和发布都受规格时限约束。
+
+### 83.2 执行记录与 ToolEffect 是两张不同的账
+
+migration `20260921_0010` 新建 sandbox_executions。记录包含执行 UUID、可选 run_id/server_id、lease_epoch、profile_hash、container_id、status、error_code、expires_at、created_at 和 finished_at。
+
+| 状态 | 含义 | 恢复处理 |
+|---|---|---|
+| starting | 已登记，可能尚未创建或未记下容器 ID | 按固定名称检查并回收 |
+| running | 已创建并开始执行 | 中断后回收，不重放 |
+| stopped | 已确认移除，尚在处理结果或 stdio 已结束 | 重启可保守标记 reaped |
+| succeeded | 命令成功且发布路径完成 | Trace 保留证据 |
+| failed / cancelled | 执行失败或取消 | 已清理时保留终态 |
+| cleanup_pending | 无法确认容器移除 | 后续清理重试 |
+| reaped | 清理器回收了遗留执行 | 不推断业务成功 |
+
+SandboxExecution 描述“哪个容器运行过、是否清理”；ToolEffect 描述“这个业务动作能否重试、结果是否已提交”。容器已经不存在，不证明它此前没有产生效果。恢复时仍沿用 UNKNOWN 的人工核查规则，不因容器回收而自动重新执行写动作。
+
+### 83.3 输入不是整个 Workspace
+
+stage() 使用 `run_id/epoch/execution_id/input` 创建独立目录。每个输入必须在数据库中属于当前 Run；解析后的文件路径必须处于 Artifact 根内，大小和存储 hash 必须一致。单个输入最多 1 MiB，合计最多 8 MiB。
+
+输入在容器中只用 Artifact UUID 命名，不使用外部原始文件名。controller 写入副本并设为只读，再把该目录只读绑定到 `/input`。Workspace、数据库凭据、Provider key、宿主目录与 Docker socket 都不出现在执行容器的参数中。
+
+这里“可用输入”表示调用明确列出且经过同 Run 校验的 Artifact；本模块没有新增跨 Run 文件授权产品。需要处理另一 Run 的文件时，应先经过现有业务流程生成当前 Run 的输入，不能伪造 UUID 绕过校验。
+
+### 83.4 guest.py 为什么仍不可信
+
+guest 使用 create_subprocess_exec 启动参数数组，设置最小环境和 `/output` 工作目录。它并发读取两个输出流，按合计字节数限制，避免程序通过 stderr 绕过 stdout 上限。运行结束后输出一个 JSON 包。
+
+执行代码可能尝试伪造回执，因此 controller 不直接相信 guest 声称的文件和大小。decode_outputs 再次验证列表数量、严格 base64、唯一文件名和字节预算；外层 Docker attach 同时设有 16 MiB 总限额，容纳 base64 与 JSON 开销但不允许无限响应。
+
+非零命令退出记录为 failed / sandbox_command_failed，ShellTool 返回工具失败。guest 执行包装异常则返回通用错误，controller 不把堆栈或内部路径直接回显给模型。
+
+### 83.5 输出路径与特殊文件为什么必须拒绝
+
+收集器只接受 `/output` 下单层普通文件，名字不能包含目录分隔符、冒号、控制字符或特殊的点路径。使用 O_NOFOLLOW 与 O_NONBLOCK 打开，随后 fstat 确认 regular file 且链接数为 1。
+
+这同时拒绝 symlink、hardlink、FIFO、设备和目录：symlink 可能指向镜像其他路径，hardlink 可能共享未预期对象，FIFO 可能让读取阻塞，目录或压缩包递归展开会产生另一套路径和配额问题。本实现不展开任意归档，也不提供目录复制。
+
+这些检查是纵深防护。最终 Artifact 路径由 ArtifactService 生成，不沿用 guest 的文件系统路径。原始名字只放入 attributes，用于展示和追踪。
+
+### 83.6 发布为何安排在容器移除之后
+
+正常顺序是：读取有界回执 → 校验文件 → 强制移除并确认不存在 → 再查租约 → 创建 Artifact → 写执行终态。容器尚在运行时，程序可能继续改变输出；停止整个容器后才进入宿主发布阶段，可以缩小这种竞争窗口。
+
+每个 Artifact 的内部名称包含 epoch、execution_id、序号和 SHA-256，attributes 保存原始名字、执行 ID 与代次。ArtifactService 使用 LeaseGuard，在自身写入事务中继续检查执行权。旧 Worker 即使拿到了回执，也不能绕过 fencing 发布。
+
+多个文件逐个创建，并非跨文件原子提交。发布到一半失去租约时，可能保留已发布的部分产物；它们仍属于旧执行且可追踪，不能因此把整个工具标成成功。这是排查 UNKNOWN 时应同时查看 Artifact 和 ToolEffect 的原因。
+
+### 83.7 取消、断连与超时如何到达整个容器
+
+服务等待输出时每 250ms 检查租约和任务取消，同时检查 HTTP 客户端是否断连。客户端退出时还会尽力发送 DELETE；该请求失败仍有 controller 的时限和租约检查兜底。轮询间隔不是最大撤销延迟承诺，数据库与 Docker 响应也会影响时延。
+
+finally 先取消读取任务并有界排空本地 CLI 管道，再执行 Docker rm --force；随后通过精确名称查询确认容器不存在。只杀 docker attach 进程不算清理成功，因为容器和其子进程可能仍然运行。
+
+rm 或确认步骤失败时写 cleanup_pending，不返回可发布的成功结果。恢复清理可以重复，业务执行不能因此重复。数据库 update 用 shield 等待已经开始的提交完成后再传播取消，避免取消恰好落在 SQLite commit 时留下未完成事务。
+
+### 83.8 重启后如何找回遗留执行
+
+controller 启动先 reap，Docker 不可达则启动失败；运行中每 5 秒尝试扫描。清理器扫描 starting/running/stopped/cleanup_pending 记录及受控 label 的容器，跳过本进程 active 中的执行，其他执行只停止和回收，不重新运行命令。
+
+staging 删除先验证目标位于配置根之内且不是根本身。正常完成及遗留执行回收会删除对应输入副本；如果进程在写入终态之后、删除目录之前崩溃，仍可能留下孤立 staging 文件，需要停机核对后清理。本模块不宣称任意崩溃点都能自动清空所有历史磁盘残留。
+
+---
+
+## 84. 阶段四模块 10 网络出口、MCP 通道与测试地图
+
+### 84.1 为什么 DNS 检查后还要绑定 IP
+
+只在发请求前检查域名并不充分：检查时得到公网 IP，实际连接时若再次解析为私网地址，前一次检查就失效了。URLGuard.resolve 返回规范 URL 和全部地址，并要求全部地址都可公开访问，IPv4、IPv6 和云元数据地址均受限制。
+
+EgressTransport 选取已检查地址，直接把发给底层 HTTP transport 的 URL host 改成该 IP；Host 头仍使用原站点，TLS sni_hostname 也保留原域名。这样证书校验使用原站点身份，连接目标却固定为已检查的地址。
+
+例如请求 `https://example.com/a`，解析得到 `93.184.216.34`，实际连接该地址，同时使用 `Host: example.com` 和原域名 SNI。不能为了连接成功关闭 TLS 校验。所有 DNS 结果中只要混有一个私网地址，整次解析就拒绝。
+
+### 84.2 重定向与环境代理的处理
+
+web_fetch 保留手动重定向，每一跳都重新校验。公共页面跳转到 `169.254.169.254` 时，在建立下一跳连接之前拒绝。默认客户端不继承 HTTP_PROXY 等环境设置，底层不自动重试到其他地址。
+
+请求设置 Accept-Encoding: identity，非 identity 压缩回执直接拒绝，避免在字节限制之前出现透明解压膨胀。原有响应类型、正文大小和超时限制继续生效。注入 MockTransport 的单元测试只证明请求构造与决策，不能证明公网 TLS 实际握手。
+
+### 84.3 公网读取与执行容器网络不是一条通道
+
+本版没有让容器借助 HTTP_PROXY 联网。所有 job 与 stdio 执行容器固定 `network=none`，任意代码不能自行直连公网、内网或云元数据。需要网页资料时，由受控 web_fetch 获取结果，再通过明确的 Artifact 输入交给执行容器。
+
+Provider 使用自己的可信客户端和秘密，不经过公开网页工具的策略。预设 MCP HTTP endpoint 也保持独立的部署者信任配置。本模块没有把 EgressTransport 自动套到所有网络调用，更没有增加任意联网 Python 或通用容器出口代理。
+
+### 84.4 第三方 stdio 如何接入现有 SDK
+
+LaunchProfile 增加 sandbox_profile_id。容器 Profile 不能同时配置宿主 command、args 或 cwd；原宿主 stdio 路径必须显式标记 trusted_fixture，仅用于项目受信测试程序。生产第三方 Server 应进入经过审查的固定镜像。
+
+ConnectionManager 把 server_id、config_version 和可选 lease 传入 open_transport。sandbox.stdio 使用带 Bearer 的内部 WebSocket 连接 controller，将官方 SDK SessionMessage 转换为逐行 JSON-RPC。这个 WebSocket 是项目私有控制通道，不是宣称新增 MCP 标准传输协议。
+
+controller 从数据库读取 Server 的启用状态和配置版本，再取得部署 Profile。调用者不能直接指定要执行的命令。Worker 连接携带租约；API 管理发现可能没有 Run，因此执行记录的 run_id/epoch 允许为空。
+
+### 84.5 通道有哪些停止条件
+
+stdio 首帧最大 4 KiB，单条传输消息最大 64 KiB；输入累计最多 4 MiB，stdout 与 stderr 共享规格输出预算。连接受 Profile 总时限约束，默认 30 秒、最大 300 秒，不是永久后台服务。
+
+服务定期检查配置版本和 enabled，Worker 路径额外检查租约。任何读写任务结束、连接断开、超时或检查失败都会进入 finally，关闭 CLI 并回收容器。SDK Session 的创建与关闭仍由 Connection 所有者任务完成，避免跨任务关闭 AnyIO 上下文。
+
+容器 stdio 当前拒绝 secret_ref，不注入 Provider 或外部服务密钥。需要凭据或联网的第三方 Server 不属于此版支持范围；不能用 trusted_fixture 标记把任意第三方程序移回宿主运行。
+
+### 84.6 测试地图及其证据边界
+
+| 测试文件 / 场景 | 已验证内容 | 不能替代的证据 |
+|---|---|---|
+| test_sandbox_controller.py：鉴权与执行 | HTTP 契约、规格绑定、Artifact 与状态记录 | FakeDriver 不证明内核隔离 |
+| 取消、租约、超时、清理失败 | 拒绝发布、记录待清理、回收不重放 | PostgreSQL 并发时序 |
+| 非零退出与单实例锁 | 失败状态、第二 owner 被拒绝 | 分布式 controller 选主 |
+| 输出洪泛 | 真实本地固定测试脚本、有界读取与清理 | Docker cgroup 限额 |
+| TCP + WebSocket + 官方 MCP SDK | 实际控制通道与 stdio 会话 | 测试 Server 为受信 fixture |
+| test_sandbox_egress.py | 混合 DNS、IP/Host/SNI、重绑定、重定向拒绝 | 公网证书与真实网络路径 |
+| test_docker_sandbox.py：cgroup | CPU 配额与节流、内存、swap、PIDs、用户与能力 | 只有显式 Linux Docker 运行才成立 |
+| Docker 故障注入 | 内存、进程、磁盘、输出、进程树时限与清理 | 本机跳过不能记为通过 |
+| Docker 网络与特殊文件 | 直连公网/元数据拒绝、symlink/hardlink/FIFO/目录拒绝 | 共享内核的敌对多租户安全 |
+| test_migrations.py | 0010 升降级与表结构 | 生产数据回滚决策 |
+
+CI 新增独立 sandbox job，构建镜像、推入 job 本地 registry 得到 RepoDigest，再显式开启真实测试。测试开关开启后，缺少 Docker、Linux 或 digest 会失败，不会静默跳过。本机通过数字及跳过原因见[模块 10 运行说明](阶段四-模块10验收与运行说明.md)。
+
+### 84.7 故障定位顺序
+
+未配置 Shell 时先看 shell_sandbox_profile；已有旧宿主白名单不代表启用。controller 拒绝请求时核对 token、两侧 Profile 的完整 JSON 与 hash，再看 Trace 的 sandbox_executions。客户端有意归一化内部错误，详细原因从受控记录与部署检查定位。
+
+启动失败时检查 Linux daemon、socket、镜像 RepoDigest、cgroup/seccomp 支持和 staging 锁。不要通过移除资源参数、换成 mutable tag、挂载整个 Workspace 或运行 privileged 容器来绕过预检。
+
+cleanup_pending 时先恢复 Docker 管理通道并确认具体容器，等待或触发回收。ToolEffect UNKNOWN 仍需核查业务结果。Artifact 存在、容器不存在和工具成功是三个不同事实，应一起检查。
+
+---
+
+## 85. 阶段四模块 10 学习验收
+
+结合源码、数据库和测试回答：
+
+1. 为什么 Docker socket 只能属于 controller，不能挂给 Worker？
+2. controller 为什么仍属于必须信任的计算基？
+3. SandboxSpec 与 SandboxRequest 分别由谁控制？
+4. Profile 名字没变而 hash 变化时，旧请求会怎样？
+5. 为什么只限制 argv[0] 无法代替容器隔离？
+6. 为什么禁用模式不能退回旧 ShellSandbox？
+7. CPU、内存、PIDs、输出和 inode 上限各解决什么问题？
+8. memory 与 memory-swap 设置成相同值意味着什么？
+9. 为什么不允许镜像 VOLUME 和运行时自动 pull？
+10. Docker create 成功后为何还要 inspect？
+11. Docker attach 的进程退出是否等于容器及子进程停止？
+12. 为什么先写执行记录，再创建容器？
+13. SandboxExecution 和 ToolEffect 分别记录什么事实？
+14. execution_id 与业务幂等身份为什么不同？
+15. 为什么 stage 路径包含 Run、epoch 与执行 ID 三层？
+16. 输入 Artifact 为什么检查所属 Run、hash 和解析后的路径？
+17. guest 的输出包为什么还要在 controller 重新校验？
+18. O_NOFOLLOW、O_NONBLOCK、regular file 和 nlink 各防什么？
+19. 为什么不直接把输出原名拼进宿主 Artifact 路径？
+20. 多个输出文件发布中途失败，会留下什么可追踪事实？
+21. 收到成功回执后为何还要移除容器并再次检查租约？
+22. shield 数据库更新和 shield 清理各保护什么窗口？
+23. cleanup_pending 为什么不能转译为业务执行成功？
+24. 单实例文件锁和 reap 的 active 集合有什么关系？
+25. 为什么仍可能留下需要停机清理的 staging 文件？
+26. DNS 预检与实际 IP 绑定有什么区别？
+27. IP 绑定后 Host 与 SNI 为什么必须保留域名？
+28. 私有 WebSocket 控制通道与 MCP 标准传输有什么区别？
+29. network=none 的第三方 stdio Server 可以使用哪些资源，不能使用哪些资源？
+30. 哪些测试已经在本机通过，哪些必须在 Linux Docker 或 PostgreSQL 环境补证？
+
+建议按正常文件产出、租约丢失、清理失败、DNS 重绑定、stdio 断连五条路径阅读测试。能够解释每一次权限检查、数据提交和清理确认的位置，才算掌握模块 10，而不是只会拼接 docker run 参数。

@@ -71,7 +71,7 @@ class PersistentAgentRunner:
         self._registry = ToolRegistry(
             self._base_registry.get(name) for name in self._base_registry.names
         )
-        manager = ConnectionManager(self._settings)
+        manager = ConnectionManager(self._settings, lease=lease)
         try:
             await register_run_tools(
                 MCPService(self._session_factory, self._settings, manager),

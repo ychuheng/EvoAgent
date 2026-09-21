@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from evoagent.core.models import ToolRisk
 from evoagent.mcp.schema import HTTPProfile, LaunchProfile
+from evoagent.sandbox.schema import SandboxSpec
 
 
 class ProviderName(StrEnum):
@@ -79,8 +80,14 @@ class Settings(BaseSettings):
     retry_max_elapsed_seconds: float = Field(default=300.0, gt=0, le=86_400)
     sse_poll_seconds: float = Field(default=0.5, gt=0, le=30)
     sse_heartbeat_seconds: float = Field(default=15.0, gt=0, le=300)
-    # Shell 默认完全关闭。运维者必须按部署环境显式配置可执行文件白名单。
+    # 旧宿主 allowlist 仅保留受信 fixture；Worker 需显式选择容器 Profile。
     shell_allowed_executables: tuple[str, ...] = ()
+    sandbox_profiles: dict[str, SandboxSpec] = Field(default_factory=dict)
+    shell_sandbox_profile: str | None = None
+    sandbox_controller_url: str = "http://sandbox-controller:8090"
+    sandbox_controller_token: SecretStr | None = None
+    sandbox_staging_root: Path = Path("/var/lib/evoagent-sandbox")
+
     search_provider: str = "mock"
     search_api_key: SecretStr | None = None
 

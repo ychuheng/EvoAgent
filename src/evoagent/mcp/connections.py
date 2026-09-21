@@ -41,7 +41,19 @@ def error_code(error):
 
 
 class Connection:
-    def __init__(self, config, settings, publish, observe, transport):
+    def __init__(
+        self,
+        config,
+        settings,
+        publish,
+        observe,
+        transport,
+        *,
+        identity=None,
+        version=None,
+        lease=None,
+    ):
+        self.identity, self.version, self.lease = identity, version, lease
         self.config, self.settings = config, settings
         self.publish, self.observe, self.transport = publish, observe, transport
         self.wakeup = asyncio.Event()
@@ -93,7 +105,15 @@ class Connection:
             async with AsyncExitStack() as stack:
                 async with asyncio.timeout(self.config.connection_timeout):
                     streams = await stack.enter_async_context(
-                        self.transport(self.config, self.settings)
+                        self.transport(
+                            self.config,
+                            self.settings,
+                            server_id=self.identity,
+                            config_version=self.version,
+                            lease=self.lease,
+                        )
+                        if self.transport is open_transport
+                        else self.transport(self.config, self.settings)
                     )
                     session = await stack.enter_async_context(
                         ClientSession(
@@ -182,7 +202,8 @@ class Connection:
 
 
 class ConnectionManager:
-    def __init__(self, settings, transport=open_transport):
+    def __init__(self, settings, transport=open_transport, *, lease=None):
+        self.lease = lease
         self.settings, self.transport = settings, transport
         self.instance_id = f"mcp:{uuid4().hex}"
         self.connections = {}
@@ -219,7 +240,16 @@ class ConnectionManager:
                 raise MCPError("mcp_connection_limit")
             # 仅发现/握手可有限重试，绝不包含 tools/call。
             for attempt in range(2):
-                connection = Connection(config, self.settings, publish, observe, self.transport)
+                connection = Connection(
+                    config,
+                    self.settings,
+                    publish,
+                    observe,
+                    self.transport,
+                    identity=identity,
+                    version=version,
+                    lease=self.lease,
+                )
                 self.connections[identity] = (version, connection)
                 try:
                     return await asyncio.shield(connection.ready)

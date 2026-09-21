@@ -42,7 +42,7 @@ async def test_file_read_rejects_outside_and_oversized_files(tmp_path: Path) -> 
 @pytest.mark.asyncio
 @respx.mock
 async def test_web_fetch_reads_public_text_response() -> None:
-    respx.get("https://example.com/").mock(
+    respx.get("https://93.184.216.34/").mock(
         return_value=httpx.Response(
             200,
             text="hello web",
@@ -58,7 +58,7 @@ async def test_web_fetch_reads_public_text_response() -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_web_fetch_revalidates_redirect_and_blocks_private_target() -> None:
-    first = respx.get("https://example.com/start").mock(
+    first = respx.get("https://93.184.216.34/start").mock(
         return_value=httpx.Response(
             302,
             headers={"location": "http://127.0.0.1/admin"},
@@ -74,7 +74,7 @@ async def test_web_fetch_revalidates_redirect_and_blocks_private_target() -> Non
 @pytest.mark.asyncio
 @respx.mock
 async def test_web_fetch_enforces_streamed_size_limit() -> None:
-    respx.get("https://example.com/large").mock(
+    respx.get("https://93.184.216.34/large").mock(
         return_value=httpx.Response(
             200,
             content=b"12345",
@@ -93,7 +93,7 @@ async def test_web_fetch_enforces_streamed_size_limit() -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_web_fetch_rejects_binary_content() -> None:
-    respx.get("https://example.com/image").mock(
+    respx.get("https://93.184.216.34/image").mock(
         return_value=httpx.Response(
             200,
             content=b"image",
@@ -108,7 +108,7 @@ async def test_web_fetch_rejects_binary_content() -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_web_fetch_converts_timeout_to_tool_error() -> None:
-    respx.get("https://example.com/slow").mock(side_effect=httpx.ReadTimeout("slow"))
+    respx.get("https://93.184.216.34/slow").mock(side_effect=httpx.ReadTimeout("slow"))
     async with WebFetchTool(URLGuard(public_resolver), timeout_seconds=1) as tool:
         with pytest.raises(ToolExecutionError, match="timed out"):
             await tool.invoke(WebFetchArguments(url="https://example.com/slow"))

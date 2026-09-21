@@ -21,13 +21,20 @@ class Contract(BaseModel):
 
 
 class LaunchProfile(Contract):
-    command: str
+    command: str | None = None
+    sandbox_profile_id: str | None = Field(default=None, max_length=128)
     args: tuple[str, ...] = Field(default=(), max_length=32)
     cwd: str | None = None
-    trusted_fixture: Literal[True]
+    trusted_fixture: bool = False
 
     @model_validator(mode="after")
     def controlled_command(self):
+        if self.sandbox_profile_id:
+            if self.command or self.args or self.cwd or self.trusted_fixture:
+                raise ValueError("container profile cannot supply host argv")
+            return self
+        if not self.trusted_fixture or not self.command:
+            raise ValueError("host stdio requires an explicitly trusted fixture")
         if not Path(self.command).is_absolute() or Path(self.command).suffix.lower() in {
             ".bat",
             ".cmd",

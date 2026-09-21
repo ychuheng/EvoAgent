@@ -56,6 +56,9 @@ class URLGuard:
         self._resolver = resolver or self._resolve_addresses
 
     async def validate(self, url: str) -> str:
+        return (await self.resolve(url))[0]
+
+    async def resolve(self, url: str) -> tuple[str, tuple[str, ...]]:
         """校验 URL 语法、凭据、主机名以及主机的全部 IP 地址。"""
 
         try:
@@ -103,7 +106,7 @@ class URLGuard:
                 )
 
         path = parts.path or "/"
-        return urlunsplit((scheme, parts.netloc, path, parts.query, ""))
+        return urlunsplit((scheme, parts.netloc, path, parts.query, "")), tuple(addresses)
 
     @staticmethod
     async def _resolve_addresses(host: str, port: int) -> tuple[str, ...]:

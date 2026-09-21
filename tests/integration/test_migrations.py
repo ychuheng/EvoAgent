@@ -9,6 +9,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 EXPECTED_TABLES = {
+    "sandbox_executions",
     "mcp_servers",
     "mcp_catalogs",
     "mcp_tool_reviews",

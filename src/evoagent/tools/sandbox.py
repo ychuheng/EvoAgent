@@ -37,6 +37,7 @@ class ShellResult:
     return_code: int
     stdout: str
     stderr: str
+    artifacts: tuple[dict, ...] = ()
 
 
 class ShellSandbox:

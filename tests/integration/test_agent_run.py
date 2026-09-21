@@ -31,7 +31,7 @@ async def public_resolver(host: str, port: int) -> tuple[str, ...]:
 @respx.mock
 async def test_complete_run_uses_multiple_tools_and_returns_answer(tmp_path: Path) -> None:
     (tmp_path / "notes.txt").write_text("local evidence", encoding="utf-8")
-    respx.get("https://example.com/source").mock(
+    respx.get("https://93.184.216.34/source").mock(
         return_value=httpx.Response(
             200,
             text="web evidence",

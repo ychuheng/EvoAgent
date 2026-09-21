@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from evoagent.db.models import (
     ArtifactRecord,
     RunSnapshotRecord,
+    SandboxExecutionRecord,
     ToolApprovalRecord,
     ToolCallRecord,
     ToolEffectRecord,
@@ -45,6 +46,7 @@ class RunTrace(BaseModel):
     approvals: tuple[dict[str, Any], ...]
     snapshots: tuple[dict[str, Any], ...]
     artifacts: tuple[dict[str, Any], ...]
+    sandbox_executions: tuple[dict[str, Any], ...] = ()
 
 
 class TraceService:
@@ -69,6 +71,13 @@ class TraceService:
                     select(ToolCallRecord)
                     .where(ToolCallRecord.run_id == run_id)
                     .order_by(ToolCallRecord.created_at)
+                )
+            )
+            sandboxes = list(
+                await unit.session.scalars(
+                    select(SandboxExecutionRecord)
+                    .where(SandboxExecutionRecord.run_id == run_id)
+                    .order_by(SandboxExecutionRecord.created_at)
                 )
             )
             call_ids = [call.id for call in calls]
@@ -132,6 +141,18 @@ class TraceService:
                     "usage": item.usage,
                 }
                 for item in turns
+            ),
+            sandbox_executions=tuple(
+                {
+                    "id": str(item.id),
+                    "container_id": item.container_id,
+                    "lease_epoch": item.lease_epoch,
+                    "profile_hash": item.profile_hash,
+                    "status": item.status,
+                    "error_code": item.error_code,
+                    "expires_at": item.expires_at.isoformat(),
+                }
+                for item in sandboxes
             ),
             tool_calls=tuple(
                 {

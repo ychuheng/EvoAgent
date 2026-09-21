@@ -7,6 +7,7 @@ import httpx
 from pydantic import Field, field_validator
 
 from evoagent.core.models import ContractModel, ToolRisk
+from evoagent.sandbox.egress import EgressTransport
 from evoagent.tools.base import BaseTool, ToolExecutionError
 from evoagent.tools.guards import URLGuard
 
@@ -60,7 +61,9 @@ class WebFetchTool(BaseTool[WebFetchArguments]):
         self._timeout = httpx.Timeout(timeout_seconds)
         self._max_response_bytes = max_response_bytes
         self._max_redirects = max_redirects
-        self._client = client or httpx.AsyncClient()
+        self._client = client or httpx.AsyncClient(
+            transport=EgressTransport(url_guard), trust_env=False, follow_redirects=False
+        )
         self._owns_client = client is None
 
     async def __aenter__(self) -> Self:
