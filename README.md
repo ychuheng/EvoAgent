@@ -2,9 +2,11 @@
 
 EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目标是在可靠任务执行的基础上，建立可验证、可版本化、可回滚的 Skill 生命周期。
 
-当前版本 `0.4.0.dev0`：前三阶段已完成；阶段四已实现模块 0～12 的工程代码，包括 Redis 唤醒/配额、双 Worker 调度、独立维护队列、Eval fencing，以及隔离的运行时实验和分账报告。PostgreSQL/pgvector、Redis、双真实进程与 Mock 实验已有验收；真实模型报告单独记录，不把小样本结论当成阶段四整体效果证明。
+当前版本 `0.4.0.dev0`：前三阶段已完成；阶段四已实现模块 0～13 的工程代码，包括 Redis 唤醒/配额、双 Worker 调度、独立维护队列、Eval fencing，以及隔离的运行时实验和分账报告。PostgreSQL/pgvector、Redis、双真实进程与 Mock 实验已有验收；真实模型报告单独记录，不把小样本结论当成阶段四整体效果证明。
 
-最新入口：[模块 11～12 运行说明](docs/阶段四-模块11至12验收与运行说明.md)、[源码手册第 86～93 章](docs/EvoAgent-源码讲解与学习手册.md)、[ADR-013](docs/ADR-013-数据库持久队列与Redis唤醒限流.md)、[ADR-014](docs/ADR-014-独立运行时实验与隔离评测.md)。数据库最新迁移为 `20260922_0012`。
+最新入口：[模块 13 页面运行说明](docs/阶段四-模块13验收与运行说明.md)、[源码手册第 94～97 章](docs/EvoAgent-源码讲解与学习手册.md)。新增 Memory 管理、MCP 目录审核/卸载和上下文证据页面，保留原 Skill/Eval 三个页面。前端 12 项组件测试、6 个浏览器流程通过，后端 PostgreSQL/Redis 回归 404 passed、13 skipped。
+
+调度与实验入口：[模块 11～12 运行说明](docs/阶段四-模块11至12验收与运行说明.md)、[源码手册第 86～93 章](docs/EvoAgent-源码讲解与学习手册.md)、[ADR-013](docs/ADR-013-数据库持久队列与Redis唤醒限流.md)、[ADR-014](docs/ADR-014-独立运行时实验与隔离评测.md)。数据库最新迁移为 `20260922_0012`。
 
 阶段四最新部署与验收见[模块 6～7 运行说明](docs/阶段四-模块6至7验收与运行说明.md)，源码讲解见[学习手册第 69～73 章](docs/EvoAgent-源码讲解与学习手册.md)。升级需执行 migration `20260920_0007`，PostgreSQL 必须安装 vector 扩展；Compose/CI 已使用 pgvector 镜像。SQLite 使用 JSON 向量替身，不证明向量 SQL 通过。默认仍为词法 Skill 检索，`EVOAGENT_RETRIEVAL_BACKEND=hybrid` 开启混合检索，`EVOAGENT_MEMORY_RETRIEVAL_ENABLED=true` 开启已确认记忆注入；新链路要求快照 v2。旧活动配置不自动改写，配置不兼容时拒绝恢复。
 
@@ -14,7 +16,7 @@ EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目
 
 模块 10 新增独立 sandbox-controller、固定 digest 容器规格、租约与取消清理、受控 Artifact 输入输出、MCP 容器 stdio，以及 web_fetch 的 DNS/IP 绑定。最新迁移为 `20260921_0010`；详见[模块 10 运行说明](docs/阶段四-模块10验收与运行说明.md)、[手册第 82～85 章](docs/EvoAgent-源码讲解与学习手册.md)和[ADR-012](docs/ADR-012-独立执行容器与受控网络出口.md)。Shell 默认关闭，无宿主 fallback；容器固定禁网。Windows 契约回归通过，并已在 Docker Desktop Linux Engine 中完成 11 项真实容器资源、网络、清理与文件边界验收。
 
-记忆提议、确认和归档操作见[模块 3～5 运行说明](docs/阶段四-模块3至5验收与运行说明.md)。Redis 已在模块 11 实现，Memory 管理前端仍属后续模块。
+记忆提议、确认和归档操作见[模块 3～5 运行说明](docs/阶段四-模块3至5验收与运行说明.md)。Redis 已在模块 11 实现，Memory 管理前端已在模块 13 接入，使用步骤见[页面运行说明](docs/阶段四-模块13验收与运行说明.md)。
 
 ## 环境要求
 

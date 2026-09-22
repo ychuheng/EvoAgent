@@ -97,6 +97,10 @@
 91. 阶段四模块 12：执行链、成本与报告
 92. 阶段四模块 12：数据集、测试与验收边界
 93. 阶段四模块 12 学习验收
+94. 阶段四模块 13：页面契约与 Memory 人工决定
+95. 阶段四模块 13：MCP 目录审核与卸载
+96. 阶段四模块 13：上下文证据、错误语义与测试地图
+97. 阶段四模块 13 学习验收
 
 ## 1. 阅读说明
 
@@ -110,7 +114,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～12 已实现工程代码；PostgreSQL/Redis、双进程调度和 Runtime Mock 报告已验收，真实模型效果证据仍待补。最新增量见第 86～93 章；较早章节的测试数字保留对应交付时间点，模块 13～14 尚未完成。
+`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～13 已实现工程代码；PostgreSQL/Redis、双进程调度和 Runtime Mock 报告已验收，真实模型效果证据仍待补。最新页面增量见第 94～97 章；较早章节的测试数字保留对应交付时间点，模块 14 尚未完成。
 
 已经完成：
 
@@ -7570,3 +7574,214 @@ test_runtime_experiments.py 创建一个只在 private_validators 中出现的�
 28. known_usage 为什么需要进入 checkpoint？
 29. Mock 检索命中能否证明真实同义召回改善？
 30. 在宣布阶段四完成之前，还需要哪些真实模型、容器和资源环境证据？
+
+
+---
+
+## 94. 阶段四模块 13：页面契约与 Memory 人工决定
+
+### 94.1 本模块要解决什么问题
+
+之前 Memory 已能由 API 提议、确认和撤销，但使用者要手工拼 UUID、锁版本和请求 JSON，容易把“HTTP 返回成功”理解为“所有后台工作已经完成”。本模块提供可核对的来源、版本与任务状态界面，让人工决定建立在服务端事实之上。
+
+例如一条记忆执行 erase 后，数据库先把版本撤销，再由维护 Worker 清理内容。此时页面必须能同时表达“不能再用于新运行”和“物理清理还在 pending”。若点击按钮后直接从列表移除记录，使用者就失去了检查删除失败的入口。
+
+模块只扩展管理能力。它不负责重新实现 Memory 状态机，也不在浏览器中自行确认模型生成的候选。入口是 [App.tsx](../frontend/src/App.tsx)，原 Skill、Review、Eval 页面保留，新增 Memory、MCP、Context 三个分支；切换页面会卸载当前组件，不把内容写入浏览器持久存储。
+
+### 94.2 文件和职责
+
+| 文件 | 职责 |
+| --- | --- |
+| [api/phase4.ts](../frontend/src/api/phase4.ts) | Memory、维护 Job、MCP、Context、Retrieval DTO 和窄 API 封装 |
+| [api/client.ts](../frontend/src/api/client.ts) | 共用请求、错误、204 响应处理 |
+| [MemoryPage.tsx](../frontend/src/pages/MemoryPage.tsx) | 作用域查询、详情、人工决定、删除任务状态 |
+| [Evidence.tsx](../frontend/src/components/Evidence.tsx) | JSON 证据文本展示与 409 说明 |
+| [State.tsx](../frontend/src/components/State.tsx) | Loading、Empty、ErrorNotice、Badge |
+| [memory.py](../src/evoagent/api/routes/memory.py) | 原有可信管理 API，作用域和来源校验仍在服务端 |
+
+phase4.ts 沿用 TypeScript 明确接口，不把所有响应都当作任意 JSON。只有本来属于开放证据的 locator、result、Schema、estimate 等使用 unknown。请求路径中的身份使用 encodeURIComponent，写请求只带契约允许的字段。
+
+### 94.3 Session 输入与已加载作用域为何分开
+
+MemoryPage 的 input 是用户正在编辑的值，session 是成功读取后固定下来的作用域。用户可以先把输入框改成另一个 Session，再决定是否查询；这不能导致当前详情按钮突然向新 Session 发送旧 memory_version_id。
+
+读取新作用域时，先清除旧列表、详情、Job 和 session。只有列表读取成功才登记新 session。详情和决定始终使用已加载 session，不使用实时 input。这把“表单草稿”与“当前事实所属范围”分开，避免界面身份混用。
+
+所有异步交互通过 perform 设置 busy、清理旧错误和通知，操作中禁用相关输入与按钮。finally 释放 busy，所以接口错误不会让页面永久卡在加载状态。这里没有通过修改本地对象模拟确认成功的乐观更新。
+
+### 94.4 从列表到来源证据的完整调用链
+
+```text
+输入 Session → GET /sessions/{id}/memories
+  → 显示所有版本和状态
+  → 选择 version_id
+  → GET /sessions/{id}/memories/{version_id}
+  → 展示 sources/events/maintenance_job_id
+  → 如有 Job，再 GET /maintenance-jobs/{id}
+```
+
+列表保留 proposed、confirmed、rejected、revoked、superseded 等历史状态；不能只列可检索的 confirmed，因为人工审核需要看到被替代和拒绝的证据。详情中的 scope、revision 和 lock_version 有不同含义：scope 决定可见范围，revision 是内容版本，lock_version 是该事实条目的并发修改条件。
+
+内容哈希和来源哈希也不能互换。content_hash 标识记忆文本，source_hash 标识来源消息，locator 表示提取位置。人工确认时后台仍会重新读取来源、核对哈希和内容引用，不依赖页面已经展示过来源这一事实。
+
+### 94.5 冲突和按钮规则
+
+同一 entry_id 存在其他版本时，proposed 行提示先核对冲突。这只是人工提示，不是替代服务端冲突判定。是否可确认还取决于 supersedes_version_id、current_version_id、来源有效性和当前锁版本。
+
+proposed 显示确认和拒绝；proposed/confirmed 显示撤销；仍有内容且没有清理 Job 的记录可请求清理。决定请求发送 action 和 expected_lock_version。409 统一说明“版本或状态冲突”，保留错误码并要求刷新后重新审核，不自动换成最新版本重放决定。
+
+举例：用户读到 lock_version=3，另一个管理入口先改到 4。页面提交 3，后台拒绝。此时如果前端悄悄改成 4 重试，就把针对旧事实的人工决定套到了新事实上。当前实现没有这种自动重试。
+
+### 94.6 删除维护任务如何展示
+
+决定请求成功后重新读取列表和详情，再根据 maintenance_job_id 查询状态。erase 的通知仅写“撤销已提交”，后面明确要求查看内容清理任务。即使后续读取失败，也不会声称文件或索引已经清理。
+
+Job 展示 status、attempts、error_code、next_attempt_at 和 result。只有 failed 显示显式重试入口。重试 POST 返回后再次读取详情和 Job，不在本地直接标记 completed。用户通过“刷新事实”观察 Worker 后续进展；这里采用手动刷新，不维持无限轮询或创建第二套重试计时器。
+
+刷新后 content=null 显示“内容已清理”；审计和来源引用仍可保留。删除记录、撤销使用资格、清理正文是三个不同动作，不能从一个字段推断全部完成。
+
+## 95. 阶段四模块 13：MCP 目录审核与卸载
+
+### 95.1 四种状态必须分别理解
+
+[MCPPage.tsx](../frontend/src/pages/MCPPage.tsx) 同时展示连接配置 enabled、进程健康 state、工具审核 approved、Server execution_state。这四个维度不能合并成一个绿色“可用”。
+
+例如 enabled=true 但没有健康观察，只能说明部署配置允许连接，不能说明进程已连接。目录里有工具但 approved=false，不能交给模型调用。工具审核通过但 execution_state=disabled，仍不允许执行。即便全部满足，实际调用仍需通过运行时冻结契约、权限审批和副作用控制。
+
+### 95.2 配置引用而不是浏览器执行命令
+
+注册表单只接收 Server 名称、stdio/streamable_http 选择和部署 Profile ID。新对象的 enabled=false、超时 10 秒、max_concurrency=1；transport 决定填 launch_profile_id 还是 endpoint_profile_id，另一项为 null。服务端 validate_config 再核对部署配置是否存在。
+
+页面不提供 argv、任意 URL 或 API Key 输入。新注册表单不配置 secret_ref；已有带凭据 Server 只显示“已配置引用”，不会显示引用名，更不会向浏览器请求服务端密钥值。需要凭据的配置仍由既有部署/API 工作流完成。
+
+启用/禁用操作把已读取配置连同 expected_lock_version 交给 PUT。配置变化由后端递增版本并关闭旧连接。前端不修改目录 config_version 来强行使它重新匹配。
+
+### 95.3 发现与目录历史
+
+选择 Server 后并行读取 catalogs 和 health，这是互不依赖的只读查询；得到目录后再读取该目录 reviews。当前默认选最后一个 revision，但保留所有目录按钮用于历史核对。
+
+每个目录展示 content_hash、revision、config_version、diff 和工具列表。展开工具可看 input_schema、output_schema、remote_annotations。远端 description 和 JSON 都通过 React 文本节点渲染，不使用 dangerouslySetInnerHTML；远端声明只是需要审核的内容，不自动成为本地风险配置。
+
+页面用“目录 revision 等于 Server latest_revision，且 config_version 等于 Server lock_version”识别当前目录。历史目录仍可查看，但审核 fieldset 与激活按钮禁用。后端也会拒绝 stale，前端禁用不能替代这个检查。
+
+### 95.4 审核版本如何选择和提交
+
+reviews 是不可变审计记录序列，同一个 tool_name 可能有多个 lock_version。页面建立 Map，按工具保留最大版本作为当前审核事实。ReviewForm 的 key 包含 catalog.id、tool_name 和 lock_version，刷新到新审核时重建表单，避免沿用旧表单状态。
+
+提交时显式挑选 tool_name、approved、risk、effect、reviewer、reason、expected_lock_version；不直接展开 API 返回对象。原因是返回值可能包含 created_at 等字段，而后端 extra=forbid。如果把显示 DTO 原样发送，正常审核也会因额外字段失败。
+
+允许风险 R0～R3 和三种副作用，写入型 effect 配 R0/R1 时界面不能批准。拒绝工具需要理由和审核人，并保持当前风险/副作用；如果要重新分类后批准，必须显式填写并提交。
+
+### 95.5 激活为什么需要两种版本
+
+execution 请求包含 expected_lock_version、expected_execution_version、state 和 catalog_id。配置版本防止针对旧连接配置激活；执行版本防止两个人相互覆盖 active/draining/disabled。两者都由当前 Server 响应取得，不由浏览器递增推算。
+
+激活成功后重新查询服务端列表、目录与审核，才能显示结果。返回通知仍说明逐工具审核和权限检查继续存在。按钮“激活此目录”不是绕过所有审核的快捷开关。
+
+### 95.6 排空与卸载的边界
+
+排空调用提交 draining，运行时拒绝新调用，并让已有调用按既有规则退出。页面说明“等待在途调用退出”，不把 draining 直接显示为全局清理完成。
+
+卸载执行能力提交 disabled；后端提交执行状态后调用 manager.disconnect。目录和审核记录保留，旧 Run 的冻结记录也不会被重写。卸载不等于删掉 MCPServer 行，因此页面仍有审计入口。
+
+健康观察由 API 按 expires_at 和 config_version 判断新鲜度。页面显示 stale、错误码和有效期，没有观察则明确“未知”。当前是查询时快照，过了时间需刷新，不能因为页面还开着就把一条旧 ready 观察称为实时健康。
+
+## 96. 阶段四模块 13：上下文证据、错误语义与测试地图
+
+### 96.1 为什么新增 Context 查询而不是直接展开快照
+
+[traces.py](../src/evoagent/api/routes/traces.py) 新增 GET /runs/{run_id}/context。界面需要的是预算和修订事实，不需要完整消息和内部配置。直接返回 config_snapshot、summary 或 Artifact URI 会把无关正文和存储路径带到页面。
+
+接口先读取 Run；不存在返回 run_not_found。随后只从 context_policy 取 mode/version/budget/counter/strict，返回 max_output_tokens、config_hash、status 和 error_code。修订按 revision 升序查询，返回父 ID、输入/策略哈希、Artifact ID、estimate 和时间，不返回摘要正文。无迁移，因为这些事实已经存在。
+
+### 96.2 预算卡片的含义
+
+[ContextPage.tsx](../frontend/src/pages/ContextPage.tsx) 展示 context_window、output_tokens、safety_margin 三个冻结值。只有三个值都是有限数字时才计算输入上限，否则显示未知。
+
+```text
+输入上限 = 上下文窗口 - 输出预留 - 安全余量
+```
+
+这是预算配置关系，不是服务端模型的精确用量。max_output_tokens 是当次冻结请求的输出上限，单独展示。修订 estimate 中的 before/after 是上下文处理的估算；如果 Run 因 context_budget_exceeded 在请求前停止，页面显示失败事实，不把安全拒绝解读为成功优化。
+
+没有 policy 的 Run 可能使用旧策略或尚未冻结。没有 revisions 表示没有持久化修订，不能宣称压缩成功，也不能用零填补不存在的计数。
+
+### 96.3 检索的三种“空”
+
+Context 成功读取后，再请求已有 retrieval API。这样即使检索查询失败，预算和修订证据仍可查看。
+
+第一种是 retrieval_batch_not_found：没有冻结批次，可能旧链路不支持或尚未执行到该阶段。第二种是有批次但 selections 为空：有明确的无候选事实。第三种是有候选但 selected_count=0：候选可能因预算等原因被全部省略。页面逐项显示 omission_reason，因此第三种不能冒充第二种。
+
+检索配置、generation、degraded、source_hash、text_hash、rank 和 evidence 都来自已有持久记录。界面不重新跑检索，不按今天的索引替换历史候选，也不把 degraded=false 当作真实语义质量合格。
+
+### 96.4 错误与旧数据清理
+
+共用 request 现在正确处理 204：没有响应体就不调用 response.json。对于 FastAPI 422 的数组 detail，界面显示 HTTP 状态，不把包含用户输入的校验对象转换为字符串或直接展示。
+
+failure 把 409 显示为版本或状态冲突，并保留 error.code 方便定位。其他异常保留可读错误。页面开始读取新 Run 时先清除旧 context、retrieval 和错误，所以失败后不会把上一 Run 的证据留在新查询标题下。
+
+异步写操作不进行后台自动重放。若写操作已提交但随后的刷新失败，使用者应刷新确认事实；再次提交旧锁版本会由服务端拒绝。这比前端假设网络错误就等于数据库回滚更可靠。
+
+### 96.5 测试地图
+
+| 测试文件 | 验证的不变量 |
+| --- | --- |
+| [Phase4.test.tsx](../frontend/src/Phase4.test.tsx) | Memory 空/错/冲突/删除重试；MCP 空/错/历史只读/引用不回显；Context 缺批次和清旧值；204/422 |
+| [phase4.spec.ts](../frontend/e2e/phase4.spec.ts) | 浏览器执行 Memory 审核清理、MCP 审核排空卸载、上下文降级省略与空命中 |
+| [lifecycle.spec.ts](../frontend/e2e/lifecycle.spec.ts) | 旧查看配对报告、批准发布、回滚流程继续工作 |
+| [test_context_evidence_api.py](../tests/integration/test_context_evidence_api.py) | 真数据库查询、修订顺序/父关系、预算、404、私密正文/凭据/路径不返回 |
+| [test_memory_api.py](../tests/integration/test_memory_api.py) | 既有真实 API 状态机、冲突与异步清理契约 |
+| [test_mcp_catalogs.py](../tests/integration/test_mcp_catalogs.py) | 既有目录版本、发现与审核后端契约 |
+
+前端 fixture 固定 HTTP 响应便于稳定验证交互，不声称它执行了真实第三方 MCP 或付费模型。Python 集成测试补充服务端契约验证。浏览器还在 390×844 视口检查文档宽度，并保存上下文页面截图，测试输出留在 Git 忽略目录。
+
+### 96.6 推荐阅读与故障定位顺序
+
+先读 phase4.ts，再读页面的读取函数、perform 和写操作，最后沿 API 进入 MemoryService/MCPService。若看到 409，先检查所读 lock_version 和目录 config_version；若删除一直 pending，检查维护 Worker；若 MCP enabled 但无法调用，逐一核对当前目录、审核、execution_state 和健康；若没有 Context 修订，检查运行是否真正触发压缩，而不是首先怀疑页面漏查。
+
+本模块运行步骤和当次测试数字见[模块 13 验收说明](阶段四-模块13验收与运行说明.md)。页面交付不修改模块 12 小样本的负面结论，也不把模块 14 的最终效果与部署验收提前标为完成。
+
+## 97. 阶段四模块 13 学习验收
+
+### 97.1 能画出三条请求链
+
+请从按钮开始画出确认记忆、卸载 MCP、查询上下文三条链路，分别标注身份、版本条件、数据库提交、异步维护和后续重新读取的位置。不要只画 React → API 两个方框；要能指出哪一步失败时用户会看到什么，哪些事实可能已经提交。
+
+### 97.2 必须解释的 30 个问题
+
+1. 为什么输入框里的 Session ID 和已加载 Session ID 要分别保存？
+2. 查询一个新作用域失败后为什么要清除旧详情？
+3. Memory revision 和 entry lock_version 分别控制什么？
+4. 为什么列表要保留 proposed、revoked 和 superseded？
+5. 同事实多版本提示为什么不是最终冲突判定？
+6. content_hash、source_hash 和 locator 各证明什么？
+7. 页面已经展示来源，后端为什么还要在确认时复验？
+8. 收到 409 后为什么不能自动获取最新锁版本并重试？
+9. erase 成功响应究竟证明了哪一步完成？
+10. 删除 Job pending、failed、completed 对应什么操作建议？
+11. 为什么重试后需要再读 Job，而不是标记 completed？
+12. 内容清理后为什么还可以保留审计记录？
+13. MCP enabled、健康 ready、审核 approved、执行 active 为何分开？
+14. 为什么浏览器只能注册部署 Profile 引用？
+15. 为什么页面不回显 secret_ref 名称？
+16. 配置更新后旧目录为何不能直接激活？
+17. 同一工具多个审核记录如何选出当前版本？
+18. 为什么不能把审核响应 DTO 原样发送给 POST？
+19. 为什么写入副作用配 R0/R1 不能批准？
+20. execution_version 与配置 lock_version 防止的竞争有什么不同？
+21. 排空返回后为什么不能宣称所有在途调用已结束？
+22. 卸载执行能力为什么不删除 Server 历史？
+23. stale 健康观察与 disabled 执行状态有什么区别？
+24. Context API 为什么不直接返回整个 config_snapshot？
+25. 输入上限如何计算，缺少字段时为什么显示未知？
+26. 修订 estimate 和 Provider usage 为什么不能互换？
+27. 没有冻结批次、无候选、全部省略三种情况如何区分？
+28. 422 的 detail 数组为什么不应直接展示给用户？
+29. 固定 HTTP fixture 的浏览器测试证明了什么、没有证明什么？
+30. 模块 13 测试通过为什么不能推出记忆效果提升或 v0.4 完整交付？
+
+### 97.3 动手验收
+
+准备同一事实的两个版本，在一个页面读旧锁版本，再通过 API 修改并从页面提交，观察 409 和刷新后的来源变化。接着暂停维护 Worker，请求内容清理，确认界面停留在真实 pending；启动维护 Worker 后刷新，观察完成结果。最后查看一个预算超限 Run 和一个没有冻结检索批次的旧 Run，说明两者各缺少什么证据。
+
+上述练习应在演示数据库执行，不为了界面截图篡改真实报告。能够区分按钮反馈、数据库事实、外部执行结果和效果评测结论，才算掌握本模块。

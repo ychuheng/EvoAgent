@@ -41,3 +41,12 @@ th { color: #69736e; font-size: .76rem; text-transform: uppercase; }
 .metric-grid span { color: #69736e; font-size: .78rem; }.metric-grid strong { font-size: 1.7rem; }
 footer { padding: 1.5rem 5vw; color: #69736e; border-top: 1px solid #d4ccba; }
 @media (max-width: 800px) { header { align-items: start; flex-direction: column; }.page-grid { grid-template-columns: 1fr; }.form-row { align-items: stretch; flex-direction: column; }.metric-grid { grid-template-columns: 1fr 1fr; }input { min-width: 0; width: 100%; } }
+
+button:disabled { cursor: not-allowed; opacity: .5; }
+label { display: grid; gap: .35rem; }
+select { font: inherit; padding: .55rem; max-width: 100%; }
+fieldset { border: 1px solid #d4ccba; display: grid; gap: .75rem; min-width: 0; }
+.actions { flex-wrap: wrap; }
+.panel { margin-bottom: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.tool-review { border-top: 1px solid #d4ccba; margin-top: 1.5rem; padding-top: 1rem; }
+summary { cursor: pointer; padding: .5rem 0; }

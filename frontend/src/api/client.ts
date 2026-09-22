@@ -16,7 +16,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
@@ -24,12 +24,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ApiErrorBody;
     throw new ApiError(
-      body.error?.message ?? body.detail ?? `请求失败：HTTP ${response.status}`,
+      body.error?.message ?? (typeof body.detail === "string" ? body.detail : `请求失败：HTTP ${response.status}`),
       body.error?.code ?? "http_error",
       response.status,
     );
   }
-  return (await response.json()) as T;
+  return response.status === 204 ? undefined as T : (await response.json()) as T;
 }
 
 export const api = {
