@@ -5,10 +5,12 @@ import json
 from sqlalchemy import select
 
 from evoagent.db.models import (
+    EvalRunRecord,
     MaintenanceJobRecord,
     MemorySourceRecord,
     MemoryVersionRecord,
     MessageRecord,
+    RuntimeEvalRunRecord,
     SessionRecord,
 )
 from evoagent.memory.policy import redact
@@ -60,6 +62,10 @@ async def enqueue_archive(factory, session_id):
             raise MemoryError("session_not_found")
         end = scope.next_message_sequence - 1
         messages, digest = await archive_input(session, session_id, end)
+        run_ids = [message.run_id for message in messages if message.run_id]
+        for model in (EvalRunRecord, RuntimeEvalRunRecord):
+            if await session.scalar(select(model.id).where(model.run_id.in_(run_ids))):
+                raise MemoryError("evaluation_source_forbidden")
         if not messages:
             raise MemoryError("archive_empty")
         key = f"archive:{session_id}:{end}:{digest}"

@@ -1,6 +1,7 @@
 """根据配置组装并启动独立 Worker 进程。"""
 
 import asyncio
+import signal
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from uuid import UUID
@@ -47,6 +48,8 @@ from evoagent.tools.registry import ToolRegistry
 from evoagent.tools.sandbox import RunSandbox
 from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
 from evoagent.workers.main import JobWorker
+from evoagent.workers.rate_limit import GatedProvider, ServiceGate
+from evoagent.workers.wakeup import Wakeup, redis_client
 
 
 class WorkerDemoProvider:
@@ -112,12 +115,28 @@ class WorkerDemoProvider:
 class ConfiguredTaskHandler:
     """为每个 Run 创建独立 Provider、工具和持久化 Runner。"""
 
-    def __init__(self, settings: Settings, database: Database) -> None:
+    def __init__(self, settings: Settings, database: Database, gate=None) -> None:
         self._settings = settings
         self._database = database
+        self._gate = gate or ServiceGate(settings)
 
     async def handle(self, lease: JobLease) -> TaskExecutionResult:
+        from evoagent.evals.runtime import settings_for_run
+
+        settings = await settings_for_run(
+            self._database.session_factory, lease.run_id, self._settings
+        )
+        handler = ConfiguredTaskHandler(settings, self._database, self._gate)
+        return await handler._handle(lease)
+
+    async def _handle(self, lease: JobLease) -> TaskExecutionResult:
         provider = self._provider(lease.run_id)
+
+        async def check():
+            async with self._database.session_factory() as session:
+                await LeaseGuard(lease).check(session)
+
+        gated = GatedProvider(provider, self._gate, f"model:{self._settings.model}", check)
         search_provider = self._search_provider()
         web_fetch = WebFetchTool(URLGuard(), timeout_seconds=self._settings.tool_timeout_seconds)
         artifact_service = ArtifactService(
@@ -148,8 +167,9 @@ class ConfiguredTaskHandler:
             settings=self._settings,
             session_factory=self._database.session_factory,
             context_builder=ContextBuilder(),
-            provider=provider,
+            provider=gated,
             registry=registry,
+            service_gate=self._gate,
         )
         try:
             return await runner.handle(lease)
@@ -170,6 +190,7 @@ class ConfiguredTaskHandler:
             api_key=self._settings.api_key,
             base_url=str(self._settings.base_url),
             timeout_seconds=self._settings.model_timeout_seconds,
+            thinking_mode=self._settings.provider_thinking_mode,
         )
 
     def _search_provider(self):
@@ -192,26 +213,34 @@ class ConfiguredTaskHandler:
 async def run_worker() -> None:
     settings = Settings()
     embedding_provider = provider_from_settings(settings)
+    client = redis_client(settings)
+    wakeup = Wakeup(client, settings.redis_namespace)
     async with Database(settings.database_url.get_secret_value()) as database:
-        manager = JobLeaseManager(database.session_factory, lease_seconds=settings.lease_seconds)
+        manager = JobLeaseManager(
+            database.session_factory,
+            lease_seconds=settings.lease_seconds,
+            runtime_experiment_id=settings.worker_runtime_experiment_id,
+            runtime_arm=settings.worker_runtime_arm,
+        )
+        database.session_factory.configure(info={"wakeup": wakeup})
         worker = JobWorker(
             worker_id=settings.worker_id,
             lease_manager=manager,
-            handler=ConfiguredTaskHandler(settings, database),
+            handler=ConfiguredTaskHandler(settings, database, ServiceGate(settings, client)),
+            concurrency=settings.worker_concurrency,
+            wakeup=wakeup,
             heartbeat_seconds=settings.heartbeat_seconds,
             poll_seconds=settings.worker_poll_seconds,
             snapshot_schema_version=settings.snapshot_schema_version,
-            maintenance_worker=MaintenanceWorker(
-                database.session_factory,
-                LocalArtifactStore(settings.artifact_root),
-                IndexService(
-                    database.session_factory, embedding_provider, settings.embedding_model
-                ),
-            ),
         )
+        loop = asyncio.get_running_loop()
+        with suppress(NotImplementedError):
+            loop.add_signal_handler(signal.SIGTERM, worker.stop)
         try:
             await worker.run_forever()
         finally:
+            if client is not None:
+                await client.aclose()
             if hasattr(embedding_provider, "aclose"):
                 await embedding_provider.aclose()
 
@@ -219,3 +248,43 @@ async def run_worker() -> None:
 def main() -> None:
     with suppress(KeyboardInterrupt):
         asyncio.run(run_worker())
+
+
+async def run_maintenance_worker():
+    settings = Settings()
+    provider = provider_from_settings(settings)
+    client = redis_client(settings)
+    task = asyncio.current_task()
+    with suppress(NotImplementedError):
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+    async with Database(settings.database_url.get_secret_value()) as database:
+        worker = MaintenanceWorker(
+            database.session_factory,
+            LocalArtifactStore(settings.artifact_root),
+            IndexService(
+                database.session_factory,
+                provider,
+                settings.embedding_model,
+                service_gate=ServiceGate(settings, client),
+            ),
+        )
+        try:
+            while True:
+                from sqlalchemy.exc import SQLAlchemyError
+
+                try:
+                    handled = await worker.run_once()
+                except SQLAlchemyError:
+                    handled = False
+                if not handled:
+                    await asyncio.sleep(settings.worker_poll_seconds)
+        finally:
+            if client is not None:
+                await client.aclose()
+            if hasattr(provider, "aclose"):
+                await provider.aclose()
+
+
+def maintenance_main():
+    with suppress(KeyboardInterrupt, asyncio.CancelledError):
+        asyncio.run(run_maintenance_worker())

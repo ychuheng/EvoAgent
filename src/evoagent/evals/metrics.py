@@ -127,6 +127,19 @@ def _duration_ms(started: datetime | None, ended: datetime | None) -> float | No
     return max(0.0, (ended - started).total_seconds() * 1000)
 
 
+def model_usage_rows(turns, events):
+    """模型完成事件覆盖直接回答及重试；兼容只保存 Turn 的旧评测 fixture。"""
+    completed = [
+        event.payload.get("usage") for event in events if event.event_type == "model.completed"
+    ]
+    failed = [
+        None
+        for event in events
+        if event.event_type == "model.failed" and event.payload.get("error_code") != "rate_limited"
+    ]
+    return completed + failed if completed or failed else [turn.usage for turn in turns]
+
+
 class MetricsCollector:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -175,7 +188,7 @@ class MetricsCollector:
                 .limit(1)
             )
 
-        usage_rows = [item.usage for item in turns]
+        usage_rows = model_usage_rows(turns, events)
         usage_known = bool(usage_rows) and all(item is not None for item in usage_rows)
         input_tokens = (
             sum(int(item["input_tokens"]) for item in usage_rows if item is not None)

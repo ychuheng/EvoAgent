@@ -174,6 +174,7 @@ class TraceService:
                     "tool_call_id": str(item.tool_call_id),
                     "status": item.status.value,
                     "semantic_key": item.semantic_key,
+                    "effect_scope": item.effect_scope,
                     "result_hash": item.result_hash,
                 }
                 for item in effects

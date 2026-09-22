@@ -89,6 +89,7 @@ def test_context_policy_changes_comparison_hash_without_changing_legacy_hash():
     legacy.pop("summarizer")
     legacy.pop("selected_skills")
     legacy.pop("retrieval")
+    legacy.pop("provider_thinking_mode")
     digest = (
         "sha256:"
         + hashlib.sha256(

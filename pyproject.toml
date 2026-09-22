@@ -19,6 +19,7 @@ dependencies = [
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.7,<3",
     "python-dotenv>=1.0,<2",
+    "redis>=5,<7",
     "sqlalchemy[asyncio]>=2.0.52,<2.1",
     "uvicorn>=0.35,<1",
     "websockets>=15,<16",
@@ -39,8 +40,10 @@ evoagent = "evoagent.cli:main"
 evoagent-sandbox-controller = "evoagent.sandbox.controller:main"
 evoagent-api = "evoagent.api.main:main"
 evoagent-worker = "evoagent.workers.bootstrap:main"
+evoagent-maintenance-worker = "evoagent.workers.bootstrap:maintenance_main"
 evoagent-eval-worker = "evoagent.evals.worker:main"
 evoagent-eval-dataset = "evoagent.evals.cli:main"
+evoagent-runtime-eval = "evoagent.evals.runtime_cli:main"
 evoagent-phase3-demo = "evoagent.evals.demo:main"
 
 [tool.hatch.build.targets.wheel]
@@ -52,6 +55,7 @@ asyncio_mode = "auto"
 pythonpath = ["src"]
 testpaths = ["tests"]
 markers = [
+    "redis: requires explicit Redis integration environment",
     "docker: requires opt-in Linux Docker sandbox integration environment",
     "postgres: 需要真实 PostgreSQL 服务的集成测试",
 ]

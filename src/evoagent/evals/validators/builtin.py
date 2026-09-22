@@ -87,6 +87,12 @@ def _max_tool_calls(parameters: dict[str, Any], trace: TraceBundle):
 
 
 def default_validator_registry() -> ValidatorRegistry:
+    from evoagent.evals.validators.runtime import (
+        expected_status,
+        no_duplicate_effects,
+        preserves_constraints,
+    )
+
     return ValidatorRegistry(
         tuple(
             FunctionValidator(name, function)
@@ -99,6 +105,9 @@ def default_validator_registry() -> ValidatorRegistry:
                 ("tool_policy", _tool_policy),
                 ("no_unknown_effects", _no_unknown_effects),
                 ("max_tool_calls", _max_tool_calls),
+                ("preserves_constraints", preserves_constraints),
+                ("expected_status", expected_status),
+                ("no_duplicate_effects", no_duplicate_effects),
             )
         )
     )

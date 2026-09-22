@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import suppress
+from uuid import uuid4
 
 from evoagent.config import Settings
 from evoagent.db.session import Database
@@ -11,6 +12,7 @@ from evoagent.evals.validators import default_validator_registry
 
 async def run_eval_worker() -> None:
     settings = Settings()
+    owner = f"{settings.worker_id[:80]}:eval:{uuid4().hex}"
     async with Database(settings.database_url.get_secret_value()) as database:
         coordinator = EvalCoordinator(
             database.session_factory,
@@ -18,7 +20,7 @@ async def run_eval_worker() -> None:
             lease_seconds=settings.eval_lease_seconds,
         )
         while True:
-            lease = await coordinator.claim_next(f"{settings.worker_id}-eval")
+            lease = await coordinator.claim_next(owner)
             if lease is None:
                 await asyncio.sleep(settings.eval_poll_seconds)
                 continue

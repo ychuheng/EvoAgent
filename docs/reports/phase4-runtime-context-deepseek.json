@@ -1,0 +1,590 @@
+{
+  "schema_version": 1,
+  "experiment_id": "a41ed63a-004d-4109-b366-f9c94ccaeef5",
+  "report_kind": "real",
+  "spec": {
+    "schema_version": 1,
+    "experiment_variable": "context_policy",
+    "control": {
+      "context_policy": "legacy",
+      "memory_mode": "off",
+      "retrieval_backend": "lexical",
+      "worker_count": 1
+    },
+    "treatment": {
+      "context_policy": "bounded",
+      "memory_mode": "off",
+      "retrieval_backend": "lexical",
+      "worker_count": 1
+    },
+    "repeats": 1,
+    "provider": "openai_compatible",
+    "provider_thinking_mode": "disabled",
+    "model": "deepseek-flash",
+    "code_version": "module11-12-real-acceptance",
+    "dataset_hash": "sha256:84737b54cd46905348514a151601848ac99d97844eebcd695f618e297c14d3c3",
+    "environment": {
+      "os": "Windows-10-10.0.19045-SP0",
+      "python": "3.13.5",
+      "cpu_count": "12",
+      "resource_limits": "Windows; one worker per arm; context budget=4096; output<=128; iterations<=2",
+      "source_sha256": "929c8037f20dc20ff8e0c5d614ce3113d8a8a69f0d8e361722713b6553ebb310"
+    },
+    "context_window_tokens": 4096,
+    "max_output_tokens": 128,
+    "context_safety_margin": 512,
+    "max_total_tokens": 12000,
+    "max_iterations": 2,
+    "embedding_model": "mock-hash-v1",
+    "memory_retrieval_top_k": 3,
+    "retrieval_min_lexical_score": 0.1,
+    "retrieval_max_vector_distance": 0.35,
+    "retrieval_rrf_k": 60,
+    "retrieval_memory_budget": 2000
+  },
+  "spec_hash": "sha256:c9202c3ad57cd8dfcc1f69b716d5d1546ee64e78350ccd79e31f3de34072cb48",
+  "summary": {
+    "control": {
+      "samples": 2,
+      "success_rate": 1,
+      "total_tokens": {
+        "known_samples": 2,
+        "mean": 2972,
+        "median": 2972.0
+      },
+      "tool_calls": {
+        "known_samples": 2,
+        "mean": 0,
+        "median": 0.0
+      },
+      "latency_ms": {
+        "known_samples": 2,
+        "mean": 2579.8534999999997,
+        "median": 2579.8534999999997
+      }
+    },
+    "treatment": {
+      "samples": 2,
+      "success_rate": 0,
+      "total_tokens": {
+        "known_samples": 0,
+        "mean": null,
+        "median": null
+      },
+      "tool_calls": {
+        "known_samples": 2,
+        "mean": 0,
+        "median": 0.0
+      },
+      "latency_ms": {
+        "known_samples": 2,
+        "mean": 1238.118,
+        "median": 1238.118
+      }
+    }
+  },
+  "pairs": [
+    {
+      "case_id": "6355db8c-b63f-4332-a0b3-20f0ea537e37",
+      "repeat": 0,
+      "comparable": true
+    },
+    {
+      "case_id": "a1572586-1eb8-4b5e-8567-374753eeaf60",
+      "repeat": 0,
+      "comparable": true
+    }
+  ],
+  "comparable_pairs": 2,
+  "samples": [
+    {
+      "case_id": "6355db8c-b63f-4332-a0b3-20f0ea537e37",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "f02a67be-c367-4cd5-a951-40e013a6d28d",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 4547,
+        "output_tokens": 7,
+        "total_tokens": 4554,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2851.4339999999997,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0027999922167509794
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0039000005926936865
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 12000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:b28b4dbfcb2b931a13d0137dd0383035f0bfef0f5c68ed76be56e2b3266c3ece",
+      "evidence": {
+        "known_main_tokens": 4554,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:987a3b20953b4a22a7e572d52c288847",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 4547,
+                "output_tokens": 7,
+                "total_tokens": 4554
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 4554,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 4554,
+        "exact_model_tokens": 4554,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "6355db8c-b63f-4332-a0b3-20f0ea537e37",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "7158995c-6c6b-41c0-8345-99258c1e00f9",
+        "status": "limit_reached",
+        "validator_passed": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 1305.523,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": "context_budget_exceeded"
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": false,
+          "evidence": {
+            "status": "limit_reached"
+          },
+          "failure_reason": "run did not complete",
+          "duration_ms": 0.0018999999156221747
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": false,
+          "evidence": {
+            "missing": [
+              "500"
+            ],
+            "forbidden": []
+          },
+          "failure_reason": "answer violates frozen constraints",
+          "duration_ms": 0.0035999983083456755
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 12000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 4096,
+            "output_tokens": 128,
+            "safety_margin": 512
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:c42bc6bf036126cdc041ad67b064a8b1e6fbf7742d797e452a59915121ce7a62",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:73cc279433c24931befb50c80dc614c5",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "a1572586-1eb8-4b5e-8567-374753eeaf60",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "fcfa7460-8355-4f29-ba74-4f521eacfb30",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1385,
+        "output_tokens": 5,
+        "total_tokens": 1390,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2308.2729999999997,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.001300009898841381
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0029999937396496534
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 12000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:b28b4dbfcb2b931a13d0137dd0383035f0bfef0f5c68ed76be56e2b3266c3ece",
+      "evidence": {
+        "known_main_tokens": 1390,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:987a3b20953b4a22a7e572d52c288847",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1385,
+                "output_tokens": 5,
+                "total_tokens": 1390
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1390,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1390,
+        "exact_model_tokens": 1390,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "a1572586-1eb8-4b5e-8567-374753eeaf60",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "6179f7d5-2d57-4dde-b436-a837c3d33a35",
+        "status": "limit_reached",
+        "validator_passed": false,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 1170.713,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": "context_budget_exceeded"
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": false,
+          "evidence": {
+            "status": "limit_reached"
+          },
+          "failure_reason": "run did not complete",
+          "duration_ms": 0.0013999961083754897
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": false,
+          "evidence": {
+            "missing": [
+              "500"
+            ],
+            "forbidden": []
+          },
+          "failure_reason": "answer violates frozen constraints",
+          "duration_ms": 0.0023000029614195228
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 12000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 4096,
+            "output_tokens": 128,
+            "safety_margin": 512
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:c42bc6bf036126cdc041ad67b064a8b1e6fbf7742d797e452a59915121ce7a62",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:73cc279433c24931befb50c80dc614c5",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    }
+  ],
+  "conclusion": "descriptive only; no statistical significance or quality claim"
+}

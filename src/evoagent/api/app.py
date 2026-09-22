@@ -81,6 +81,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        from evoagent.workers.wakeup import Wakeup, redis_client
+
+        client = redis_client(resolved_settings)
+        resolved_database.session_factory.configure(
+            info={"wakeup": Wakeup(client, resolved_settings.redis_namespace)}
+        )
         app.state.settings = resolved_settings
         app.state.memory_generator = memory_generator
         app.state.database = resolved_database
@@ -94,6 +100,9 @@ def create_app(
         try:
             yield
         finally:
+            resolved_database.session_factory.configure(info={})
+            if client is not None:
+                await client.aclose()
             await app.state.mcp_manager.aclose()
             if owned_memory_provider is not None:
                 await owned_memory_provider.aclose()
@@ -104,9 +113,10 @@ def create_app(
 
     app = FastAPI(title="EvoAgent API", version="0.4.0.dev0", lifespan=lifespan)
     app.include_router(memory.router, prefix="/api/v1")
-    from evoagent.api.routes import mcp, retrieval
+    from evoagent.api.routes import mcp, retrieval, runtime_evals
 
     app.include_router(mcp.router, prefix="/api/v1")
+    app.include_router(runtime_evals.router, prefix="/api/v1")
     app.include_router(retrieval.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")

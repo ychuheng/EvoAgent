@@ -42,6 +42,24 @@ def make_request(*, with_tool: bool = False) -> ModelRequest:
     )
 
 
+@respx.mock
+async def test_explicit_non_thinking_mode_is_sent_without_changing_default_payload():
+    route = respx.post(ENDPOINT).mock(
+        return_value=httpx.Response(
+            200,
+            text=sse(
+                {"choices": [{"index": 0, "delta": {"content": "OK"}, "finish_reason": "stop"}]}
+            ),
+        )
+    )
+    async with OpenAICompatibleProvider(
+        api_key="test", base_url=ENDPOINT, timeout_seconds=1, thinking_mode="disabled"
+    ) as provider:
+        _ = [event async for event in provider.stream(make_request())]
+    assert json.loads(route.calls[0].request.content)["thinking"] == {"type": "disabled"}
+    assert "thinking" not in OpenAICompatibleProvider._build_payload(make_request())
+
+
 @pytest.mark.asyncio
 @respx.mock
 async def test_provider_streams_text_usage_and_completed_response() -> None:

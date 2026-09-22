@@ -100,8 +100,10 @@ class AgentLoop:
             if resume_state.config_hash != self._config_hash:
                 raise ValueError("snapshot config hash does not match current AgentLoop")
             messages = list(resume_state.messages)
-            known_usage = resume_state.usage or TokenUsage(
-                input_tokens=0, output_tokens=0, total_tokens=0
+            known_usage = (
+                resume_state.known_usage
+                or resume_state.usage
+                or TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
             )
             usage_is_complete = resume_state.usage_is_complete
             previous_tool_fingerprint = resume_state.previous_tool_fingerprint
@@ -115,6 +117,7 @@ class AgentLoop:
             repeated_tool_calls = 0
             first_iteration = 1
 
+        self._known_usage = known_usage
         for iteration in range(first_iteration, self._max_iterations + 1):
             request = ModelRequest(
                 messages=tuple(messages),
@@ -131,6 +134,7 @@ class AgentLoop:
                             messages=tuple(messages),
                             completed_iterations=iteration - 1,
                             usage=known_usage if usage_is_complete else None,
+                            known_usage=known_usage,
                             usage_is_complete=usage_is_complete,
                             previous_tool_fingerprint=previous_tool_fingerprint,
                             repeated_tool_calls=repeated_tool_calls,
@@ -187,6 +191,15 @@ class AgentLoop:
             except asyncio.CancelledError:
                 raise
             except ProviderError as error:
+                if error.code == "rate_limited":
+                    await self._save_checkpoint(
+                        messages=messages,
+                        completed_iterations=iteration - 1,
+                        usage=known_usage if usage_is_complete else None,
+                        usage_is_complete=usage_is_complete,
+                        previous_tool_fingerprint=previous_tool_fingerprint,
+                        repeated_tool_calls=repeated_tool_calls,
+                    )
                 await self._event_sink.emit(
                     EventType.MODEL_FAILED,
                     {
@@ -217,6 +230,7 @@ class AgentLoop:
                 usage_is_complete = False
             else:
                 known_usage = known_usage + response_usage
+            self._known_usage = known_usage
 
             await self._event_sink.emit(
                 EventType.MODEL_COMPLETED,
@@ -247,6 +261,14 @@ class AgentLoop:
                     previous_tool_fingerprint=previous_tool_fingerprint,
                     repeated_tool_calls=repeated_tool_calls,
                 )
+                if any(result.error_code == "rate_limited" for result in results):
+                    return self._failure(
+                        messages,
+                        iteration,
+                        known_usage if usage_is_complete else None,
+                        "rate_limited",
+                        "tool quota unavailable",
+                    )
                 if repeated_tool_calls >= self._max_repeated_tool_calls:
                     return AgentLoopResult(
                         status=AgentLoopStatus.LIMIT_REACHED,
@@ -260,12 +282,12 @@ class AgentLoop:
                         ),
                     )
 
-                if usage_is_complete and known_usage.total_tokens >= self._max_total_tokens:
+                if known_usage.total_tokens >= self._max_total_tokens:
                     return AgentLoopResult(
                         status=AgentLoopStatus.LIMIT_REACHED,
                         messages=tuple(messages),
                         iterations=iteration,
-                        usage=known_usage,
+                        usage=known_usage if usage_is_complete else None,
                         error_code="token_budget_reached",
                         error_message=(
                             f"token budget reached: {known_usage.total_tokens} "
@@ -329,6 +351,7 @@ class AgentLoop:
                 messages=tuple(messages),
                 completed_iterations=completed_iterations,
                 usage=usage,
+                known_usage=getattr(self, "_known_usage", usage),
                 usage_is_complete=usage_is_complete,
                 previous_tool_fingerprint=previous_tool_fingerprint,
                 repeated_tool_calls=repeated_tool_calls,

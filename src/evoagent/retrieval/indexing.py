@@ -1,6 +1,7 @@
 """事务外向量生成、提交前复验及 generation 原子切换。"""
 
 from asyncio import timeout
+from contextlib import nullcontext
 from datetime import UTC
 from uuid import UUID, uuid4
 
@@ -40,8 +41,9 @@ async def enqueue_source(session, key):
 
 
 class IndexService:
-    def __init__(self, factory, provider, model="mock-hash-v1"):
+    def __init__(self, factory, provider, model="mock-hash-v1", service_gate=None):
         self.factory, self.provider, self.model = factory, provider, model
+        self.service_gate = service_gate
 
     async def ensure_profile(self):
         async with self.factory() as session:
@@ -160,12 +162,24 @@ class IndexService:
         )
         for offset in range(0, len(sources), 16):
             batch = sources[offset : offset + 16]
-            async with timeout(15):
-                result = validate(
-                    await self.provider.embed(tuple(s.text[:12000] for s in batch), identity),
-                    identity,
-                    len(batch),
-                )
+
+            async def check():
+                async with self.factory() as session:
+                    await self._owned(session, job_id, owner, epoch)
+
+            gate = (
+                self.service_gate.acquire(f"embedding:{identity.model}", check)
+                if self.service_gate
+                else nullcontext()
+            )
+            async with gate:
+                await check()
+                async with timeout(15):
+                    result = validate(
+                        await self.provider.embed(tuple(s.text[:12000] for s in batch), identity),
+                        identity,
+                        len(batch),
+                    )
             vectors.extend(result.vectors)
             usage = usage + result.usage if usage is not None and result.usage is not None else None
         async with self.factory() as session:

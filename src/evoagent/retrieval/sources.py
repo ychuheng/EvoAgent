@@ -11,6 +11,7 @@ from evoagent.db.models import (
     MemorySourceRecord,
     MemoryVersionRecord,
     MessageRecord,
+    RuntimeEvalRunRecord,
     SessionArchiveRecord,
     SessionRecord,
     SkillRecord,
@@ -134,6 +135,12 @@ async def load_source(
         ):
             return None
         messages, digest = await archive_input(session, archive.session_id, archive.end_sequence)
+        if await session.scalar(
+            select(RuntimeEvalRunRecord.id).where(
+                RuntimeEvalRunRecord.run_id.in_([message.run_id for message in messages])
+            )
+        ):
+            return None
         if await session.scalar(
             select(EvalRunRecord.id).where(
                 EvalRunRecord.run_id.in_([message.run_id for message in messages])

@@ -2,12 +2,38 @@
 
 from typing import Self
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import Session
+
+
+@event.listens_for(Session, "after_flush")
+def _queue_changed(session, context):
+    from evoagent.db.models import MaintenanceJobRecord, TaskRecord
+
+    for row in session.new | session.dirty:
+        if (isinstance(row, TaskRecord) and row.status == "queued") or (
+            isinstance(row, MaintenanceJobRecord) and row.status == "pending"
+        ):
+            session.info["queue_changed"] = True
+
+
+class QueueSession(AsyncSession):
+    async def commit(self):
+        await super().commit()
+        changed = self.info.pop("queue_changed", False)
+        wakeup = self.info.get("wakeup")
+        if changed and wakeup is not None:
+            await wakeup.publish()
+
+    async def rollback(self):
+        await super().rollback()
+        self.info.pop("queue_changed", None)
 
 
 class Database:
@@ -17,7 +43,7 @@ class Database:
         self.engine: AsyncEngine = create_async_engine(url, echo=echo, pool_pre_ping=True)
         self.session_factory = async_sessionmaker(
             self.engine,
-            class_=AsyncSession,
+            class_=QueueSession,
             expire_on_commit=False,
         )
 

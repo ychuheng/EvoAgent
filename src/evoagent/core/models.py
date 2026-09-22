@@ -320,6 +320,7 @@ class LoopState(ContractModel):
     messages: tuple[Message, ...] = Field(min_length=1)
     completed_iterations: int = Field(ge=0)
     usage: TokenUsage | None = None
+    known_usage: TokenUsage | None = None
     usage_is_complete: bool = True
     previous_tool_fingerprint: str | None = None
     repeated_tool_calls: int = Field(default=0, ge=0)

@@ -39,6 +39,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
       postgres:
         image: pgvector/pgvector:0.8.1-pg17
         env:
@@ -74,6 +78,7 @@ jobs:
       - name: Test
         env:
           EVOAGENT_TEST_DATABASE_URL: postgresql+asyncpg://evoagent:evoagent@127.0.0.1:5432/evoagent_test
+          EVOAGENT_TEST_REDIS_URL: redis://127.0.0.1:6379/0
         run: pytest
 
   container:

@@ -51,8 +51,10 @@ class PersistentAgentRunner:
         registry: ToolRegistry,
         retry_policy: RetryPolicy | None = None,
         permission_policy: PermissionPolicy | None = None,
+        service_gate=None,
     ) -> None:
         self._settings = settings
+        self._service_gate = service_gate
         self._session_factory = session_factory
         self._context_builder = context_builder
         self._provider = provider
@@ -111,7 +113,12 @@ class PersistentAgentRunner:
             from evoagent.runtime.context_resolver import ContextResolver
 
             resolved = await ContextResolver(
-                self._session_factory, self._settings, self._registry, guard, self._context_builder
+                self._session_factory,
+                self._settings,
+                self._registry,
+                guard,
+                self._context_builder,
+                service_gate=self._service_gate,
             ).resolve(task, run)
         matches = (
             resolved.skills
@@ -145,6 +152,7 @@ class PersistentAgentRunner:
             schema_version=self._settings.snapshot_schema_version,
             summarizer="extractive-v1" if self._settings.snapshot_schema_version == 2 else None,
             provider=run.provider,
+            provider_thinking_mode=self._settings.provider_thinking_mode,
             model=run.model,
             system_prompt_hash=sha256_text(self._context_builder.system_prompt),
             tool_manifest_hash=self._registry.manifest_hash(),
@@ -158,7 +166,7 @@ class PersistentAgentRunner:
             max_output_tokens=(
                 self._settings.max_output_tokens
                 if self._settings.context_policy == "bounded"
-                else None
+                else self._settings.model_request_max_output_tokens
             ),
             max_tool_result_chars=self._settings.max_tool_result_chars,
             model_timeout_seconds=self._settings.model_timeout_seconds,
@@ -187,6 +195,10 @@ class PersistentAgentRunner:
                 skill_context=resolved.skill_text if resolved else skill_context,
                 external_context=resolved.memory_texts if resolved else (),
             )
+            from evoagent.evals.runtime import history_for_run
+
+            history = await history_for_run(self._session_factory, run.id)
+            initial_messages = (initial_messages[0], *history, *initial_messages[1:])
         else:
             initial_messages = resume_state.messages
             await sink.emit(
@@ -208,6 +220,8 @@ class PersistentAgentRunner:
         executor = ToolExecutor(
             self._registry,
             sink,
+            service_gate=self._service_gate,
+            lease_check=lambda: self._load_owned_records(lease),
             timeout_seconds=self._settings.tool_timeout_seconds,
             max_result_chars=self._settings.max_tool_result_chars,
             output_store=ToolOutputStore(
@@ -247,7 +261,7 @@ class PersistentAgentRunner:
             max_output_tokens=(
                 self._settings.max_output_tokens
                 if self._settings.context_policy == "bounded"
-                else None
+                else self._settings.model_request_max_output_tokens
             ),
             checkpoint_writer=checkpoints,
             context_hash=skill_context_hash or "",
@@ -291,6 +305,18 @@ class PersistentAgentRunner:
         created_at = task.created_at
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=UTC)
+        if (
+            error_code == "rate_limited"
+            and (datetime.now(UTC) - created_at).total_seconds()
+            < self._settings.retry_max_elapsed_seconds
+        ):
+            return TaskExecutionResult(
+                status=PersistentRunStatus.RETRYING,
+                error_code=error_code,
+                error_message=result.error_message,
+                next_attempt_at=datetime.now(UTC)
+                + timedelta(seconds=self._settings.retry_base_seconds),
+            )
         decision = self._retry_policy.decide(
             error_code,
             attempt_count=task.attempt_count,

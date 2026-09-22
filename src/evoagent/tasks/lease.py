@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from evoagent.db.models import RunRecord, TaskRecord
+from evoagent.db.models import RunRecord, RuntimeEvalRunRecord, TaskRecord
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.tasks.lease_guard import LeaseGuard, database_now
 from evoagent.tasks.lease_guard import LeaseLostError as LeaseLostError
@@ -61,11 +61,15 @@ class JobLeaseManager:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         lease_seconds: float,
+        runtime_experiment_id=None,
+        runtime_arm=None,
     ) -> None:
         if lease_seconds <= 0:
             raise ValueError("lease_seconds must be positive")
         self._session_factory = session_factory
         self._lease_duration = timedelta(seconds=lease_seconds)
+        self._runtime_experiment_id = runtime_experiment_id
+        self._runtime_arm = runtime_arm
 
     async def claim_next(self, owner: str, *, now: datetime | None = None) -> JobLease | None:
         """用 ``SKIP LOCKED`` 领取一个到期可执行的 QUEUED Task。"""
@@ -75,9 +79,20 @@ class JobLeaseManager:
             raise ValueError("lease owner cannot be blank")
         async with UnitOfWork(self._session_factory) as unit:
             current_time = now or await database_now(unit.session)
+            runtime_tasks = select(RunRecord.task_id).join(
+                RuntimeEvalRunRecord, RuntimeEvalRunRecord.run_id == RunRecord.id
+            )
             statement = (
                 select(TaskRecord)
                 .where(
+                    TaskRecord.id.in_(
+                        runtime_tasks.where(
+                            RuntimeEvalRunRecord.experiment_id == self._runtime_experiment_id,
+                            RuntimeEvalRunRecord.arm == self._runtime_arm,
+                        )
+                    )
+                    if self._runtime_experiment_id
+                    else TaskRecord.id.not_in(runtime_tasks),
                     TaskRecord.status == TaskStatus.QUEUED,
                     or_(
                         TaskRecord.next_attempt_at.is_(None),
@@ -112,7 +127,8 @@ class JobLeaseManager:
             task.lease_owner = normalized_owner
             task.lease_expires_at = expires_at
             task.heartbeat_at = current_time
-            task.attempt_count += 1
+            if run.error_code != "rate_limited":
+                task.attempt_count += 1
             task.lease_epoch += 1
             task.lock_version += 1
             run.status = PersistentRunStatus.RUNNING

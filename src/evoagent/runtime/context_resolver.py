@@ -1,7 +1,9 @@
 """短事务取候选、事务外向量请求、复验后冻结实际注入文本。"""
 
 from asyncio import timeout
+from contextlib import nullcontext
 from dataclasses import dataclass
+from time import perf_counter
 from uuid import UUID
 
 from sqlalchemy import select
@@ -37,6 +39,7 @@ from evoagent.runtime.checkpoints import SnapshotCompatibilityError
 from evoagent.sessions.service import text_hash
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.retrieval import RetrievalMatch, SkillRetrievalService
+from evoagent.workers.rate_limit import RateLimited
 
 
 @dataclass(frozen=True)
@@ -48,10 +51,13 @@ class ResolvedContext:
 
 
 class ContextResolver:
-    def __init__(self, factory, settings, registry, guard, builder, provider=None):
+    def __init__(
+        self, factory, settings, registry, guard, builder, provider=None, service_gate=None
+    ):
         self.factory, self.settings, self.registry = factory, settings, registry
         self.guard, self.builder = guard, builder
         self.provider = provider
+        self.service_gate = service_gate
 
     def config(self):
         s = self.settings
@@ -123,6 +129,8 @@ class ContextResolver:
                 and doc.input_hash == candidates[doc.source_key].input_hash
             }
         distances, degraded = {}, None
+        embedding_usage = 0
+        retrieval_started = perf_counter()
         if config["backend"] == "hybrid" and candidates:
             if not profile or not allowed:
                 degraded = "index_not_ready"
@@ -134,9 +142,23 @@ class ContextResolver:
                         profile.model, profile.dimension, profile.preprocessing, profile.metric
                     )
                     async with timeout(15):
-                        result = validate(
-                            await provider.embed((task.goal[:12000],), identity), identity, 1
+
+                        async def check():
+                            async with self.factory() as session:
+                                await self.guard.check(session)
+
+                        gate = (
+                            self.service_gate.acquire(f"embedding:{identity.model}", check)
+                            if self.service_gate
+                            else nullcontext()
                         )
+                        async with gate:
+                            await check()
+                            embedding_usage = None
+                            result = validate(
+                                await provider.embed((task.goal[:12000],), identity), identity, 1
+                            )
+                            embedding_usage = result.usage
                     async with self.factory() as session:
                         rows = await exact_distances(
                             session,
@@ -148,7 +170,7 @@ class ContextResolver:
                     distances = {allowed[key]: value for key, value in rows.items()}
                     if len(rows) < len(candidates):
                         degraded = "partial_index"
-                except (EmbeddingError, TimeoutError, OSError, SQLAlchemyError):
+                except (EmbeddingError, TimeoutError, OSError, SQLAlchemyError, RateLimited):
                     degraded = "vector_unavailable"
                 finally:
                     if (
@@ -276,6 +298,8 @@ class ContextResolver:
                     "batch_id": str(batch.id),
                     "selected_count": batch.selected_count,
                     "degraded": degraded,
+                    "embedding_tokens": embedding_usage,
+                    "latency_ms": (perf_counter() - retrieval_started) * 1000,
                 },
                 created_at=utc_now(),
             )

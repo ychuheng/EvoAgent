@@ -5,6 +5,8 @@ from contextlib import suppress
 from typing import Protocol
 from uuid import uuid4
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from evoagent.tasks.lease import (
     JobLease,
     JobLeaseManager,
@@ -14,6 +16,7 @@ from evoagent.tasks.lease import (
 )
 from evoagent.tasks.state_machine import PersistentRunStatus
 from evoagent.workers.heartbeat import LeaseHeartbeat
+from evoagent.workers.wakeup import Wakeup
 
 
 class TaskHandler(Protocol):
@@ -33,9 +36,15 @@ class JobWorker:
         poll_seconds: float,
         snapshot_schema_version: int = 1,
         maintenance_worker=None,
+        concurrency: int = 1,
+        wakeup: Wakeup | None = None,
     ) -> None:
         self._worker_id = f"{worker_id[:95]}:{uuid4().hex}"
         self._maintenance_worker = maintenance_worker
+        if concurrency < 1:
+            raise ValueError("concurrency must be positive")
+        self._concurrency = concurrency
+        self._wakeup = wakeup or Wakeup(None, "local")
         self._snapshot_schema_version = snapshot_schema_version
         self._lease_manager = lease_manager
         self._handler = handler
@@ -52,18 +61,35 @@ class JobWorker:
         self._stopping.set()
 
     async def run_forever(self) -> None:
+        tasks = [asyncio.create_task(self._lane()) for _ in range(self._concurrency)]
+        listener = asyncio.create_task(self._wakeup.listen())
+        if self._maintenance_worker is not None:
+            tasks.append(asyncio.create_task(self._maintenance_lane()))
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            tasks.append(listener)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _maintenance_lane(self):
+        while not self._stopping.is_set():
+            with suppress(LeaseLostError, SQLAlchemyError):
+                await self._maintenance_worker.run_once()
+            with suppress(TimeoutError):
+                await asyncio.wait_for(self._stopping.wait(), self._poll_seconds)
+
+    async def _lane(self) -> None:
         while not self._stopping.is_set():
             try:
                 handled = await self.run_once()
-            except LeaseLostError:
+            except (LeaseLostError, SQLAlchemyError):
                 handled = False
             if not handled:
-                with suppress(TimeoutError):
-                    await asyncio.wait_for(self._stopping.wait(), timeout=self._poll_seconds)
+                await self._wakeup.wait(self._stopping, self._poll_seconds)
 
     async def run_once(self) -> bool:
-        if self._maintenance_worker is not None:
-            await self._maintenance_worker.run_once()
         await self._lease_manager.promote_due_retries()
         await self._lease_manager.recover_expired()
         await self._lease_manager.recover_pending(schema_version=self._snapshot_schema_version)

@@ -3,7 +3,7 @@
 import hashlib
 import json
 from enum import StrEnum
-from typing import Any, Self
+from typing import Any, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -27,6 +27,7 @@ class RunConfigSnapshot(BaseModel):
     retrieval: dict[str, Any] | None = None
 
     provider: str = Field(min_length=1, max_length=64)
+    provider_thinking_mode: Literal["disabled"] | None = None
     model: str = Field(min_length=1, max_length=256)
     system_prompt_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     tool_manifest_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
@@ -63,6 +64,8 @@ class RunConfigSnapshot(BaseModel):
 
     def canonical_dict(self, *, comparison: bool = False) -> dict[str, Any]:
         value = self.model_dump(mode="json")
+        if self.provider_thinking_mode is None:
+            value.pop("provider_thinking_mode")
         if self.schema_version == 1:
             value.pop("schema_version")
         if self.summarizer is None:

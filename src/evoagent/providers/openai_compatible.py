@@ -41,6 +41,7 @@ class OpenAICompatibleProvider:
         base_url: str,
         timeout_seconds: float,
         client: httpx.AsyncClient | None = None,
+        thinking_mode: str | None = None,
     ) -> None:
         secret = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
         if not secret.strip():
@@ -60,6 +61,9 @@ class OpenAICompatibleProvider:
         self._timeout = httpx.Timeout(timeout_seconds)
         self._client = client or httpx.AsyncClient()
         self._owns_client = client is None
+        if thinking_mode not in (None, "disabled"):
+            raise ValueError("only explicit disabled thinking mode is supported")
+        self._thinking_mode = thinking_mode
 
     async def __aenter__(self) -> Self:
         return self
@@ -77,6 +81,8 @@ class OpenAICompatibleProvider:
         """发送一次流式请求，并产生统一 ProviderEvent。"""
 
         payload = self._build_payload(request)
+        if self._thinking_mode is not None:
+            payload["thinking"] = {"type": self._thinking_mode}
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Accept": "text/event-stream",

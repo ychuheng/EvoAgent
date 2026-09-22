@@ -12,6 +12,7 @@ from evoagent.db.models import (
     MessageRecord,
     RunMemoryReferenceRecord,
     RunRecord,
+    RuntimeEvalRunRecord,
     SessionRecord,
     TaskRecord,
     ToolApprovalRecord,
@@ -38,6 +39,10 @@ async def source_message(session, message_id, session_id):
         raise MemoryError("source_run_not_completed")
     # 所有评测来源均拒绝，覆盖 HOLDOUT，也避免训练/评测串线。
     if await session.scalar(select(EvalRunRecord.id).where(EvalRunRecord.run_id == run.id)):
+        raise MemoryError("evaluation_source_forbidden")
+    if await session.scalar(
+        select(RuntimeEvalRunRecord.id).where(RuntimeEvalRunRecord.run_id == run.id)
+    ):
         raise MemoryError("evaluation_source_forbidden")
     approvals = await session.scalar(
         select(ToolApprovalRecord.id).where(

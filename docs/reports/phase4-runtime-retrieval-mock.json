@@ -1,0 +1,1944 @@
+{
+  "schema_version": 1,
+  "experiment_id": "98ef82ec-b4d9-4cc3-bf7a-2729e69d648e",
+  "report_kind": "mock",
+  "spec": {
+    "schema_version": 1,
+    "experiment_variable": "retrieval_backend",
+    "control": {
+      "context_policy": "bounded",
+      "memory_mode": "read_only",
+      "retrieval_backend": "lexical",
+      "worker_count": 1
+    },
+    "treatment": {
+      "context_policy": "bounded",
+      "memory_mode": "read_only",
+      "retrieval_backend": "hybrid",
+      "worker_count": 1
+    },
+    "repeats": 1,
+    "provider": "mock",
+    "provider_thinking_mode": null,
+    "model": "mock-model",
+    "code_version": "module11-12-acceptance",
+    "dataset_hash": "sha256:3c2d0469e2a54086e5b063a1427c5b2b302c4e4f9ba40616693253d6603f6360",
+    "environment": {
+      "execution": "Windows single process per arm; PostgreSQL pgvector; mock-hash-v1; index prepared"
+    },
+    "context_window_tokens": 32768,
+    "max_output_tokens": 4096,
+    "context_safety_margin": 1024,
+    "max_total_tokens": 32000,
+    "max_iterations": 8,
+    "embedding_model": "mock-hash-v1",
+    "memory_retrieval_top_k": 3,
+    "retrieval_min_lexical_score": 0.1,
+    "retrieval_max_vector_distance": 0.35,
+    "retrieval_rrf_k": 60,
+    "retrieval_memory_budget": 2000
+  },
+  "spec_hash": "sha256:5cb53e61c18a9f6daf2bd19e5bc2863b0c7b85afbea0f36c9f28ae5df23a1649",
+  "summary": {
+    "control": {
+      "samples": 4,
+      "success_rate": 1,
+      "total_tokens": {
+        "known_samples": 0,
+        "mean": null,
+        "median": null
+      },
+      "tool_calls": {
+        "known_samples": 4,
+        "mean": 2,
+        "median": 2.0
+      },
+      "latency_ms": {
+        "known_samples": 4,
+        "mean": 1500.5420000000001,
+        "median": 1542.3495
+      }
+    },
+    "treatment": {
+      "samples": 4,
+      "success_rate": 1,
+      "total_tokens": {
+        "known_samples": 0,
+        "mean": null,
+        "median": null
+      },
+      "tool_calls": {
+        "known_samples": 4,
+        "mean": 2,
+        "median": 2.0
+      },
+      "latency_ms": {
+        "known_samples": 4,
+        "mean": 1343.413,
+        "median": 1411.223
+      }
+    }
+  },
+  "pairs": [
+    {
+      "case_id": "4a13c915-3866-4e2e-93b8-5767f966acad",
+      "repeat": 0,
+      "comparable": true
+    },
+    {
+      "case_id": "62857e05-95b2-42ba-974f-405f6d09508f",
+      "repeat": 0,
+      "comparable": true
+    },
+    {
+      "case_id": "9209ead1-d3f9-4e7b-809f-bedc021648bf",
+      "repeat": 0,
+      "comparable": true
+    },
+    {
+      "case_id": "c407921e-f46b-4ebe-9621-bd5fba3642cc",
+      "repeat": 0,
+      "comparable": true
+    }
+  ],
+  "comparable_pairs": 4,
+  "samples": [
+    {
+      "case_id": "4a13c915-3866-4e2e-93b8-5767f966acad",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "5b1049fd-40a6-4ee0-b8c9-422192aabe4d",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 2,
+        "tool_succeeded": 2,
+        "tool_failed": 0,
+        "tool_calls_by_name": {
+          "file_write": 1,
+          "web_search": 1
+        },
+        "latency_ms": 1639.073,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0015999976312741637
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0026000052457675338
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": "91d24093-9ec9-4425-9405-da900d6ba3c9",
+          "generation": 1,
+          "degraded": null,
+          "selection_hash": "sha256:fb5520c87fb7d2449b778b199bd94d21a3cc6170e43384ab1b336c5489303366"
+        },
+        "provider": "mock",
+        "model": "mock-model",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 8,
+        "max_total_tokens": 32000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 4096,
+            "safety_margin": 1024
+          },
+          "counter": "mock-utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 4096,
+        "model_timeout_seconds": 60.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:3017fb60c330a4f564dfaf3b98a4a5ea408026da04503bc30420e9f9e636289d",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 3,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [
+            "sha256:5627d491918c8d58fc164739a8532f7cdcb69c4ad0a71e21cebbdf5c2934cb38"
+          ],
+          "quality": {
+            "recall_at_k": null,
+            "mrr": 0,
+            "irrelevant_forced_hit": true
+          }
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "retrieval-acceptance:fd11ca4f8d59476596bb8d296fe8b4c6",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "ec8b5039-5c3b-44da-919f-bb6571be4762",
+              "selected_count": 1,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 40.677400000276975
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5226,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 2,
+              "estimate": {
+                "count": 5821,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 2,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 3,
+              "estimate": {
+                "count": 6382,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 3,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": null
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "4a13c915-3866-4e2e-93b8-5767f966acad",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "9971293b-6387-432c-9987-dc645744a731",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 2,
+        "tool_succeeded": 2,
+        "tool_failed": 0,
+        "tool_calls_by_name": {
+          "file_write": 1,
+          "web_search": 1
+        },
+        "latency_ms": 1439.3180000000002,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0014999968698248267
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0021999876480549574
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "hybrid",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": "91d24093-9ec9-4425-9405-da900d6ba3c9",
+          "generation": 1,
+          "degraded": null,
+          "selection_hash": "sha256:1281351ffe97169aedf8df8f0402d2898397befcfbb9817df6c4548e91574554"
+        },
+        "provider": "mock",
+        "model": "mock-model",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 8,
+        "max_total_tokens": 32000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 4096,
+            "safety_margin": 1024
+          },
+          "counter": "mock-utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 4096,
+        "model_timeout_seconds": 60.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:b840ffc3ea7b516adff2a1f91e04fab20bbec5c493022ce541ae18f7334cc3d1",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 3,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [
+            "sha256:5627d491918c8d58fc164739a8532f7cdcb69c4ad0a71e21cebbdf5c2934cb38"
+          ],
+          "quality": {
+            "recall_at_k": null,
+            "mrr": 0,
+            "irrelevant_forced_hit": true
+          }
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "retrieval-acceptance:45c6e0c841704cfabf91d2474037973a",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "942af331-a5a4-48d3-9097-47da6071eaf3",
+              "selected_count": 1,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 53.93290000210982
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5226,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 2,
+              "estimate": {
+                "count": 5821,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 2,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 3,
+              "estimate": {
+                "count": 6382,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 3,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": null
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "62857e05-95b2-42ba-974f-405f6d09508f",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "75b6ac94-4b0c-4c5d-be94-f8c456028ffb",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 2,
+        "tool_succeeded": 2,
+        "tool_failed": 0,
+        "tool_calls_by_name": {
+          "file_write": 1,
+          "web_search": 1
+        },
+        "latency_ms": 1445.626,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0017999991541728377
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0022999884095042944
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": "91d24093-9ec9-4425-9405-da900d6ba3c9",
+          "generation": 1,
+          "degraded": null,
+          "selection_hash": "sha256:c3b28a3ba28afa77edb7203d6975b74eb42e4ef8be81c97432fa725a0f6596e3"
+        },
+        "provider": "mock",
+        "model": "mock-model",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 8,
+        "max_total_tokens": 32000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 4096,
+            "safety_margin": 1024
+          },
+          "counter": "mock-utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 4096,
+        "model_timeout_seconds": 60.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:4136ec4cef6baf8d5658ba6403a71ef24972f934724c4bcc1fb0f7ad64f5aa08",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 3,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [
+            "sha256:f3df6f44580419cd7fd75a196870fec966ec5a55b857b2d452573abfbbc3ab92"
+          ],
+          "quality": {
+            "recall_at_k": 1.0,
+            "mrr": 1.0,
+            "irrelevant_forced_hit": false
+          }
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "retrieval-acceptance:fd11ca4f8d59476596bb8d296fe8b4c6",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "8d4d15f7-1960-4d1b-863b-0a1c4bdb552e",
+              "selected_count": 1,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 41.78540001157671
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5173,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 2,
+              "estimate": {
+                "count": 5768,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 2,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 3,
+              "estimate": {
+                "count": 6329,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 3,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": null
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "62857e05-95b2-42ba-974f-405f6d09508f",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "f728ebd3-e03b-49cd-a44a-606f59890975",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 2,
+        "tool_succeeded": 2,
+        "tool_failed": 0,
+        "tool_calls_by_name": {
+          "file_write": 1,
+          "web_search": 1
+        },
+        "latency_ms": 1392.577,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0014999968698248267
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0023000029614195228
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "hybrid",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": "91d24093-9ec9-4425-9405-da900d6ba3c9",
+          "generation": 1,
+          "degraded": null,
+          "selection_hash": "sha256:86f0cd9ba12b55f4fde7b168ab33d731c0c739a4ca62bfd8239322e235580240"
+        },
+        "provider": "mock",
+        "model": "mock-model",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 8,
+        "max_total_tokens": 32000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 4096,
+            "safety_margin": 1024
+          },
+          "counter": "mock-utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 4096,
+        "model_timeout_seconds": 60.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:996f8c8003eb1fb77f53172afb69b771688dce09d47b4675996af8460c9c7686",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 3,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [
+            "sha256:f3df6f44580419cd7fd75a196870fec966ec5a55b857b2d452573abfbbc3ab92"
+          ],
+          "quality": {
+            "recall_at_k": 1.0,
+            "mrr": 1.0,
+            "irrelevant_forced_hit": false
+          }
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "retrieval-acceptance:45c6e0c841704cfabf91d2474037973a",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "f500853d-3acb-42d4-8488-093790986758",
+              "selected_count": 1,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 57.06959999224637
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5173,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 2,
+              "estimate": {
+                "count": 5768,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 2,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 3,
+              "estimate": {
+                "count": 6329,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 3,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": null
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "9209ead1-d3f9-4e7b-809f-bedc021648bf",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "234d4b46-cbf4-44ca-92c5-0297baf92307",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 2,
+        "tool_succeeded": 2,
+        "tool_failed": 0,
+        "tool_calls_by_name": {
+          "file_write": 1,
+          "web_search": 1
+        },
+        "latency_ms": 1801.717,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.003300010575912893
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0039000005926936865
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": "91d24093-9ec9-4425-9405-da900d6ba3c9",
+          "generation": 1,
+          "degraded": null,
+          "selection_hash": "sha256:3ffa92ade99045c500cf5a2b5caefaf1f3e579b778414e8e7233ff7e1c6983bf"
+        },
+        "provider": "mock",
+        "model": "mock-model",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 8,
+        "max_total_tokens": 32000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 4096,
+            "safety_margin": 1024
+          },
+          "counter": "mock-utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 4096,
+        "model_timeout_seconds": 60.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:2fc8fcee9fe06a5f7df7c71750d595d0b4b803f1bb10054fa7f6b33aec51c2b5",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 3,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [
+            "sha256:f3df6f44580419cd7fd75a196870fec966ec5a55b857b2d452573abfbbc3ab92"
+          ],
+          "quality": {
+            "recall_at_k": 1.0,
+            "mrr": 1.0,
+            "irrelevant_forced_hit": false
+          }
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "retrieval-acceptance:fd11ca4f8d59476596bb8d296fe8b4c6",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "23bc7629-d6fb-4dbb-86f5-214dfa142875",
+              "selected_count": 1,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 56.66439999185968
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5164,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 2,
+              "estimate": {
+                "count": 5759,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 2,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 3,
+              "estimate": {
+                "count": 6320,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 3,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": null
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "9209ead1-d3f9-4e7b-809f-bedc021648bf",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "f8f306c5-0b69-4a5c-bf8f-5bae0a0c15fc",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 2,
+        "tool_succeeded": 2,
+        "tool_failed": 0,
+        "tool_calls_by_name": {
+          "file_write": 1,
+          "web_search": 1
+        },
+        "latency_ms": 1429.8690000000001,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0036999990697950125
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.005699999746866524
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "hybrid",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": "91d24093-9ec9-4425-9405-da900d6ba3c9",
+          "generation": 1,
+          "degraded": null,
+          "selection_hash": "sha256:3612257bbbb538f83adac27e8186138b1b81e3c6354f02f33a8b53f965860da0"
+        },
+        "provider": "mock",
+        "model": "mock-model",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 8,
+        "max_total_tokens": 32000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 4096,
+            "safety_margin": 1024
+          },
+          "counter": "mock-utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 4096,
+        "model_timeout_seconds": 60.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:002f8e44a1c870dfe70c8f2828366d24f37a719ea2982f3c8e8dcda5290fca7e",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 3,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [
+            "sha256:f3df6f44580419cd7fd75a196870fec966ec5a55b857b2d452573abfbbc3ab92"
+          ],
+          "quality": {
+            "recall_at_k": 1.0,
+            "mrr": 1.0,
+            "irrelevant_forced_hit": false
+          }
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "retrieval-acceptance:45c6e0c841704cfabf91d2474037973a",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "20506aa5-d25b-40f5-8284-e3472c66dbc5",
+              "selected_count": 1,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 59.619699997710995
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5164,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 2,
+              "estimate": {
+                "count": 5759,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 2,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 3,
+              "estimate": {
+                "count": 6320,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 3,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": null
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "c407921e-f46b-4ebe-9621-bd5fba3642cc",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "6ddb7344-6253-4a28-9c29-5253af774e0f",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 2,
+        "tool_succeeded": 2,
+        "tool_failed": 0,
+        "tool_calls_by_name": {
+          "file_write": 1,
+          "web_search": 1
+        },
+        "latency_ms": 1115.7520000000002,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0013999961083754897
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0021000014385208488
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": "91d24093-9ec9-4425-9405-da900d6ba3c9",
+          "generation": 1,
+          "degraded": null,
+          "selection_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "provider": "mock",
+        "model": "mock-model",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 8,
+        "max_total_tokens": 32000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 4096,
+            "safety_margin": 1024
+          },
+          "counter": "mock-utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 4096,
+        "model_timeout_seconds": 60.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:3d99e7d2b3757b56040d05d385d0cb3684fd69de9fc4e1f0600b4a2e6fb14d0c",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 3,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": {
+            "recall_at_k": null,
+            "mrr": 0,
+            "irrelevant_forced_hit": false
+          }
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "retrieval-acceptance:fd11ca4f8d59476596bb8d296fe8b4c6",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "38b68b94-a264-4f94-981b-920a0626b08c",
+              "selected_count": 0,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 10.462899997946806
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 4932,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 2,
+              "estimate": {
+                "count": 5527,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 2,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 3,
+              "estimate": {
+                "count": 6088,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 3,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": null
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "c407921e-f46b-4ebe-9621-bd5fba3642cc",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "40bed194-4226-4f36-ae2f-266dfe3dee56",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "tool_calls": 2,
+        "tool_succeeded": 2,
+        "tool_failed": 0,
+        "tool_calls_by_name": {
+          "file_write": 1,
+          "web_search": 1
+        },
+        "latency_ms": 1111.888,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.001600012183189392
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0023000029614195228
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "hybrid",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": "91d24093-9ec9-4425-9405-da900d6ba3c9",
+          "generation": 1,
+          "degraded": null,
+          "selection_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "provider": "mock",
+        "model": "mock-model",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 8,
+        "max_total_tokens": 32000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 4096,
+            "safety_margin": 1024
+          },
+          "counter": "mock-utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 4096,
+        "model_timeout_seconds": 60.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:21934d41771223c3a156e3b3bf7d7a682a0d61e6eaae679468216e10397a9eae",
+      "evidence": {
+        "known_main_tokens": 0,
+        "unknown_main_calls": 3,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": {
+            "recall_at_k": null,
+            "mrr": 0,
+            "irrelevant_forced_hit": false
+          }
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "retrieval-acceptance:45c6e0c841704cfabf91d2474037973a",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "d2f1bb3e-7b04-4726-bf0d-65018fe66f93",
+              "selected_count": 0,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 28.963700009626336
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 4932,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 2,
+              "estimate": {
+                "count": 5527,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 2,
+              "finish_reason": "tool_calls",
+              "tool_call_count": 1,
+              "usage": null
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 3,
+              "estimate": {
+                "count": 6088,
+                "method": "mock-utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "exact_mock"
+              },
+              "dropped_indices": [],
+              "input_limit": 27648,
+              "max_output_tokens": 4096
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 3,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": null
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": null,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 0,
+        "exact_model_tokens": null,
+        "embedding_tokens": 0
+      }
+    }
+  ],
+  "conclusion": "descriptive only; no statistical significance or quality claim"
+}

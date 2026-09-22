@@ -1,5 +1,6 @@
 """带 epoch 的持久化维护任务，进程退出后可以重新领取。"""
 
+import asyncio
 from datetime import timedelta
 from uuid import UUID, uuid4
 
@@ -26,6 +27,7 @@ from evoagent.db.models import (
 from evoagent.memory.archival import archive_input, summarize_archive
 from evoagent.memory.schema import MemoryError
 from evoagent.tasks.lease_guard import database_now
+from evoagent.workers.rate_limit import RateLimited
 
 
 class MaintenanceWorker:
@@ -43,6 +45,9 @@ class MaintenanceWorker:
                 .where(
                     or_(
                         MaintenanceJobRecord.status == "pending",
+                        (MaintenanceJobRecord.status == "failed")
+                        & (MaintenanceJobRecord.attempts < 3)
+                        & (MaintenanceJobRecord.next_attempt_at <= now),
                         (MaintenanceJobRecord.status == "running")
                         & (MaintenanceJobRecord.lease_expires_at <= now),
                     )
@@ -59,6 +64,14 @@ class MaintenanceWorker:
                 .limit(1)
             )
             if job is None:
+                return None
+            if job.attempts >= 3:
+                job.status = "failed"
+                job.error_code = "maintenance_attempts_exhausted"
+                job.next_attempt_at = None
+                job.lease_owner = None
+                job.lease_expires_at = None
+                await session.commit()
                 return None
             epoch = job.lease_epoch
             changed = await session.execute(
@@ -84,9 +97,16 @@ class MaintenanceWorker:
         lease = await self.claim()
         if lease is None:
             return False
+        execution = asyncio.create_task(self.execute(*lease))
+        heartbeat = asyncio.create_task(self._heartbeat(*lease))
         try:
-            await self.execute(*lease)
-        except (OSError, ValueError) as error:
+            done, _ = await asyncio.wait(
+                (execution, heartbeat), return_when=asyncio.FIRST_COMPLETED
+            )
+            if heartbeat in done:
+                await heartbeat
+            await execution
+        except (OSError, ValueError, RateLimited) as error:
             async with self.factory() as session:
                 await session.execute(
                     update(MaintenanceJobRecord)
@@ -103,7 +123,31 @@ class MaintenanceWorker:
                     )
                 )
                 await session.commit()
+        finally:
+            for task in (execution, heartbeat):
+                task.cancel()
+            await asyncio.gather(execution, heartbeat, return_exceptions=True)
         return True
+
+    async def _heartbeat(self, job_id, epoch):
+        while True:
+            await asyncio.sleep(30)
+            async with self.factory() as session:
+                now = await database_now(session)
+                changed = await session.execute(
+                    update(MaintenanceJobRecord)
+                    .where(
+                        MaintenanceJobRecord.id == job_id,
+                        MaintenanceJobRecord.status == "running",
+                        MaintenanceJobRecord.lease_owner == self.owner,
+                        MaintenanceJobRecord.lease_epoch == epoch,
+                        MaintenanceJobRecord.lease_expires_at > now,
+                    )
+                    .values(lease_expires_at=now + timedelta(seconds=120))
+                )
+                if changed.rowcount != 1:
+                    raise MemoryError("maintenance_lease_lost")
+                await session.commit()
 
     async def execute(self, job_id, epoch):
         async with self.factory() as lookup:

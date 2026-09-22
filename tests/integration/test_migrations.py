@@ -9,6 +9,8 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 EXPECTED_TABLES = {
+    "runtime_experiments",
+    "runtime_eval_runs",
     "sandbox_executions",
     "mcp_servers",
     "mcp_catalogs",

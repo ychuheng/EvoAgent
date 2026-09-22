@@ -680,6 +680,7 @@ class EvalCaseRecord(Base):
 
 class EvalExperimentRecord(Base):
     __tablename__ = "eval_experiments"
+    lease_epoch: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     kind: Mapped[EvalExperimentKind] = mapped_column(
@@ -707,6 +708,31 @@ class EvalExperimentRecord(Base):
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RuntimeExperimentRecord(Base):
+    __tablename__ = "runtime_experiments"
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    dataset_id: Mapped[UUID] = mapped_column(ForeignKey("eval_datasets.id"))
+    spec: Mapped[dict[str, Any]] = mapped_column(JSON)
+    spec_hash: Mapped[str] = mapped_column(String(71))
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    report: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    report_hash: Mapped[str | None] = mapped_column(String(71))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RuntimeEvalRunRecord(Base):
+    __tablename__ = "runtime_eval_runs"
+    __table_args__ = (UniqueConstraint("experiment_id", "case_id", "arm", "repeat_index"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    experiment_id: Mapped[UUID] = mapped_column(ForeignKey("runtime_experiments.id"), index=True)
+    case_id: Mapped[UUID] = mapped_column(ForeignKey("eval_cases.id"))
+    arm: Mapped[str] = mapped_column(String(16))
+    repeat_index: Mapped[int] = mapped_column(Integer)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"), unique=True)
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    validation_results: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
 
 
 class EvalRunRecord(Base):

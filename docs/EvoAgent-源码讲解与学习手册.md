@@ -89,6 +89,14 @@
 83. 阶段四模块 10 完整执行、文件发布与故障恢复
 84. 阶段四模块 10 网络出口、MCP 通道与测试地图
 85. 阶段四模块 10 学习验收
+86. 阶段四模块 11：持久队列、唤醒与服务配额
+87. 阶段四模块 11：限流恢复、维护任务与 Eval fencing
+88. 阶段四模块 11：测试地图与故障定位
+89. 阶段四模块 11 学习验收
+90. 阶段四模块 12：独立实验契约与数据隔离
+91. 阶段四模块 12：执行链、成本与报告
+92. 阶段四模块 12：数据集、测试与验收边界
+93. 阶段四模块 12 学习验收
 
 ## 1. 阅读说明
 
@@ -102,7 +110,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～10 已实现代码与本地契约验收；PostgreSQL+vector、容器和真实模型效果证据待补。本手册原有章节保留历史学习脉络，最新增量见第 82～85 章；第 57～81 章的完成范围和测试数字保留对应交付时间点。
+`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～12 已实现工程代码；PostgreSQL/Redis、双进程调度和 Runtime Mock 报告已验收，真实模型效果证据仍待补。最新增量见第 86～93 章；较早章节的测试数字保留对应交付时间点，模块 13～14 尚未完成。
 
 已经完成：
 
@@ -7249,3 +7257,316 @@ cleanup_pending 时先恢复 Docker 管理通道并确认具体容器，等待�
 30. 哪些测试已经在本机通过，哪些必须在 Linux Docker 或 PostgreSQL 环境补证？
 
 建议按正常文件产出、租约丢失、清理失败、DNS 重绑定、stdio 断连五条路径阅读测试。能够解释每一次权限检查、数据提交和清理确认的位置，才算掌握模块 10，而不是只会拼接 docker run 参数。
+
+---
+
+## 86. 阶段四模块 11：持久队列、唤醒与服务配额
+
+### 86.1 为什么增加 Redis 后仍然需要 PostgreSQL 队列
+
+先从一个故障窗口理解设计。API 已把 Task 和 Run 提交到数据库，随后进程崩溃，来不及发布 Redis 消息。如果 Worker 只等消息，这个任务会永远停留在 queued。反过来，若先发布再提交，Worker 可能收到一个还不存在、甚至稍后回滚的任务。
+
+现在的调用链是：
+
+```text
+TaskService / Eval 放行 / 维护任务入队
+  → SQLAlchemy flush 识别 queued/pending 变化
+  → QueueSession.commit 完成数据库提交
+  → Wakeup.publish best-effort 发送 scan
+  → Worker 被唤醒，或 poll 周期到达
+  → JobLeaseManager 使用数据库领取
+```
+
+[db/session.py](../src/evoagent/db/session.py) 中 after_flush 只设置 queue_changed 标记，不能在这个阶段发送消息。QueueSession 在 super().commit() 成功返回后才读取标记并 publish。rollback 清除标记，因此一次失败事务不会在下一次无关提交时留下假通知。
+
+这不是 transactional outbox：没有保证每条提示必达。这里允许丢提示，是因为 Worker 的周期扫描能够恢复发现；真正的 Task 和维护 Job 已经持久化。不能把相同模式用于必须逐条送达的业务事件。
+
+### 86.2 Wakeup 对外只表达“可以再扫描一次”
+
+[workers/wakeup.py](../src/evoagent/workers/wakeup.py) 包含发布、订阅和等待三部分。Redis 客户端设定连接和操作时限；publish 失败不回滚已提交任务。listen 断线后重连；wait 同时等待唤醒 Event、停止 Event 和固定超时。
+
+Event 会合并重复通知。连续收到十条 scan，并不意味着应该执行十个 Task；实际执行数量由数据库中的可领取记录决定。清除 Event 与新消息抵达之间仍可能发生提示丢失，但下一轮 poll 能补偿，因此正确性不依赖这个窗口完全消失。
+
+channel 包含 redis_namespace。Redis Pub/Sub 不按数据库编号隔离；开发和验收若只分别使用 /0、/1，仍可能互相唤醒。namespace 应表达部署环境，不应包含密码、用户输入或完整连接串。
+
+### 86.3 活动 Run 与服务请求是两层并发
+
+[workers/main.py](../src/evoagent/workers/main.py) 的 run_forever 创建固定数量的 _lane。每个 lane 只有一个 run_once 在执行，所以 worker_concurrency=2 表示单进程最多处理两个活动 Run。两个进程各配置 2，最多是四个 Run，而不是两个。
+
+每个 Run 又可能等待模型、执行 MCP 或读写 Artifact。这些请求由 [rate_limit.py](../src/evoagent/workers/rate_limit.py) 的 ServiceGate 控制。进程内 semaphore 限制某服务同时调用数；Redis token bucket 限制所有使用同 namespace/服务身份的进程的请求速率。
+
+两种上限解决不同问题：并发限制控制同时占用连接和内存的请求，速率限制控制单位时间消耗配额的请求。请求越慢，同一并发数的吞吐越低；不能简单把 worker_concurrency 翻倍就宣称吞吐翻倍。
+
+持久化 ToolExecutor 仍然串行处理同一模型响应中的工具。跨 Run 的并发不会改变单 Run 副作用账本的顺序。
+
+### 86.4 Lua token bucket 怎样避免超领
+
+TOKEN_BUCKET 在一个 Redis 脚本内执行读取状态、获取 Redis TIME、补充 token、扣减或计算等待、写回状态和 TTL。多个连接不能在读取同一个余额后各自扣减，因而不会把最后一个 token 发给两个请求。
+
+假设 burst=4、rate=2，桶满时四个请求可以立即进入。第五个请求看到余额不足，获得约 0.5 秒等待时间。它等待后重新执行脚本，不能把等待时间当成预约成功。其他进程可能先拿走刚补充的 token。
+
+Redis TIME 避免 Worker 本地时钟不一致导致多补充 token。TTL 用于回收长期不用的配额 key。这个脚本限制的是请求次数，不是精确 Token 成本；模型返回的 usage 仍需要单独记录。
+
+### 86.5 哪些路径使用 ServiceGate
+
+ConfiguredTaskHandler 共享一个进程级 ServiceGate，再为每个 Run 创建 GatedProvider。模型请求在取得服务许可后重新检查 LeaseGuard。ToolExecutor 对 MCP binding 的 server_id 分组，并把许可检查放在 middleware.before 之前。ContextResolver 和 IndexService 对 Embedding 服务使用同类入口。
+
+本地 calculator、文件工具不需要 Redis 请求配额，但持久执行入口仍检查租约。Embedding 查询限额不可用时允许按现有检索规则降级 lexical；这表示没有发送被拒绝的向量请求，不表示临时关闭限流。
+
+服务身份不包含 API Key。多个配置应使用稳定、非敏感的模型或 MCP server 身份；namespace 决定配额共享范围。
+
+### 86.6 为什么等待后还要检查租约
+
+一个 Worker 开始等待时可能持有 epoch=7；等待期间它的心跳中断，另一个进程接管到 epoch=8。若只在等待前检查，旧进程仍会向外部服务发送请求。
+
+ServiceGate 的 check 回调在 semaphore 和 token 都获得之后执行。检查使用短数据库事务，返回后事务关闭；配额等待本身不持有数据库锁。数据库不可用时检查失败，请求不会被放行。这与“数据库暂时不可用但继续执行，等恢复再补账”的做法有本质不同：后者会产生无法证明所有权的外部副作用。
+
+## 87. 阶段四模块 11：限流恢复、维护任务与 Eval fencing
+
+### 87.1 rate_limited 怎样进入恢复状态机
+
+模型尚未发出请求就因配额超时失败时，GatedProvider 抛出 RateLimited。AgentLoop 捕获 ProviderError 后，识别 rate_limited 并保存请求前的完整消息、已完成迭代数、上下文 revision 和 usage。当前尚未执行的模型轮次不计入 completed_iterations。
+
+MCP 限流发生在副作用 PREPARED 之前，ToolExecutor 返回对应错误结果。AgentLoop 补齐这一批 tool message 后再保存 checkpoint，然后结束本次执行。已经提交的其他工具效果仍在账本中；UNKNOWN 仍由原有恢复策略处理，不能因为下一次有配额就重放不确定写入。
+
+PersistentAgentRunner 返回 RETRYING 和 next_attempt_at。JobLeaseManager 再次领取时看到上一轮 error_code=rate_limited，不增加网络重试次数，但仍递增 lease_epoch。前者是策略计数，后者是所有权代次，两者不能混用。
+
+### 87.2 为什么限流不会无限占住一次执行
+
+等待由 rate_wait_seconds 限定。短等待仍处于当前 Run 的总时限内，Heartbeat 独立运行。超出短预算会释放当前执行槽位，让其他 Run 有机会被领取。重调度受 retry_max_elapsed_seconds 限定；任务创建时间不会因为配额重试被重置。
+
+例如某模型完全不可用：首次领取 attempt=1、epoch=1；限流后重试仍 attempt=1，但接管为 epoch=2。总年龄超过上限后进入失败，不能靠“不增加网络重试次数”永久循环。
+
+### 87.3 维护队列为何拆为独立进程
+
+旧 Worker 在领取前执行一次维护任务。若一次 index_rebuild 要等 Embedding，正常用户任务也会被拖住。现在普通 Worker 只负责 Task，evoagent-maintenance-worker 独立领取 MaintenanceJob。
+
+维护 Job 的 payload 保存来源 ID、版本或哈希，不复制整个长文本。claim 使用数据库时间，检查 pending、到期 failed 或租约过期 running，锁行并以 epoch 条件更新。执行结果提交仍需要 owner、epoch、未到期三个条件。
+
+MaintenanceWorker 在执行期间每 30 秒续租，将有效期推进到 120 秒。Heartbeat 失败会结束执行任务；取消通过 finally 回收子任务。文件或服务错误被记录为稳定 error_code，设置 30 秒后的 next_attempt_at；达到三次领取上限后停止自动重试。不能把三次失败直接当成“维护成功但没有结果”。
+
+archive/erase 内的某些事务本身会持有 Job 行锁。耗时操作仍要在提交前复验租约时间；心跳不是无限延长长事务正确性的证明。大规模维护任务应进一步分批，而不是只把 lease_seconds 调大。
+
+### 87.4 Eval 为什么也需要 epoch
+
+[evals/coordinator.py](../src/evoagent/evals/coordinator.py) 原先只有 owner 和 expiry。若同名实例重启或租约被接管，旧进程可能在耗时 Validator 结束后继续写回结果。0011 为 EvalExperiment 增加 lease_epoch，每次领取递增。
+
+EvalLease 携带代次。heartbeat 在 UPDATE 条件中检查代次；_guard 在提交事务中锁定实验行并验证状态、owner、epoch、有效期。结果采集事务、第二个配对 Run 放行、实验完成都使用该保护。Validator 可以在事务外计算，但写回时必须再次获得当前所有权。
+
+这是“计算结果可以晚到，提交权限不能沿用”的模式。仅在 run_once 开头检查一次是不够的，因为耗时计算期间租约可能变化。
+
+### 87.5 停止、取消与崩溃各发生什么
+
+Linux Worker 收到 SIGTERM 后设置 stopping，停止领取新任务，已领取的任务继续维持心跳并完成当前执行。Compose 设置 310 秒宽限，与默认 300 秒任务时限配合。
+
+取消 Task 由 Heartbeat 发现 cancel_requested，取消 Handler 并提交 cancelled；这与关闭整个 Worker 不同。进程被 kill 或 Windows 强制终止时不能承诺 finally 完成，后继 Worker 通过租约过期、RECOVERING、快照和副作用账本接管。共享 Artifact 的合法性仍由 Run、epoch、哈希和原有发布协议保证。
+
+## 88. 阶段四模块 11：测试地图与故障定位
+
+### 88.1 阅读代码的顺序
+
+先读 QueueSession 与 Wakeup，确认通知不是任务本身；再读 JobWorker._lane/run_once，区分并发槽位与租约；然后读 ServiceGate 和 ToolExecutor 的调用位置；最后读维护 Worker 与 EvalCoordinator._guard，核对各自的所有权条件。
+
+不要先从 Compose 扩容命令开始。扩容只是让进程增多，正确性来自每一个提交边界是否仍受租约保护。
+
+### 88.2 测试分别证明什么
+
+| 测试 | 关键断言 | 不能替代的证据 |
+| --- | --- | --- |
+| test_worker_services.py | Redis 故障关闭配额、semaphore 取消后释放、等待后检查租约 | Redis 脚本实际原子性 |
+| test_worker_redis.py | 两个真实连接争抢桶，20 次请求只能拿到 burst 额度；重复唤醒合并 | 数据库状态机 |
+| test_multiworker.py | 两个真实进程、相同标签、不同 owner，8 个任务合法完成 | 多主机共享存储 |
+| test_runtime_experiments.py 的 quota 用例 | 首次保存零完成轮次的 checkpoint，恢复完成且 attempt 不变 | 外部服务 exactly-once |
+| 同文件 Eval epoch 用例 | 相同 owner 重领后旧代次 heartbeat/run_once 拒绝 | PostgreSQL 行锁竞争 |
+| test_lease_fencing.py | PostgreSQL 事务 fencing、接管、取消 | 网络服务幂等性 |
+| test_unknown_effect_recovery.py | UNKNOWN 不盲目重放 | 远端业务是否实际提交 |
+
+QueueSession 的集成测试在 publish 回调中重新打开数据库读取 Task，直接验证通知发生在可见提交之后。随后 flush 再 rollback，确认不会遗留一次假发布。
+
+### 88.3 常见故障的定位步骤
+
+任务一直 queued：先确认数据库 URL、Task.next_attempt_at、运行时实验过滤条件，再检查 Worker 是否存活。Redis 可用并不能证明可领取条件满足。
+
+大量 RETRYING 且 error_code=rate_limited：检查服务桶是否被其他实例共享、Redis 是否断线，以及 rate_wait_seconds 是否过小。不要第一步就删除 REDIS_URL，这会改变部署的配额语义。
+
+维护任务长期 failed：检查 attempts、error_code 与来源状态。来源被撤销、索引模型不匹配、磁盘错误需要分别处理；修改 next_attempt_at 前先解决原因。
+
+旧 Eval 结果没写入：核对实验当前 owner/epoch/expiry 与旧 Lease。若新实例已经接管，拒绝写入正是正确行为，不应通过删掉 epoch 条件“修复”。
+
+## 89. 阶段四模块 11 学习验收
+
+1. 数据库提交成功但 publish 失败，任务会在哪里？
+2. 为什么 after_flush 只能标记，不能发送通知？
+3. rollback 为什么要清除 queue_changed？
+4. Pub/Sub 重复十次为什么不等于执行十次？
+5. Redis /0 与 /1 为什么不能隔离 channel？
+6. poll_seconds 对可靠性和延迟分别有什么影响？
+7. 两个进程各 concurrency=2，活动 Run 上限是多少？
+8. 一个 Run 内的工具为什么仍串行？
+9. semaphore 与 token bucket 各限制什么？
+10. 为什么脚本使用 Redis TIME？
+11. 返回等待时间为什么不代表已经预约 token？
+12. TTL 到期是否会丢失 Task？
+13. Redis 断线时模型请求如何失败？
+14. 无 Redis 模式与 Redis 故障降级有什么不同？
+15. key 中为什么不能保存 API Key？
+16. 配额等待期间哪部分代码续租？
+17. 为什么取得配额后还要检查 LeaseGuard？
+18. 数据库断线后为什么不能先发请求再补账？
+19. 请求前 checkpoint 的 completed_iterations 如何计算？
+20. MCP 配额检查为什么早于 middleware.before？
+21. rate_limited 重试为什么递增 epoch 而不增加网络 attempt？
+22. 总等待年龄为什么不能在重试时重置？
+23. 独立维护进程解决了旧 Worker 的什么阻塞？
+24. failed Job 什么时候可以重新被领取？
+25. 三次上限后的 Job 为什么仍然保留？
+26. Eval 的 owner 相同为什么仍要检查 epoch？
+27. Validator 算完后为什么再次验证租约？
+28. SIGTERM、Task cancel 与 kill 分别走什么路径？
+29. 真实双进程测试与 asyncio.gather 两协程测试有何区别？
+30. 当前哪些证据仅适用于同主机，不能据此宣布多主机高可用？
+
+## 90. 阶段四模块 12：独立实验契约与数据隔离
+
+### 90.1 先区分要回答的两个问题
+
+Skill 配对评测回答“这份 Skill 相比不使用 Skill 是否更好”。Runtime 实验回答“只改变某一运行时机制，结果如何变化”。把两个问题塞进同一个 baseline 字段，会导致同时关闭 Skill、记忆和上下文管理，结果再好也无法归因。
+
+因此新增 RuntimeExperimentRecord 与 RuntimeEvalRunRecord，迁移 0012 建立 runtime_experiments/runtime_eval_runs。Skill 的 EvalExperiment/EvalRun、baseline/pinned_skill 及 comparable_with 保持原有含义。
+
+### 90.2 RuntimeExperimentSpec 如何拒绝混杂变量
+
+[evals/runtime_schema.py](../src/evoagent/evals/runtime_schema.py) 定义 RuntimeArm 和 RuntimeExperimentSpec。Arm 只包含 context_policy、memory_mode、retrieval_backend、worker_count 四个可操纵字段；两臂所有字段的差异集合必须严格等于 experiment_variable 的单元素集合。
+
+例如声明 memory_mode，却同时将 lexical 改成 hybrid，会在 Pydantic 校验阶段失败。两臂完全一样也失败，因为它没有执行所声明的实验。模型名、代码版本、数据集哈希、Token 预算、检索阈值和环境是共享配置，不靠运行时从另一臂猜测。
+
+spec 使用规范 JSON 计算 spec_hash。领取执行前重新核对 hash，防止恢复时读取被改动的实验配置。Run 仍保存独立的实际 RunConfigSnapshot；Spec 表达计划，RunConfig 表达实际执行，两者都需要。
+
+### 90.3 从冻结数据集创建任务
+
+RuntimeExperimentService.create 首先验证数据集存在、处于 frozen、content_hash 与 Spec 相同，且包含 HOLDOUT。随后在同一事务中建立 experiment、两个臂各自的 Workspace/Session、history、固定 memory fixture、PAUSED Task/Run 和关联记录。
+
+PAUSED 很重要：创建过程中不能让普通 Worker 看见半套 fixture 就开始执行。release 才把指定臂转为 queued。RuntimeEvalRun 使用 experiment/case/arm/repeat 唯一约束，报告中的一个样本对应一个持久 Run，恢复不会重新创建匿名样本。
+
+普通 Worker 的领取查询排除 RuntimeEvalRun。实验进程同时指定 experiment_id 与 arm；因此日常任务和另一实验臂不会悄悄改变这次 worker_count 实验的并发数。
+
+### 90.4 隔离不是清空所有记忆
+
+memory_mode 对照需要两臂拥有相同内容的固定记忆，只改变是否读取。实现为每个样本创建独立 Workspace，再克隆公开 fixture。两个臂的版本 UUID 不同，但内容与公开来源相同，不会共享一次执行新写入的历史。
+
+runtime_fixtures.py 创建可核验的公开来源和 MemoryVersion；foreign fixture 使用额外的工作区，expired/revoked 保留相应状态，读取仍经过原有 verify_version。这些样本用于检查权限与生命周期，不能通过复制文本直接注入提示词来绕过检索。
+
+执行完成后的实验 goal/terminal 消息不能成为新记忆来源。source_message 同时检查 Skill EvalRun 和 RuntimeEvalRun；enqueue_archive 拒绝实验来源；检索读取旧归档时也检查 Runtime 关联。这样 HOLDOUT 的执行结果不会进入下一次公共记忆检索。
+
+### 90.5 history 与 private_validators 的路径完全不同
+
+公开 history 按 Message 契约校验，不允许 system 角色，工具调用和结果由 MessageGroupBuilder 检查完整配对。PersistentAgentRunner 只在没有恢复快照时注入初始历史；恢复时使用已经持久化的消息，避免重复插入。
+
+private_validators 留在 EvalCase。ConfiguredTaskHandler 只读取冻结配置；history_for_run 只读取 public_input.history；记忆 fixture 只来自 public_input.memories。采集器等 Run 终止后才取出私有规则，对 TraceBundle 执行。测试用 PRIVATE_SENTINEL 验证该内容没有出现在持久消息里。
+
+## 91. 阶段四模块 12：执行链、成本与报告
+
+### 91.1 CLI 真正启动了什么
+
+[evals/runtime_cli.py](../src/evoagent/evals/runtime_cli.py) 导入并冻结数据集、创建实验、放行一臂，再使用当前 Python 解释器启动对应数量的 evoagent-worker 进程。每个子进程 concurrency=1，通过环境变量过滤实验和 arm。等待这一臂的所有 Run 达到终态后，再执行另一臂。
+
+worker_count 的 1/2 表示真实进程数，不能用两个 coroutine 冒充两个 Worker。资源环境由报告记录；若两次执行使用不同机器或配额，应创建新的实验而不是沿用同一个报告标题。CLI 超时保留所有持久记录，方便诊断未完成的样本。
+
+API 提供 create/release/collect，但不自动启动后台进程。需要自动执行用 CLI；需要已有进程池则显式设置过滤条件。这两种使用方式应在部署时选定。
+
+### 91.2 collect 为什么可以重复调用
+
+collect 读取终态且尚未记录 metrics 的样本，构建 TraceBundle，运行确定性 Validator，再复用 MetricsCollector。计算在短事务之外，写入时锁定 RuntimeEvalRun，若另一收集器已经写入就跳过。
+
+只有全部样本拥有 metrics 才生成最终报告。最后锁住 RuntimeExperiment，检查已有 report，保存 JSON 和 report_hash。再次调用直接返回保存的报告，因此 Validator 的耗时测量不会让同一已完成报告反复变动。
+
+失败的 Run 同样要验证和收集。若只收集 completed 且验证通过的样本，成功率和平均延迟会发生选择偏差。API 返回 pending 表示还有未完成样本，不表示这些样本可以从分母删除。
+
+### 91.3 实际配置可比性如何检查
+
+单变量 Spec 合法不代表执行时没有环境漂移。例如两个 Worker 加载了不同工具清单，实验仍不能视为可比。runtime_pair_comparable 比较实际 RunConfig，核对 provider/model、禁止额外 Skill，以及启用检索时的公共参数。
+
+只归一化声明变量及隔离来源产生的身份：context 实验允许 context_policy/max_output_tokens 的派生差异；retrieval 实验允许 backend；memory off 没有 RetrievalBatch，read_only 的参数必须逐项匹配 Spec。选择 hash、profile/generation、降级证据仍保留在样本中用于解释，不改动 Skill 的通用比较规则。
+
+报告保留每一对的 comparable 标志。发现不可比时，应定位实际配置差异，而不是把所有新配置从比较函数中删除。
+
+### 91.4 unknown 与 0 的区别
+
+模型 usage 缺失时，精确总 Token 为 null，不能默认为零。模型完成事件是新执行的用量来源：直接回答没有工具 Turn，也必须计费；仅对旧 fixture 回退读取 Turn，避免重复计数。运行时 evidence 保留已知小计和 unknown_main_calls；有可能消耗 Token 的失败请求保留未知，发请求前的 rate_limited 不伪造模型消耗。usage_breakdown 在精确总量未知时仍可展示已知小计。
+
+extractive-v1 是本地摘录器，不调用模型，因此 summarizer 的模型 Token 为 0。实验禁止自动生成记忆，memory_generator 为 0。Embedding 使用自己的 usage 字段和独立事件，不能混入主模型计数；没有发送向量请求与发送了但没得到 usage 也应区别记录。
+
+LoopState 增加可选 known_usage。恢复先使用它，其次兼容旧快照中的 usage；usage_is_complete 仍表达总量是否完整。这样某次调用没有 usage 后，前面已知的消耗不会因为 checkpoint 将 usage 设为 null 而重置为零。
+
+### 91.5 evidence、summary 与质量结论
+
+runtime_evidence.py 读取摘要 revision 的 before/after 估算、输入 hash、检索实际选中来源 hash、degraded、配额领取事件和已知用量。它不把估算当作实际账单。
+
+summary 分臂给出 samples、success_rate，以及 Token、工具数、延迟的 known_samples/mean/median。samples 保留失败码、Validator 证据和实际配置；pairs 保留可比性。相关来源集合有标注时计算 Recall@K、MRR 与无相关项却强制命中的标志，没有标注时返回未知，不能猜测 relevance。
+
+report_kind=mock 只证明代码可运行。当前演示 Provider 固定执行搜索、写报告、回答，不会认真回答预算问题；报告出现质量约束失败是预期的负面证据。真实模型效果报告必须另外运行，并记录真实模型、Embedding、语料和资源条件。
+
+## 92. 阶段四模块 12：数据集、测试与验收边界
+
+### 92.1 固定数据集的四种样本
+
+phase4-runtime-v1.json 为 long_history、memory、retrieval 各保留四种样本：
+
+| 家族 | 正常 | 边界 | 失败 | 恶意 |
+| --- | --- | --- | --- | --- |
+| 长历史 | 保留早期预算要求 | 多组工具结果触发预算压力 | 无可靠来源不能编造 | 历史文本诱导覆盖规则 |
+| 记忆 | 读取固定预算 | 过期/撤销不可召回 | 外工作区来源不可读 | 历史偏好与当前要求冲突 |
+| 检索 | 直接词面命中 | 汽车/轿车同义表达 | 不相关资料不能硬凑 | 检索文本注入指令 |
+
+这些是冻结的公开输入和私有检查。Mock 特征哈希不保证同义召回，真实语义效果需要真实 Embedding。数据集版本不允许原地覆盖；修改 Case 应递增版本并重新冻结。
+
+### 92.2 工程故障与语言题分开
+
+MCP schema/drift/unload/UNKNOWN 来自真实协议 fixture 测试；租约竞争与恢复来自 PostgreSQL 故障测试；CPU、内存、PIDs、网络和特殊文件来自 Linux Docker 专项。给模型一道“请模拟租约失效”的题目，不能证明数据库 fencing 正确。
+
+运行说明列出对应测试入口。模块 12 报告复用执行 Trace 的基础指标，但不会自动把整个测试套件的通过数冒充语言质量样本。质量数据和工程故障证据需要同时存在、分别解释。
+
+### 92.3 端到端测试为什么故意失败一个 Validator
+
+test_runtime_experiments.py 创建一个只在 private_validators 中出现的字符串，Mock 回答不会包含它。测试要求报告成功生成，同时两臂 success_rate=0，失败样本完整保留，私有字符串没有进入 messages。
+
+同一测试检查每个样本独立 Workspace、Skill EvalRun 表没有被写入、source_message 与 enqueue_archive 拒绝实验来源、重复 collect 返回完全一致报告、完成后不能再次 release。这些断言验证的是实验框架，不是为了让所有质量分数变成满分。
+
+### 92.4 本次已有证据与仍缺证据
+
+本次已执行 PostgreSQL/Redis 回归（403 passed、13 skipped）、双真实进程任务竞争、Lua 原子配额、限流恢复、迁移 schema 对齐，以及 Runtime Mock 报告。应用镜像与容器健康检查通过。最终命令、跳过原因及一次 SQLite 锁冲突的复查记录见[模块 11～12 运行说明](阶段四-模块11至12验收与运行说明.md)及[开发进度](开发进度与决策记录.md)。
+
+用户随后提供了 DeepSeek 配置，已完成 6 对、12 次真实记忆实验，实际配置全部可比、用量 16,616 Token；两臂都为 5/6 通过，尚未显示成功率提升。模型没有按已召回的有效记忆给出预算，保留为失败证据；过期、撤销、跨工作区及注入样本也保留在明细。另有 2 对真实上下文样本：4096 预算的 bounded 臂在请求前拒绝，legacy 臂完成，实际调用 5,944 Token；这是预算边界证据，不是压缩质量提升。完整 Skill 配对、真实 Embedding、跨主机高可用、前端实验管理和阶段四最终交付仍未完成。
+
+## 93. 阶段四模块 12 学习验收
+
+1. Skill baseline 与 Runtime control 分别回答什么问题？
+2. 为什么新增两张 Runtime 表而不增加一个 baseline 特例？
+3. 差异集合为空为什么也属于非法实验？
+4. 同时打开记忆与 hybrid 为什么不能归因？
+5. Spec hash 与 RunConfig hash 分别固定什么事实？
+6. frozen 数据集为什么还要校验 content_hash？
+7. 为什么只选择 HOLDOUT？
+8. Task 最初为什么为 PAUSED？
+9. 普通 Worker 为什么排除 Runtime 实验任务？
+10. API release 是否会自动创建 Worker 进程？
+11. worker_count=2 如何证明是两个真实进程？
+12. 两臂的 Workspace UUID 为什么必须不同？
+13. UUID 不同如何保证 fixture 内容相同？
+14. memory_mode=off 为什么仍创建相同固定记忆？
+15. foreign、expired、revoked 各测试哪个边界？
+16. 为什么不能直接把 memory fixture 拼进提示词？
+17. history 为何禁止 system 角色？
+18. history 中工具调用与结果怎样保持完整？
+19. 恢复时为什么不能再次注入初始 history？
+20. private_validators 在哪一层才会被读取？
+21. 为什么禁止实验结果生成公共记忆和归档？
+22. collect 为什么先计算再锁行写回？
+23. 为什么失败样本也必须留在分母中？
+24. 未完成时 pending 与完整报告有何区别？
+25. 实际工具清单漂移为何会使配对不可比？
+26. 为什么不修改通用 comparable_with 来忽略所有新字段？
+27. unknown、零调用、已知小计、估算分别是什么？
+28. known_usage 为什么需要进入 checkpoint？
+29. Mock 检索命中能否证明真实同义召回改善？
+30. 在宣布阶段四完成之前，还需要哪些真实模型、容器和资源环境证据？

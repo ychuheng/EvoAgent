@@ -31,6 +31,7 @@ from evoagent.evals.validators.base import ValidatorRegistry
 from evoagent.runtime.run_config import RunConfigSnapshot, RunMode
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.lifecycle import SkillVersionStatus
+from evoagent.tasks.lease_guard import database_now
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 from evoagent.trace.bundle import TraceBundleService
 
@@ -60,6 +61,7 @@ class EvalLease:
     experiment_id: UUID
     owner: str
     expires_at: datetime
+    epoch: int = 0
 
 
 _RUN_TERMINAL = frozenset(
@@ -154,8 +156,8 @@ class EvalCoordinator:
         normalized_owner = owner.strip()
         if not normalized_owner:
             raise ValueError("eval lease owner cannot be blank")
-        current = now or datetime.now(UTC)
         async with UnitOfWork(self._session_factory) as unit:
+            current = now or await database_now(unit.session)
             experiment = await unit.session.scalar(
                 select(EvalExperimentRecord)
                 .where(
@@ -175,21 +177,25 @@ class EvalCoordinator:
                 return None
             experiment.status = EvalExperimentStatus.RUNNING
             experiment.lease_owner = normalized_owner
+            experiment.lease_epoch += 1
             experiment.heartbeat_at = current
             experiment.lease_expires_at = current + self._lease_duration
             await unit.commit()
-            return EvalLease(experiment.id, normalized_owner, experiment.lease_expires_at)
+            return EvalLease(
+                experiment.id, normalized_owner, experiment.lease_expires_at, experiment.lease_epoch
+            )
 
     async def heartbeat(self, lease: EvalLease, *, now: datetime | None = None) -> EvalLease:
-        current = now or datetime.now(UTC)
-        expires = current + self._lease_duration
         async with UnitOfWork(self._session_factory) as unit:
+            current = now or await database_now(unit.session)
+            expires = current + self._lease_duration
             result = await unit.session.execute(
                 update(EvalExperimentRecord)
                 .where(
                     EvalExperimentRecord.id == lease.experiment_id,
                     EvalExperimentRecord.status == EvalExperimentStatus.RUNNING,
                     EvalExperimentRecord.lease_owner == lease.owner,
+                    EvalExperimentRecord.lease_epoch == lease.epoch,
                     EvalExperimentRecord.lease_expires_at > current,
                 )
                 .values(heartbeat_at=current, lease_expires_at=expires)
@@ -197,20 +203,18 @@ class EvalCoordinator:
             if result.rowcount != 1:
                 raise EvalLeaseLostError("evaluation lease is no longer owned")
             await unit.commit()
-        return EvalLease(lease.experiment_id, lease.owner, expires)
+        return EvalLease(lease.experiment_id, lease.owner, expires, lease.epoch)
 
     async def run_once(self, lease: EvalLease, *, now: datetime | None = None) -> bool:
         """处理已经终止的普通 Run；返回实验是否完成。"""
 
         current = now or datetime.now(UTC)
-        await self._require_lease(lease, current)
+        await self._require_lease(lease, now)
         pending = await self._terminal_unvalidated_runs(lease.experiment_id)
         for eval_run in pending:
-            await self._validate_and_collect(eval_run)
+            await self._validate_and_collect(eval_run, lease, now)
         async with UnitOfWork(self._session_factory) as unit:
-            experiment = await unit.evals.get_experiment(lease.experiment_id)
-            if experiment.lease_owner != lease.owner or experiment.lease_expires_at is None:
-                raise EvalLeaseLostError("evaluation lease is no longer owned")
+            experiment = await self._guard(unit.session, lease, now)
             eval_runs = await unit.evals.list_runs(experiment.id)
             await self._release_second_runs(unit, eval_runs, current)
             await self._mark_pair_comparability(unit, eval_runs)
@@ -225,7 +229,13 @@ class EvalCoordinator:
 
     async def cancel(self, experiment_id: UUID) -> EvalExperimentRecord:
         async with UnitOfWork(self._session_factory) as unit:
-            experiment = await unit.evals.get_experiment(experiment_id)
+            experiment = await unit.session.scalar(
+                select(EvalExperimentRecord)
+                .where(EvalExperimentRecord.id == experiment_id)
+                .with_for_update()
+            )
+            if experiment is None:
+                raise ValueError("evaluation experiment does not exist")
             if experiment.status in (
                 EvalExperimentStatus.COMPLETED,
                 EvalExperimentStatus.FAILED,
@@ -357,14 +367,24 @@ class EvalCoordinator:
 
     async def _require_lease(self, lease: EvalLease, now: datetime) -> None:
         async with UnitOfWork(self._session_factory) as unit:
-            experiment = await unit.evals.get_experiment(lease.experiment_id)
-            if (
-                experiment.status is not EvalExperimentStatus.RUNNING
-                or experiment.lease_owner != lease.owner
-                or experiment.lease_expires_at is None
-                or _is_expired(experiment.lease_expires_at, now)
-            ):
-                raise EvalLeaseLostError("evaluation lease is no longer owned")
+            await self._guard(unit.session, lease, now)
+
+    async def _guard(self, session, lease, now=None):
+        current = now or await database_now(session)
+        experiment = await session.scalar(
+            select(EvalExperimentRecord)
+            .where(
+                EvalExperimentRecord.id == lease.experiment_id,
+                EvalExperimentRecord.status == EvalExperimentStatus.RUNNING,
+                EvalExperimentRecord.lease_owner == lease.owner,
+                EvalExperimentRecord.lease_epoch == lease.epoch,
+                EvalExperimentRecord.lease_expires_at > current,
+            )
+            .with_for_update()
+        )
+        if experiment is None:
+            raise EvalLeaseLostError("evaluation lease is no longer owned")
+        return experiment
 
     async def _terminal_unvalidated_runs(self, experiment_id: UUID) -> tuple[EvalRunRecord, ...]:
         async with UnitOfWork(self._session_factory) as unit:
@@ -379,7 +399,7 @@ class EvalCoordinator:
                 if eval_run.metrics.get("state") != "completed" and run.status in _RUN_TERMINAL
             )
 
-    async def _validate_and_collect(self, eval_run: EvalRunRecord) -> None:
+    async def _validate_and_collect(self, eval_run: EvalRunRecord, lease, now=None) -> None:
         async with UnitOfWork(self._session_factory) as unit:
             case = await unit.evals.get_case(eval_run.eval_case_id)
             specs = tuple(ValidatorSpec.model_validate(item) for item in case.private_validators)
@@ -390,6 +410,7 @@ class EvalCoordinator:
             eval_run.run_id, validator_passed=passed
         )
         async with UnitOfWork(self._session_factory) as unit:
+            await self._guard(unit.session, lease, now)
             current = await unit.evals.get_run(eval_run.id)
             if current.metrics.get("state") == "completed":
                 return

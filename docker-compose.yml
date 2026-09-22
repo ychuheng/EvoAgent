@@ -1,4 +1,13 @@
 services:
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
   postgres:
     image: pgvector/pgvector:0.8.1-pg17
     environment:
@@ -21,6 +30,8 @@ services:
     environment: &app-environment
       EVOAGENT_DATABASE_URL: postgresql+asyncpg://evoagent:evoagent@postgres:5432/evoagent
       EVOAGENT_PROVIDER: mock
+      EVOAGENT_REDIS_URL: redis://redis:6379/0
+      EVOAGENT_REDIS_NAMESPACE: evoagent-compose
       EVOAGENT_WORKSPACE: /app/workspace
       EVOAGENT_ARTIFACT_ROOT: /app/workspace/artifacts
     depends_on:
@@ -48,10 +59,22 @@ services:
 
   worker:
     build: .
+    stop_grace_period: 310s
     command: ["evoagent-worker"]
     environment:
       <<: *app-environment
       EVOAGENT_WORKER_ID: worker-compose
+      EVOAGENT_WORKER_CONCURRENCY: "2"
+    volumes:
+      - evoagent-workspace:/app/workspace
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  maintenance-worker:
+    build: .
+    command: ["evoagent-maintenance-worker"]
+    environment: *app-environment
     volumes:
       - evoagent-workspace:/app/workspace
     depends_on:

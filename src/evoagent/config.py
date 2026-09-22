@@ -3,6 +3,7 @@
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
+from uuid import UUID
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -47,6 +48,8 @@ class Settings(BaseSettings):
     api_key: SecretStr | None = None
     base_url: AnyHttpUrl | None = None
     model: str | None = None
+    provider_thinking_mode: Literal["disabled"] | None = None
+    model_request_max_output_tokens: int | None = Field(default=None, ge=1)
 
     max_iterations: int = Field(default=8, ge=1, le=100)
     model_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
@@ -70,6 +73,15 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8_000, ge=1, le=65_535)
     worker_id: str = Field(default="worker-local", min_length=1, max_length=128)
     worker_poll_seconds: float = Field(default=1.0, gt=0, le=60)
+    worker_concurrency: int = Field(default=1, ge=1, le=64)
+    worker_runtime_experiment_id: UUID | None = None
+    worker_runtime_arm: Literal["control", "treatment"] | None = None
+    redis_url: SecretStr | None = None
+    redis_namespace: str = Field(default="evoagent-local", pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    service_concurrency: int = Field(default=4, ge=1, le=64)
+    service_requests_per_second: float = Field(default=2.0, gt=0, le=10000)
+    service_burst: int = Field(default=4, ge=1, le=10000)
+    rate_wait_seconds: float = Field(default=2.0, gt=0, le=60)
     lease_seconds: float = Field(default=30.0, gt=0, le=3_600)
     heartbeat_seconds: float = Field(default=10.0, gt=0, le=1_200)
     snapshot_schema_version: int = Field(default=2, ge=1, le=2)

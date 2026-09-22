@@ -1,0 +1,2088 @@
+{
+  "schema_version": 1,
+  "experiment_id": "f872ebe8-aa2b-42ce-b5c6-508537c83797",
+  "report_kind": "real",
+  "spec": {
+    "schema_version": 1,
+    "experiment_variable": "memory_mode",
+    "control": {
+      "context_policy": "bounded",
+      "memory_mode": "off",
+      "retrieval_backend": "lexical",
+      "worker_count": 1
+    },
+    "treatment": {
+      "context_policy": "bounded",
+      "memory_mode": "read_only",
+      "retrieval_backend": "lexical",
+      "worker_count": 1
+    },
+    "repeats": 1,
+    "provider": "openai_compatible",
+    "provider_thinking_mode": "disabled",
+    "model": "deepseek-flash",
+    "code_version": "module11-12-real-acceptance",
+    "dataset_hash": "sha256:51760237fdaf4a40447be3337ae992185a4c1509bb85bf09647125d72a4b684f",
+    "environment": {
+      "os": "Windows-10-10.0.19045-SP0",
+      "python": "3.13.5",
+      "cpu_count": "12",
+      "resource_limits": "Windows host; one worker process per arm; output<=128 tokens; iterations<=2",
+      "source_sha256": "929c8037f20dc20ff8e0c5d614ce3113d8a8a69f0d8e361722713b6553ebb310"
+    },
+    "context_window_tokens": 32768,
+    "max_output_tokens": 128,
+    "context_safety_margin": 1024,
+    "max_total_tokens": 6000,
+    "max_iterations": 2,
+    "embedding_model": "mock-hash-v1",
+    "memory_retrieval_top_k": 3,
+    "retrieval_min_lexical_score": 0.1,
+    "retrieval_max_vector_distance": 0.35,
+    "retrieval_rrf_k": 60,
+    "retrieval_memory_budget": 2000
+  },
+  "spec_hash": "sha256:5ef86f77cb9452b1cfbdc69bb4641943bf9dffed84185a045cc78cc2c842d9d8",
+  "summary": {
+    "control": {
+      "samples": 6,
+      "success_rate": 0.8333333333333334,
+      "total_tokens": {
+        "known_samples": 6,
+        "mean": 1374.3333333333333,
+        "median": 1373.0
+      },
+      "tool_calls": {
+        "known_samples": 6,
+        "mean": 0,
+        "median": 0.0
+      },
+      "latency_ms": {
+        "known_samples": 6,
+        "mean": 2201.166,
+        "median": 2156.76
+      }
+    },
+    "treatment": {
+      "samples": 6,
+      "success_rate": 0.8333333333333334,
+      "total_tokens": {
+        "known_samples": 6,
+        "mean": 1395,
+        "median": 1395.0
+      },
+      "tool_calls": {
+        "known_samples": 6,
+        "mean": 0,
+        "median": 0.0
+      },
+      "latency_ms": {
+        "known_samples": 6,
+        "mean": 2615.7121666666667,
+        "median": 2571.523
+      }
+    }
+  },
+  "pairs": [
+    {
+      "case_id": "17a0fc19-297b-49f4-8fa2-b9bfd883e974",
+      "repeat": 0,
+      "comparable": true
+    },
+    {
+      "case_id": "1ef7ed64-ab75-458a-a1ef-4773aa113f01",
+      "repeat": 0,
+      "comparable": true
+    },
+    {
+      "case_id": "5fa7a6d0-0380-4c34-aa57-20a8c63bed64",
+      "repeat": 0,
+      "comparable": true
+    },
+    {
+      "case_id": "d2e4a665-579a-45c6-bc94-af6eed1c3873",
+      "repeat": 0,
+      "comparable": true
+    },
+    {
+      "case_id": "dc0fd899-2c2a-4462-b5cb-677e28dec305",
+      "repeat": 0,
+      "comparable": true
+    },
+    {
+      "case_id": "ef552ed9-f441-49da-8642-9531ed217636",
+      "repeat": 0,
+      "comparable": true
+    }
+  ],
+  "comparable_pairs": 6,
+  "samples": [
+    {
+      "case_id": "17a0fc19-297b-49f4-8fa2-b9bfd883e974",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "b91701dd-7168-42d1-ae28-6051dc69c426",
+        "status": "completed",
+        "validator_passed": false,
+        "input_tokens": 1369,
+        "output_tokens": 3,
+        "total_tokens": 1372,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 1888.588,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.001400010660290718
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": false,
+          "evidence": {
+            "missing": [
+              "500"
+            ],
+            "forbidden": []
+          },
+          "failure_reason": "answer violates frozen constraints",
+          "duration_ms": 0.0032999960239976645
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:b72cff2a3f8035ae85fd327724e28198d92fb63735df095c4f95cfb4408885ac",
+      "evidence": {
+        "known_main_tokens": 1372,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:c7195b9564c24af090f757caf44e92d3",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5046,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1369,
+                "output_tokens": 3,
+                "total_tokens": 1372
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1372,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1372,
+        "exact_model_tokens": 1372,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "17a0fc19-297b-49f4-8fa2-b9bfd883e974",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "8e2e94c6-ce20-4288-b4a0-33d9a66d8afc",
+        "status": "completed",
+        "validator_passed": false,
+        "input_tokens": 1406,
+        "output_tokens": 3,
+        "total_tokens": 1409,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 3092.0809999999997,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0012999953469261527
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": false,
+          "evidence": {
+            "missing": [
+              "500"
+            ],
+            "forbidden": []
+          },
+          "failure_reason": "answer violates frozen constraints",
+          "duration_ms": 0.0029999937396496534
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": null,
+          "generation": null,
+          "degraded": null,
+          "selection_hash": "sha256:ad35ff728add0b45d57c4d32b4e742e60718c79c4cbbd2ebd8123f8035a08d26"
+        },
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:8a231a88203ddae69faaabfd4b9420a1d4a79272ed62d31bb4c1373927b1f4da",
+      "evidence": {
+        "known_main_tokens": 1409,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [
+            "sha256:95df1208520cbebddbd90dbd97cd8f41da084e245ad72671f0cd76ca6904bd98"
+          ],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:29a84e5049674399ae9e0a5c2add673c",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "c8532aa8-cac6-42af-8473-328f873fcfe5",
+              "selected_count": 1,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 42.174800008069724
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5275,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1406,
+                "output_tokens": 3,
+                "total_tokens": 1409
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1409,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1409,
+        "exact_model_tokens": 1409,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "1ef7ed64-ab75-458a-a1ef-4773aa113f01",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "72495aff-41f9-48b7-8d67-2760d524c31c",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1371,
+        "output_tokens": 3,
+        "total_tokens": 1374,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2137.01,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.001300009898841381
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.002900007530115545
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:b72cff2a3f8035ae85fd327724e28198d92fb63735df095c4f95cfb4408885ac",
+      "evidence": {
+        "known_main_tokens": 1374,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:c7195b9564c24af090f757caf44e92d3",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5052,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1371,
+                "output_tokens": 3,
+                "total_tokens": 1374
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1374,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1374,
+        "exact_model_tokens": 1374,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "1ef7ed64-ab75-458a-a1ef-4773aa113f01",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "66e761a3-6c82-4bb2-9302-0d3d5aaa6a81",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1371,
+        "output_tokens": 10,
+        "total_tokens": 1381,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2206.406,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0014999968698248267
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0031999952625483274
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": null,
+          "generation": null,
+          "degraded": null,
+          "selection_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:8ea3e7f2f58ba7b03b870920aca9c3d888ac44a88ed36e8f678d41d9759b54be",
+      "evidence": {
+        "known_main_tokens": 1381,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:29a84e5049674399ae9e0a5c2add673c",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "75868629-085c-46b7-b47f-4a773fe31590",
+              "selected_count": 0,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 8.165099992766045
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5052,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1371,
+                "output_tokens": 10,
+                "total_tokens": 1381
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1381,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1381,
+        "exact_model_tokens": 1381,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "5fa7a6d0-0380-4c34-aa57-20a8c63bed64",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "9b0fe968-d07d-4f9b-bddb-70d6804ee93f",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1369,
+        "output_tokens": 8,
+        "total_tokens": 1377,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2392.1130000000003,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0033999967854470015
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0039000005926936865
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:b72cff2a3f8035ae85fd327724e28198d92fb63735df095c4f95cfb4408885ac",
+      "evidence": {
+        "known_main_tokens": 1377,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:c7195b9564c24af090f757caf44e92d3",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5030,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1369,
+                "output_tokens": 8,
+                "total_tokens": 1377
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1377,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1377,
+        "exact_model_tokens": 1377,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "5fa7a6d0-0380-4c34-aa57-20a8c63bed64",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "121f14c8-052a-4e96-b0cc-4caf8871864a",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1406,
+        "output_tokens": 6,
+        "total_tokens": 1412,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2726.44,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0017999991541728377
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0036999990697950125
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": null,
+          "generation": null,
+          "degraded": null,
+          "selection_hash": "sha256:14f567d7fadc7ae00a2e587ca3607448741b469818c9eda77433de807b29a3dc"
+        },
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:11b375c8f428cd92b41e8aec67cd28fa4dbf58d7c05a009bcb80085df4bd5d27",
+      "evidence": {
+        "known_main_tokens": 1412,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [
+            "sha256:8269727291f0aef673ff42266cd87bfdbbd4017a54d7cca00d94b27e5ce842f8"
+          ],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:29a84e5049674399ae9e0a5c2add673c",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "ee5f8706-e154-4ca7-ad14-9f48f54441b5",
+              "selected_count": 1,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 55.92949999845587
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5259,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1406,
+                "output_tokens": 6,
+                "total_tokens": 1412
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1412,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1412,
+        "exact_model_tokens": 1412,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "d2e4a665-579a-45c6-bc94-af6eed1c3873",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "2ad440d1-825c-4d75-b824-d7b1f2deae07",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1373,
+        "output_tokens": 6,
+        "total_tokens": 1379,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2174.84,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0014999968698248267
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0033999967854470015
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:b72cff2a3f8035ae85fd327724e28198d92fb63735df095c4f95cfb4408885ac",
+      "evidence": {
+        "known_main_tokens": 1379,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:c7195b9564c24af090f757caf44e92d3",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5048,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1373,
+                "output_tokens": 6,
+                "total_tokens": 1379
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1379,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1379,
+        "exact_model_tokens": 1379,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "d2e4a665-579a-45c6-bc94-af6eed1c3873",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "55e4ec42-c2fe-46cc-a149-11e424f6432c",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1420,
+        "output_tokens": 4,
+        "total_tokens": 1424,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 3125.7690000000002,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0012999953469261527
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0025999906938523054
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": null,
+          "generation": null,
+          "degraded": null,
+          "selection_hash": "sha256:0faeda25e1034ddc98f61544a820010bf4c18b5fedeaabd5cb914bc7e7f9834c"
+        },
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:633f18ece983a6771d2487f724eb561d1e12be63fc5633a06c9e8fdaa58f9481",
+      "evidence": {
+        "known_main_tokens": 1424,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [
+            "sha256:88f14bb16ee9c02ed93435c610fc63b5130f2f7f6f70f8b85295d2fefe218bdf"
+          ],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:29a84e5049674399ae9e0a5c2add673c",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "1558b71e-c846-4e84-b139-2ee5592c25c1",
+              "selected_count": 1,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 40.34500000125263
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5327,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1420,
+                "output_tokens": 4,
+                "total_tokens": 1424
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1424,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1424,
+        "exact_model_tokens": 1424,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "dc0fd899-2c2a-4462-b5cb-677e28dec305",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "fa62b0af-30b4-4879-9e3e-75db1b7c354a",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1369,
+        "output_tokens": 3,
+        "total_tokens": 1372,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2475.765,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0013999961083754897
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.002900007530115545
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:b72cff2a3f8035ae85fd327724e28198d92fb63735df095c4f95cfb4408885ac",
+      "evidence": {
+        "known_main_tokens": 1372,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:c7195b9564c24af090f757caf44e92d3",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5046,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1369,
+                "output_tokens": 3,
+                "total_tokens": 1372
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1372,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1372,
+        "exact_model_tokens": 1372,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "dc0fd899-2c2a-4462-b5cb-677e28dec305",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "aa73189e-9293-407a-a3b2-136a664eecbc",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1369,
+        "output_tokens": 3,
+        "total_tokens": 1372,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2416.6059999999998,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0013999961083754897
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0025000044843181968
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": null,
+          "generation": null,
+          "degraded": null,
+          "selection_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:8ea3e7f2f58ba7b03b870920aca9c3d888ac44a88ed36e8f678d41d9759b54be",
+      "evidence": {
+        "known_main_tokens": 1372,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:29a84e5049674399ae9e0a5c2add673c",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "3698c78f-9f79-437b-91a3-752485288bc2",
+              "selected_count": 0,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 10.45499999599997
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5046,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1369,
+                "output_tokens": 3,
+                "total_tokens": 1372
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1372,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1372,
+        "exact_model_tokens": 1372,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "ef552ed9-f441-49da-8642-9531ed217636",
+      "arm": "control",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "db2cb402-3a28-48f8-b596-71ffa2bb6d70",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1369,
+        "output_tokens": 3,
+        "total_tokens": 1372,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2138.68,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0015999976312741637
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0025999906938523054
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:b72cff2a3f8035ae85fd327724e28198d92fb63735df095c4f95cfb4408885ac",
+      "evidence": {
+        "known_main_tokens": 1372,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 0,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:c7195b9564c24af090f757caf44e92d3",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5046,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1369,
+                "output_tokens": 3,
+                "total_tokens": 1372
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1372,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1372,
+        "exact_model_tokens": 1372,
+        "embedding_tokens": 0
+      }
+    },
+    {
+      "case_id": "ef552ed9-f441-49da-8642-9531ed217636",
+      "arm": "treatment",
+      "repeat": 0,
+      "metrics": {
+        "run_id": "11b5e403-3a81-4ac4-9317-3a09ae706baf",
+        "status": "completed",
+        "validator_passed": true,
+        "input_tokens": 1369,
+        "output_tokens": 3,
+        "total_tokens": 1372,
+        "tool_calls": 0,
+        "tool_succeeded": 0,
+        "tool_failed": 0,
+        "tool_calls_by_name": {},
+        "latency_ms": 2126.971,
+        "approvals": 0,
+        "permission_denied": 0,
+        "unknown_effects": 0,
+        "recovery_count": 0,
+        "skill_version_id": null,
+        "retrieval_score": null,
+        "failure_code": null
+      },
+      "validation_results": [
+        {
+          "validator": "run_completed",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "status": "completed"
+          },
+          "failure_reason": null,
+          "duration_ms": 0.0015999976312741637
+        },
+        {
+          "validator": "preserves_constraints",
+          "version": "1",
+          "passed": true,
+          "evidence": {
+            "missing": [],
+            "forbidden": []
+          },
+          "failure_reason": null,
+          "duration_ms": 0.002800006768666208
+        }
+      ],
+      "run_config": {
+        "schema_version": 2,
+        "summarizer": "extractive-v1",
+        "selected_skills": [],
+        "retrieval": {
+          "algorithm": "bm25-rrf-v1",
+          "route_top_n": 100,
+          "backend": "lexical",
+          "model": "mock-hash-v1",
+          "memory": true,
+          "archive": false,
+          "rrf_k": 60,
+          "lexical_threshold": 0.1,
+          "distance_threshold": 0.35,
+          "skill_top_k": 0,
+          "memory_top_k": 3,
+          "skill_budget": 4000,
+          "memory_budget": 2000,
+          "history_before_sequence": 1,
+          "profile_id": null,
+          "generation": null,
+          "degraded": null,
+          "selection_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "provider": "openai_compatible",
+        "provider_thinking_mode": "disabled",
+        "model": "deepseek-flash",
+        "system_prompt_hash": "sha256:32dd0279fbe1af4ede4372f280c3808f343bcf14141cbd351046a7e262f7a963",
+        "tool_manifest_hash": "sha256:be57233a9280f314c5313b0952880d0f3fd992c834891d674ce17e7c2a353ed5",
+        "policy_hash": "sha256:22e4c00ca790eae875eb8c52f30ae052e8d173b416a6b2d4dbda6702d91a9005",
+        "max_iterations": 2,
+        "max_total_tokens": 6000,
+        "max_repeated_tool_calls": 3,
+        "max_tool_result_chars": 20000,
+        "temperature": null,
+        "context_policy": {
+          "mode": "bounded",
+          "version": 1,
+          "budget": {
+            "context_window": 32768,
+            "output_tokens": 128,
+            "safety_margin": 1024
+          },
+          "counter": "utf8-envelope-v1",
+          "strict": false
+        },
+        "max_output_tokens": 128,
+        "model_timeout_seconds": 45.0,
+        "task_timeout_seconds": 300.0,
+        "tool_timeout_seconds": 30.0,
+        "code_version": "module11-12-real-acceptance",
+        "skill_retrieval_top_k": 0,
+        "skill_retrieval_min_score": 0.1,
+        "run_mode": "retrieval",
+        "skill_version_id": null,
+        "skill_content_hash": null,
+        "skill_context_hash": null
+      },
+      "run_config_hash": "sha256:8ea3e7f2f58ba7b03b870920aca9c3d888ac44a88ed36e8f678d41d9759b54be",
+      "evidence": {
+        "known_main_tokens": 1372,
+        "unknown_main_calls": 0,
+        "embedding_tokens": 0,
+        "summaries": [],
+        "retrieval": {
+          "batches": 1,
+          "degraded": [],
+          "selected_hashes": [],
+          "quality": null
+        },
+        "events": [
+          {
+            "type": "worker.claimed",
+            "payload": {
+              "worker_id": "worker-local:29a84e5049674399ae9e0a5c2add673c",
+              "attempt": 1,
+              "lease_epoch": 1
+            }
+          },
+          {
+            "type": "retrieval.frozen",
+            "payload": {
+              "batch_id": "ac1b5443-1bd6-498b-b439-4935167024c9",
+              "selected_count": 0,
+              "degraded": null,
+              "embedding_tokens": 0,
+              "latency_ms": 8.48730000143405
+            }
+          },
+          {
+            "type": "context.checked",
+            "payload": {
+              "iteration": 1,
+              "estimate": {
+                "count": 5046,
+                "method": "utf8-envelope-v1",
+                "tokenizer_version": "1",
+                "confidence": "estimated"
+              },
+              "dropped_indices": [],
+              "input_limit": 31616,
+              "max_output_tokens": 128
+            }
+          },
+          {
+            "type": "model.completed",
+            "payload": {
+              "iteration": 1,
+              "finish_reason": "stop",
+              "tool_call_count": 0,
+              "usage": {
+                "input_tokens": 1369,
+                "output_tokens": 3,
+                "total_tokens": 1372
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "components": {
+          "main": 1372,
+          "summarizer": 0,
+          "memory_generator": 0,
+          "embedding": 0
+        },
+        "known_model_tokens": 1372,
+        "exact_model_tokens": 1372,
+        "embedding_tokens": 0
+      }
+    }
+  ],
+  "conclusion": "descriptive only; no statistical significance or quality claim"
+}

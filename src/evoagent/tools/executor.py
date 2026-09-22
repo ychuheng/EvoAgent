@@ -24,6 +24,8 @@ class ToolExecutor:
         max_result_chars: int,
         middleware: ToolExecutionMiddleware | None = None,
         output_store=None,
+        service_gate=None,
+        lease_check=None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -35,9 +37,31 @@ class ToolExecutor:
         self._max_result_chars = max_result_chars
         self._middleware = middleware
         self._output_store = output_store
+        self._service_gate = service_gate
+        self._lease_check = lease_check
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """执行一次工具调用，并把可恢复失败转换成 ToolResult。"""
+        from evoagent.workers.rate_limit import RateLimited
+
+        try:
+            tool = self._registry.get(call.name)
+        except ToolNotFoundError:
+            return await self._execute(call)
+        binding = getattr(tool, "binding", {})
+        if self._service_gate is not None and binding.get("server_id"):
+            try:
+                async with self._service_gate.acquire(
+                    f"mcp:{binding['server_id']}", self._lease_check
+                ):
+                    return await self._execute(call)
+            except RateLimited:
+                return await self._failed_result(call, "rate_limited", "MCP quota unavailable")
+        if self._lease_check is not None:
+            await self._lease_check()
+        return await self._execute(call)
+
+    async def _execute(self, call: ToolCall) -> ToolResult:
 
         await self._event_sink.emit(
             EventType.TOOL_STARTED,
