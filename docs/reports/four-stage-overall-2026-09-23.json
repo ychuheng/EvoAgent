@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-23",
+  "commit_tested": "6ab9e293d0359cc9aa6cbc1d0ad5a63a25257139",
+  "environment": {
+    "host": "Windows",
+    "python": "3.13.5",
+    "docker_engine": "29.8.0",
+    "postgres": "pgvector/pgvector:0.8.1-pg17",
+    "redis": "redis:7.4-alpine",
+    "test_compose_project": "evoagent-v04-final"
+  },
+  "backend": {
+    "total": 423,
+    "passed": 410,
+    "skipped": 13,
+    "failed": 0,
+    "errors": 0,
+    "seconds": 127.82
+  },
+  "frontend": {
+    "typecheck": "passed",
+    "build": "passed",
+    "component_tests_passed": 12,
+    "browser_flows_passed": 6,
+    "browser_http_fixtures": true
+  },
+  "migrations": {
+    "fresh": {
+      "head": "20260922_0012",
+      "vector_version": "0.8.1",
+      "schema_drift": false,
+      "legacy_messages_preserved": 0,
+      "passed": true
+    },
+    "legacy": {
+      "head": "20260922_0012",
+      "vector_version": "0.8.1",
+      "schema_drift": false,
+      "legacy_messages_preserved": 2,
+      "passed": true
+    },
+    "additional_fresh_upgrade_check": "passed"
+  },
+  "phase3": {
+    "deterministic_demo": "passed",
+    "dataset_cases": 24,
+    "publish": true,
+    "regression_rejected": true,
+    "rollback_and_reuse": true
+  },
+  "phase4": {
+    "demo_groups": {
+      "context": 3,
+      "memory": 2,
+      "mcp": 4,
+      "workers": 6
+    },
+    "demo_total_passed": 15,
+    "docker_sandbox": {
+      "total": 11,
+      "passed": 11,
+      "skipped": 0,
+      "failed": 0,
+      "errors": 0,
+      "seconds": 48.296
+    },
+    "live_deployment": {
+      "api_ready": true,
+      "ui_status": 200,
+      "worker_task_status": "completed",
+      "committed_effects": 1,
+      "shared_report_file_verified": true,
+      "feature_off": "passed"
+    }
+  },
+  "release_gate": {
+    "evidence_errors": [],
+    "pending": [
+      "real_embedding"
+    ],
+    "release_ready": false,
+    "default_exit_code": 2,
+    "version": "0.4.0.dev0"
+  },
+  "existing_real_model_evidence": {
+    "rerun_this_round": false,
+    "source": "docs/reports/phase4-final-skill-deepseek.json",
+    "summary": "12 paired arithmetic cases; baseline and Skill both 11/12; no measured gain"
+  },
+  "scope": {
+    "backend_skip_reasons": {
+      "linux_docker_separately_run": 11,
+      "sqlite_row_lock": 1,
+      "windows_symlink_permission": 1
+    },
+    "paid_model_calls_this_round": 0,
+    "real_embedding_semantic_test": "pending"
+  },
+  "local_evidence_sha256": {
+    "output/four-stage-backend.xml": "d4d627f6474af460411a91d56cf2b1e97fa0ca71d3fe8f1bb351fe7d03e78536",
+    "output/four-stage-docker.xml": "baf4cd686a916d8ad31575599df38e5d72504a90a0ca15f22ecf8a1e6be4244a",
+    "output/four-stage-demos.json": "80bebd681f9a057a3439b10d3df3a3cb2ee84cbaeb1491191ba86123ecb65124",
+    "output/four-stage-phase3-demo.json": "171ee3e0a4b00fad6b7762670493e23adfd6e123579d79dd2cf2595a2062b273",
+    "output/four-stage-migrations.json": "d0691b7abde567471a0ca6d0dbefc85da0db8db25bad32b0095d173b791a7310",
+    "output/four-stage-deploy/docs/reports/phase4-final-deployment.json": "81e2c5510fbbe30577fede57bf34acc18b56ccb4f417eab2564f1507d39c467f"
+  }
+}
