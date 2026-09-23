@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-23",
+  "version": "0.4.0.dev0",
+  "engineering_handoff": true,
+  "formal_v04_complete": false,
+  "checks": {
+    "demos": {
+      "status": "passed",
+      "artifacts": [
+        {
+          "path": "docs/reports/phase4-final-demos.json",
+          "sha256": "cba9de06294123c1f73208fad634bdaa457a3dbcb11b792cdcb01668bd0acc74"
+        }
+      ]
+    },
+    "migrations": {
+      "status": "passed",
+      "artifacts": [
+        {
+          "path": "docs/reports/phase4-final-migrations.json",
+          "sha256": "a877a8e2d13b3695b01848b52538322d96d3b62b50629a0861cf58daae38db2f"
+        }
+      ]
+    },
+    "backend": {
+      "status": "passed",
+      "artifacts": [
+        {
+          "path": "docs/reports/phase4-final-verification.json",
+          "sha256": "c7907a097f2f2bd4b134dd1f99604d6be26b3b980f7b728c8ad56aa11893605a"
+        }
+      ]
+    },
+    "frontend": {
+      "status": "passed",
+      "artifacts": [
+        {
+          "path": "docs/reports/phase4-final-verification.json",
+          "sha256": "c7907a097f2f2bd4b134dd1f99604d6be26b3b980f7b728c8ad56aa11893605a"
+        }
+      ]
+    },
+    "docker": {
+      "status": "passed",
+      "artifacts": [
+        {
+          "path": "docs/reports/phase4-final-verification.json",
+          "sha256": "c7907a097f2f2bd4b134dd1f99604d6be26b3b980f7b728c8ad56aa11893605a"
+        }
+      ]
+    },
+    "deployment": {
+      "status": "passed",
+      "artifacts": [
+        {
+          "path": "docs/reports/phase4-final-deployment.json",
+          "sha256": "e72d1a97ce851c57b20cc62e4ac009a5a9613f1f850a3c4dd8c4110306876e7f"
+        }
+      ]
+    },
+    "phase3_regression": {
+      "status": "passed",
+      "artifacts": [
+        {
+          "path": "docs/reports/phase4-final-phase3-regression.json",
+          "sha256": "3cd8e6b4de539cb1c4109da8833c3a40e985114be6ca9f9c962abb35c949c2c6"
+        }
+      ]
+    },
+    "real_skill": {
+      "status": "passed",
+      "artifacts": [
+        {
+          "path": "docs/reports/phase4-final-skill-deepseek.json",
+          "sha256": "a86f22ec1fd74fc25a597d2c2e3feb0b4036584e212d910da9c348d8b6d49eb7"
+        },
+        {
+          "path": "docs/reports/phase4-final-skill-failures.json",
+          "sha256": "e2274ea398c4f8c6cb6f78842d418e78fa966bcfb51c8344092ae5bd48f90e67"
+        }
+      ],
+      "scope": "12 comparable arithmetic pairs, both 11/12; literal-minus false negatives retained; not a claim of improvement."
+    },
+    "real_runtime": {
+      "status": "passed",
+      "artifacts": [
+        {
+          "path": "docs/reports/phase4-runtime-context-deepseek.json",
+          "sha256": "1f14ff1be0f1c7bbeb1e1d37c4e1633aac65f28ac59981cdd3062afa04b15b42"
+        },
+        {
+          "path": "docs/reports/phase4-runtime-memory-deepseek.json",
+          "sha256": "448ec7f271d649e6f35f4a3431bd31b83e696a1869e5dd7cbc470e07352e8f41"
+        },
+        {
+          "path": "docs/reports/phase4-runtime-retrieval-mock.json",
+          "sha256": "bd2e1650ef56087b3853da675029945dbb6513fdbb8d39bac679b1fb6d17882f"
+        }
+      ],
+      "scope": "Reports exist; memory has no demonstrated benefit, context 4K rejected. Retrieval remains Mock, not semantic acceptance."
+    },
+    "real_embedding": {
+      "status": "pending",
+      "reason": "No configured 1536-dimensional semantic embedding provider. Mock vectors are not accepted as real semantic evidence."
+    }
+  },
+  "hash_normalization": "UTF-8 report bytes with CRLF normalized to LF before SHA-256"
+}

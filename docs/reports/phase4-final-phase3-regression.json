@@ -1,0 +1,28 @@
+{
+  "dataset_id": "15619ccd-6506-490f-9400-eb59d6cd7dfc",
+  "case_count": 24,
+  "source_eval_run_ids": [
+    "5655cd16-5592-48b6-8b20-c31de34b346a",
+    "3320a657-ef78-4a3d-a21b-5e2736a94a0d"
+  ],
+  "first": {
+    "version_id": "b09a6ad3-ce90-46bc-9ad5-3c6c8305579d",
+    "experiment_id": "b56f7385-0657-4a49-a2b9-66c40406ebea",
+    "gate_passed": true,
+    "published": true
+  },
+  "regression": {
+    "version_id": "9f4831ba-dfd7-4478-8c6b-b2ba1c87f356",
+    "experiment_id": "833ff357-e629-4b17-9e44-34c05385fb2c",
+    "gate_passed": false
+  },
+  "rollback": {
+    "new_version_id": "b898feb2-8d49-4be4-aa2b-b3e1363e795a",
+    "experiment_id": "be070623-e686-4f4f-8a5e-d246a63adf69",
+    "new_gate_passed": true,
+    "active_version_id": "b09a6ad3-ce90-46bc-9ad5-3c6c8305579d"
+  },
+  "retrieval_match_ids": [
+    "b09a6ad3-ce90-46bc-9ad5-3c6c8305579d"
+  ]
+}

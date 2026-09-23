@@ -1,0 +1,16 @@
+{
+  "fresh": {
+    "head": "20260922_0012",
+    "vector_version": "0.8.1",
+    "schema_drift": false,
+    "legacy_messages_preserved": 0,
+    "passed": true
+  },
+  "legacy": {
+    "head": "20260922_0012",
+    "vector_version": "0.8.1",
+    "schema_drift": false,
+    "legacy_messages_preserved": 2,
+    "passed": true
+  }
+}

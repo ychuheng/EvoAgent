@@ -1,0 +1,21 @@
+{
+  "ready": {
+    "status": "ok"
+  },
+  "ui_status": 200,
+  "task_status": "completed",
+  "run_id": "44be83c4-897d-42d3-909e-bdab321a79a5",
+  "artifact_count": 0,
+  "committed_effects": 1,
+  "tools": [
+    "web_search",
+    "file_write"
+  ],
+  "context_policy": "legacy",
+  "memory_entries": 0,
+  "mcp_servers": 0,
+  "provider": "mock",
+  "port": 18000,
+  "passed": true,
+  "shared_file_verified_from_api_container": true
+}

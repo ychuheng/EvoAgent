@@ -4,7 +4,9 @@ EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目
 
 当前版本 `0.4.0.dev0`：前三阶段已完成；阶段四已实现模块 0～13 的工程代码，包括 Redis 唤醒/配额、双 Worker 调度、独立维护队列、Eval fencing，以及隔离的运行时实验和分账报告。PostgreSQL/pgvector、Redis、双真实进程与 Mock 实验已有验收；真实模型报告单独记录，不把小样本结论当成阶段四整体效果证明。
 
-最新入口：[模块 13 页面运行说明](docs/阶段四-模块13验收与运行说明.md)、[源码手册第 94～97 章](docs/EvoAgent-源码讲解与学习手册.md)。新增 Memory 管理、MCP 目录审核/卸载和上下文证据页面，保留原 Skill/Eval 三个页面。前端 12 项组件测试、6 个浏览器流程通过，后端 PostgreSQL/Redis 回归 404 passed、13 skipped。
+最新交付：[模块 14 最终验收与交付说明](docs/阶段四-模块14最终验收与交付说明.md)、[源码手册第 98～101 章](docs/EvoAgent-源码讲解与学习手册.md)、[ADR-015](docs/ADR-015-阶段四交付证据与发布门禁.md)。四条 Demo、全新/旧库迁移、容器与页面回归、真实 Skill 配对已交付；真实 Embedding 语义验收仍待配置，正式 v0.4 门禁未放行，保留 dev0。
+
+管理页面：[模块 13 页面运行说明](docs/阶段四-模块13验收与运行说明.md)、[源码手册第 94～97 章](docs/EvoAgent-源码讲解与学习手册.md)。新增 Memory 管理、MCP 目录审核/卸载和上下文证据页面，保留原 Skill/Eval 三个页面。前端 12 项组件测试、6 个浏览器流程通过，后端 PostgreSQL/Redis 回归 404 passed、13 skipped。
 
 调度与实验入口：[模块 11～12 运行说明](docs/阶段四-模块11至12验收与运行说明.md)、[源码手册第 86～93 章](docs/EvoAgent-源码讲解与学习手册.md)、[ADR-013](docs/ADR-013-数据库持久队列与Redis唤醒限流.md)、[ADR-014](docs/ADR-014-独立运行时实验与隔离评测.md)。数据库最新迁移为 `20260922_0012`。
 
@@ -181,3 +183,14 @@ SQLite 只用于本地快速测试；PostgreSQL 迁移、跨连接事件序号�
 - `docs/阶段四-模块0至2验收与运行说明.md`
 - `docs/开发进度与决策记录.md`
 - `docs/EvoAgent-源码讲解与学习手册.md`
+
+
+## 阶段四收尾验收
+
+```powershell
+# 先按模块 14 说明启动专用 PostgreSQL/Redis 测试环境；不要使用业务库。
+.venv\Scripts\python.exe scripts/phase4_demos.py --output output/phase4-demos.json
+.venv\Scripts\python.exe scripts/phase4_release_check.py
+```
+
+第二条命令当前预期退出 2：报告哈希有效，但 `real_embedding` 为 pending。`--allow-pending` 只审计已有证据，不改变 `release_ready=false`。本轮后端全量 408 passed/13 skipped，新增证据门禁两项另行通过；Linux Docker 11 项、前端组件 12 项/浏览器 6 项通过。真实算术 Skill 12 对均可比，两臂各 11/12，无安全回归；保留 Unicode 负号导致的字面验证失败，不宣称成功率提升。完整范围见模块 14 说明。

@@ -101,6 +101,10 @@
 95. 阶段四模块 13：MCP 目录审核与卸载
 96. 阶段四模块 13：上下文证据、错误语义与测试地图
 97. 阶段四模块 13 学习验收
+98. 阶段四模块 14：可重复 Demo 与失败证据
+99. 阶段四模块 14：迁移、容器部署与真实配对
+100. 阶段四模块 14：发布证据门禁与边界
+101. 阶段四模块 14 学习验收
 
 ## 1. 阅读说明
 
@@ -114,7 +118,7 @@ EvoAgent 会逐步从一个可测试的 Agent 内核，发展为支持可靠长�
 
 ### 1.1 当前进度
 
-`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～13 已实现工程代码；PostgreSQL/Redis、双进程调度和 Runtime Mock 报告已验收，真实模型效果证据仍待补。最新页面增量见第 94～97 章；较早章节的测试数字保留对应交付时间点，模块 14 尚未完成。
+`v0.3：可验证 Skill 生命周期` 的模块 0～12 已全部实现。当前版本为 `0.4.0.dev0`，阶段四模块 0～13 已实现工程代码；PostgreSQL/Redis、双进程调度和 Runtime Mock 报告已验收，真实模型效果证据仍待补。模块 14 工程收尾见第 98～101 章，四条 Demo、真实 Skill 配对和环境验收已补齐；真实 Embedding 语义验证仍缺配置，正式 v0.4 完成门禁未放行。较早章节数字保留历史时间点。
 
 已经完成：
 
@@ -7785,3 +7789,209 @@ failure 把 409 显示为版本或状态冲突，并保留 error.code 方便定�
 准备同一事实的两个版本，在一个页面读旧锁版本，再通过 API 修改并从页面提交，观察 409 和刷新后的来源变化。接着暂停维护 Worker，请求内容清理，确认界面停留在真实 pending；启动维护 Worker 后刷新，观察完成结果。最后查看一个预算超限 Run 和一个没有冻结检索批次的旧 Run，说明两者各缺少什么证据。
 
 上述练习应在演示数据库执行，不为了界面截图篡改真实报告。能够区分按钮反馈、数据库事实、外部执行结果和效果评测结论，才算掌握本模块。
+
+
+---
+
+## 98. 阶段四模块 14：可重复 Demo 与失败证据
+
+### 98.1 为什么不能只写一份“完成清单”
+
+已有代码包含大量成功和失败断言，但分散在不同测试文件。收尾需要把它们组织成用户可以反复执行的四条演示，同时说明每个结论依赖什么环境。否则一次 SQLite 通过很容易被误写成真实多进程 PostgreSQL 接管通过，或者把 skipped 当作成功。
+
+本模块的演示定位为自动化验收重放，不另写一个简化状态机冒充生产实现。主场景直接调用 ContextStore、MemoryService、MCPService、ToolExecutor、JobLeaseManager；补充复用旧故障回归。真实模型质量实验独立执行，演示不偷偷消费 API 额度。
+
+### 98.2 入口和职责
+
+| 文件 | 负责的事实 |
+| --- | --- |
+| [phase4_demos.py](../scripts/phase4_demos.py) | 四组测试选择、独立 pytest 子进程、JUnit 属性提取、JSON 报告 |
+| [test_phase4_demos.py](../tests/integration/test_phase4_demos.py) | PostgreSQL 上的连续压缩/记忆/MCP/配额故障场景 |
+| [acceptance/compose.yml](../deploy/acceptance/compose.yml) | 专用端口、数据库卷、API/Worker 共享存储和 feature-off 部署 |
+| [phase4_migrations.py](../scripts/phase4_migrations.py) | 空库与 0005 历史消息升级验证 |
+| [phase4_skill_eval.py](../scripts/phase4_skill_eval.py) | 真实 TRAIN、固定候选、HOLDOUT 配对与门禁，不发布 |
+| [phase4_release_check.py](../scripts/phase4_release_check.py) | 必需报告、哈希、pending 与正式完成状态检查 |
+
+这些脚本属于源码仓库的交付工具，需要安装开发依赖，不作为 API 路由开放。它们没有授予模型执行测试、删除表或发布版本的权限。
+
+### 98.3 从命令到报告的完整路径
+
+```text
+--demo all 或单组名称
+  → 固定 nodeid 列表
+  → sys.executable -m pytest
+  → 临时目录中的 JUnit XML
+  → testcase 状态 + evidence 属性
+  → 输出 JSON，逐组保存
+  → 任一失败/跳过/无样本 → incomplete + 非零退出
+```
+
+使用 sys.executable 保证子进程和当前环境一致。XML 放在独立临时目录，最终只提取测试名、状态和主动记录的 evidence，不把完整异常栈和环境变量拼入公开报告。报告记录 Python、平台和源文件 SHA256，便于判断是否来自同一代码版本。
+
+passed 的条件包括子进程退出 0、有样本、所有样本 passed。缺 PostgreSQL 时测试会 skipped，但脚本不能因此报告整个 Worker Demo 已验收。逐组写文件使后续组失败时仍能看到之前完成的结果。
+
+### 98.4 PostgreSQL schema 隔离的细节
+
+demo_db 只读取显式 EVOAGENT_TEST_DATABASE_URL。每个测试生成 demo_ 加随机 UUID 的 schema，通过新引擎 server_settings.search_path 指向该 schema 和 public。vector 扩展位于 public，新 schema 可引用同一个真实向量类型。
+
+metadata.create_all 使用 checkfirst=False，因为 search_path 还包含 public：如果 public 存在同名表，默认存在性检查可能把它当作目标表，导致场景误用公共数据。当前 schema 是刚创建的随机空 schema，因此可以明确创建自己的表。连接池和 session_factory 同时绑定新引擎。
+
+finally 先关闭测试连接，再删除自己生成的 schema，最后关闭管理连接。这里不是拿任意用户输入拼 DROP SCHEMA；名称来自固定前缀和 uuid4。其他旧测试仍可能清空整个 TEST 数据库，所以所有回归都只能使用专用测试库。
+
+### 98.5 Context Demo 为什么保留计数器
+
+主场景构造完整 assistant/tool 消息组、五轮历史、累计 usage=15 和重复调用计数=2。ContextStore.prepare 生成修订和 Artifact，新建 PersistentCheckpointStore 从数据库恢复后，检查状态与压缩结果完全相同，且最初的系统/用户消息不变。
+
+演示不是只比较消息长度，还验证恢复没有清空 completed_iterations、usage、repeated_tool_calls 和 previous_tool_fingerprint。否则压缩会成为绕过预算或重复调用保护的入口。
+
+然后删除这个演示自己生成的源 Artifact，再次 prepare 必须报 context_artifact_invalid。补充测试在事务提交前抛错，验证旧快照仍然可恢复且不产生半份修订。这里的计数器是确定性 fixture，不把估算减少当作真实账单收益。
+
+### 98.6 Memory、MCP 和 Worker Demo 的边界
+
+Memory 场景确认 Workspace 事实，在第二 Session 检索到它；另一个 Workspace 查询为空。随后给运行绑定来源，再撤销版本，新查询为空且旧绑定运行报 context_source_revoked。补充删除 Job 失败/重试场景保留异步清理边界。
+
+MCP 场景通过官方 SDK 启动本地 stdio fixture，完成发现、审核、激活和一次真实远端调用。改变目录后恢复 registry，manifest 仍保持旧值，但调用被 tool_manifest_changed 阻断；卸载后再调用得到 mcp_server_disabled，远端调用日志仍只有一条。
+
+Worker 组使用真实双进程竞争测试、杀进程后的恢复测试、真实 Redis 原子配额，以及 loopback 连接拒绝。Redis 断线时 QueueSession 仍提交 Task，周期扫描可领取；ServiceGate 拒绝外部请求。不能把配额服务失联写成“自动不再限流”。
+
+## 99. 阶段四模块 14：迁移、容器部署与真实配对
+
+### 99.1 为什么分别准备 fresh、legacy、quality 和 test 库
+
+test 库会被测试清空，不能承载需要长期保留的真实模型 Trace。fresh 验证新安装和部署，legacy 验证历史数据升级，quality 保存付费实验，phase3 保留旧生命周期演示结果。它们隔离的是用途和删除风险，不是生产多租户安全边界。
+
+专用 Compose 使用 15432/16379/18000，原开发端口不变。本轮从新命名卷开始，不靠已有开发库“碰巧已经迁移过”的状态过关。停止容器时保留卷，不删除真实实验唯一记录。
+
+### 99.2 迁移验证如何避免只检查表数量
+
+phase4_migrations 首先拒绝任何已有表的数据库。fresh 直接升级 head；legacy 先升级到阶段三 0005，插入旧格式 Session 和两条 Message，再升级到 0012。
+
+完成后同时验证：Alembic head、vector 扩展、alembic check 无结构差异、旧正文不变、session_sequence 为 1/2、kind=legacy、backfill=true、content_hash 有效。表存在只能证明结构创建，不能证明旧消息被正确回填。
+
+脚本不是业务备份工具。对真实已有业务库，仍应先备份并执行正常迁移；不要为了通过“空库检查”删除已有表。旧库测试是从受控 0005 起点构造样本，不代表所有历史脏数据都已覆盖。
+
+### 99.3 应用容器 probe 验证哪条链路
+
+[phase4_deployment_probe.py](../scripts/phase4_deployment_probe.py) 从 HTTP 检查 ready 和构建后的 UI，再创建 Session/Task，等待独立 Worker 完成，读取 Trace 和 Context。它不直接把 Task.status 改为 completed。
+
+feature-off 配置使用 mock Provider、legacy Context、Memory/Archive 关闭、lexical 检索、无 MCP Server。任务仍能经过工具执行、效果提交和终态投影。Trace 中存在 committed 效果；file_write 的 report.md 在共享卷中，另从 API 容器检查文件可读。
+
+file_write 产出的文件与 ArtifactRecord 不是同一概念。当前离线 Demo 写入报告文件，但不一定注册一个 ArtifactRecord；因此 artifact_count=0 不应被解释为文件丢失。真正的共享存储检查要访问同一 run_id 对应的路径，而不是只数数据库行。
+
+### 99.4 Linux Docker 专项的路径要求
+
+可信测试控制器通过 Docker socket 创建受限执行容器。测试临时 staging 路径必须在控制器和 Docker 主机上同名可见，否则子容器的 bind mount 可能找不到实际输入文件。验收使用专用 Linux 临时目录同路径挂载。
+
+测试包含 cgroup 限额、非 root、能力清空、只读根、network=none、资源耗尽、输出洪泛、进程树清理和特殊文件边界。测试控制器有 Docker 权限，不代表 Agent Worker 也应有；生产隔离规则仍沿用 ADR-012。
+
+### 99.5 真实 Skill 实验的数据流
+
+```text
+冻结数据集：2 TRAIN + 6 HOLDOUT
+  → 两条 TRAIN 由真实 Provider 和正常 JobWorker 执行
+  → SourceValidationService 确认训练结果
+  → ProvenanceService 清洗、冻结来源与哈希
+  → 固定人工 SOP 形成 DRAFT
+  → EvalCoordinator 创建 baseline/pinned 占位，交替放行
+  → 普通 Worker 执行 6 Case × 2 repeats × 2 arms
+  → 冻结报告 + QualityGate
+  → REVIEW_REQUIRED 或 REJECTED，停止，不自动发布
+```
+
+候选定义在执行前固定。MockCandidateGenerator 只运输这份人工 SOP，不能被写成“模型自动从训练数据提炼了 Skill”。执行的模型是 DeepSeek，训练和留出任务都真实调用；这两个事实应分别描述。
+
+脚本要求独占新迁移库，若已有 Run 则拒绝，避免领取用户任务或无意重复付费。Memory/Archive 关闭、lexical、legacy 配置固定；原 RunConfigSnapshot.comparable_with 未被放宽。输出预算 384、最多四轮、累计预算 10000，thinking=disabled 与当前消息契约一致。
+
+### 99.6 结果如何解释
+
+本轮 12 对全部可比，两臂各 11/12，通过当前安全/正确性不退化门禁，候选停在 review_required。71,952 Token 包括两个真实 TRAIN 和 24 个配对运行，不能只报留出样本成本。
+
+这不是成功率提升证明。算术域的小样本也不能替代全部任务域的质量结论。另有两个判为失败的回答实际输出 Unicode 负号 −1.5，而 frozen contains_sections 要求 ASCII -1.5。系统正确保存了验证器判定，但验证器本身不具备数值等价能力。
+
+我们把原回答和 validation_results 单独导出分析，保留原 11/12 报告。下一次改进应建立新版数值验证器和新数据集/实验身份，不在看到结果后直接修改冻结标签。这是防止验收“为了好看而改变规则”的基本要求。
+
+## 100. 阶段四模块 14：发布证据门禁与边界
+
+### 100.1 为什么版本仍然是 dev0
+
+四条 Demo、部署、迁移、真实 Skill 配对完成，并不意味着真实 Embedding 语义效果已经验证。本地仍只有对话模型配置；MockEmbeddingProvider 的特征哈希能测试协议和索引，不能证明语义召回质量。
+
+因此本轮交付模块 14 的工程收尾，但正式 v0.4 完成状态保留 pending。不是所有待改进都会阻止代码提交；缺少明确要求的环境证据会阻止正式阶段完成标记。版本和 Git 标签不能比证据更乐观。
+
+### 100.2 Manifest 结构与检查顺序
+
+[phase4-final-manifest.json](reports/phase4-final-manifest.json) 按 demos、migrations、backend、frontend、docker、deployment、phase3_regression、real_skill、real_runtime、real_embedding 分类。每个通过项列出报告相对路径和 SHA256，待补项明确 reason。
+
+release_check 先检查必需类别，再检查状态、非空 artifact 列表、路径是否在仓库内、文件是否存在，最后比较字节哈希。缺少类别或文件、报告改动、失败状态均不能得出 release_ready=true。
+
+```text
+证据错误 → exit 1
+证据完整但有 pending → 默认 exit 2
+证据完整且无 pending → exit 0
+--allow-pending → 允许审计缺口，但 JSON 的 release_ready 仍为 false
+```
+
+哈希没有签名，不证明报告作者身份，也不能证明测试充分。检查器验证的是交付包的内部一致性，最终判断仍要读报告、运行环境和测试范围。
+
+### 100.3 为什么不能用小样本覆盖全部待办
+
+既有 Runtime 记忆结果两臂均 5/6，4K bounded Context 两例请求前拒绝。本轮真实 Skill 报告不能把这两个问题改成“已优化”；三者控制的变量不同。
+
+同样，pgvector SQL、Mock 哈希向量、真实 Embedding 语义质量属于三个层次。前两层测试通过不能填补最后一层。真实 Embedding 配置到位后，要固定模型身份/维度/预处理、数据集标签和阈值，重新生成对应检索证据；不能只换一个 API 地址就宣布通过。
+
+### 100.4 CI 和报告留存
+
+现有 CI 继续检查 Python 3.12/3.13、PostgreSQL/Redis、前端和 Linux Sandbox。新加四组 Demo 重放，并按 Python 版本上传 JSON，失败时也保留已有输出。付费模型与外部 Embedding 不放到无凭据的普通 CI 中假装通过。
+
+本机后端全量 408 passed、13 skipped，之后新增证据门禁两项通过；Linux Docker 单独 11 passed；前端 12 个组件和 6 个浏览器流程通过。完整数字和跳过原因见[最终验收说明](阶段四-模块14最终验收与交付说明.md)，不把不同测试命令的数字冒充同一轮全量结果。
+
+### 100.5 故障定位顺序
+
+Demo incomplete 时先看是哪组、失败还是 skipped，再检查对应 TEST URL 和服务；不要首先降低断言。迁移入口拒绝已有表时检查是否误选了业务库。Docker bind path 失败时检查 Linux 同路径挂载。真实实验拒绝已有 Run 时新建专用实验库，保留原证据。发布检查哈希不一致时追踪报告为何变化，不直接批量重算以消除告警。
+
+本模块的设计取舍记录在 [ADR-015](ADR-015-阶段四交付证据与发布门禁.md)。没有增加认证、多 Agent、自动发布、公网代理或通用联网沙箱。
+
+## 101. 阶段四模块 14 学习验收
+
+### 101.1 先能解释四种“完成”
+
+请分别解释工程实现完成、测试在当前环境通过、真实模型效果得到支持、正式阶段交付四个结论需要哪些证据。能够写代码并通过 Mock，不能自动推出其余三个结论；一次质量门禁通过也不意味着所有样本正确或必须立即发布。
+
+### 101.2 必须解释的 30 个问题
+
+1. 为什么用实际服务代码组织 Demo，而不是另写一套简化模拟？
+2. pytest 退出 0 但存在 skipped 时，为什么整组 Demo 仍是 incomplete？
+3. Demo JSON 为什么不保存完整异常栈和环境变量？
+4. source_sha256 与 Git commit 分别能说明什么？
+5. PostgreSQL 临时 schema 如何避免使用 public 中的同名表？
+6. vector 扩展为何放在 public，而业务测试表在随机 schema？
+7. 为什么不能把 TEST_DATABASE_URL 指向业务数据库？
+8. Context 压缩为何必须保留 usage、迭代和重复调用计数？
+9. Artifact 丢失时为什么不能只信数据库里的 revision？
+10. 提交前故障时，哪一份快照应该仍然有效？
+11. Workspace 跨 Session 可见与跨 Workspace 不可见分别如何证明？
+12. 撤销后旧 Run 的绑定为什么必须再次校验？
+13. MCP 目录更新为什么不直接修改已冻结 registry？
+14. 卸载后远端调用日志仍只有一条说明了什么？
+15. COMMITTED 和 UNKNOWN 在进程重启后的处理有什么不同？
+16. Redis 唤醒失败与配额失败为什么采用不同策略？
+17. loopback 真实连接拒绝证明了什么，没有证明什么？
+18. fresh 和 legacy 迁移验证为什么要使用不同数据库？
+19. 只检查迁移后的表数量会漏掉什么问题？
+20. file_write 文件与 ArtifactRecord 为什么不能等同？
+21. Docker 测试控制器与执行容器的权限为何不同？
+22. staging 路径为什么要在 Docker 主机和控制器同名可见？
+23. 使用 MockCandidateGenerator 是否意味着真实执行也是 Mock？
+24. 固定人工 SOP 的实验为什么仍须隔离 TRAIN/HOLDOUT？
+25. 为什么真实配对脚本要求空 Run 库？
+26. 两臂各 11/12、门禁通过能否证明 Skill 提升了成功率？
+27. Unicode 负号导致字面验证失败时，为何保留冻结原分数？
+28. 报告 SHA256 通过能否证明报告结论正确？
+29. --allow-pending 为什么不等于允许正式发布？
+30. 真实 Embedding 验收补齐前，为什么仍保留 0.4.0.dev0？
+
+### 101.3 动手验收
+
+先在专用测试环境执行一组 Demo，再故意移除该组要求的环境配置，检查它变成 incomplete 而非 passed。复制一份报告到独立临时目录，改变内容后用 verify 验证哈希不一致；不要修改仓库中的冻结报告来做练习。最后阅读一次真实 Skill 失败样本，分别写出“模型回答事实”和“验证器判定”，解释为何两者需要分开。
+
+理解这些边界之后，才能把项目收尾做成可核验的交付，而不是把所有待办统一改成勾选。

@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-23",
+  "backend": {
+    "passed": 408,
+    "skipped": 13,
+    "failed": 0,
+    "errors": 0,
+    "seconds": "149.834",
+    "additional_release_gate_tests_passed": 2,
+    "skip_reasons": {
+      "linux_docker_separate_suite": 11,
+      "sqlite_row_lock": 1,
+      "windows_symlink_permission": 1
+    }
+  },
+  "frontend": {
+    "typecheck": "passed",
+    "component_tests_passed": 12,
+    "browser_flows_passed": 6,
+    "production_build": "passed",
+    "browser_uses_http_fixtures": true
+  },
+  "docker": {
+    "passed": 11,
+    "failures": 0,
+    "skipped": 0,
+    "seconds": "42.363",
+    "engine": "29.8.0",
+    "sandbox_image": "127.0.0.1:5000/evoagent-sandbox@sha256:dbd3a85d745459abdb13d363899c075b5df14ae82437080c9ca4fcb52f557c34"
+  },
+  "application_image": "sha256:cd186e7c47d23aafca258d758b988212d91e0a19c323f3bd3e3e8a7c4dd71dba",
+  "application_version": "0.4.0.dev0",
+  "paid_model_known_tokens_this_module": 71952
+}

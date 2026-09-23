@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-23T03:42:20.215336+00:00",
+  "python": "3.13.5",
+  "platform": "Windows",
+  "source_sha256": "12377c37909366bc58a9700155224c22ef5db2d524a253a7c07d0eef8ecffc55",
+  "model": "deterministic fixtures; no paid model calls",
+  "postgres_configured": true,
+  "redis_configured": true,
+  "demos": {
+    "context": {
+      "exit_code": 0,
+      "status": "passed",
+      "cases": [
+        {
+          "name": "test_demo_context_restore_and_block",
+          "status": "passed",
+          "evidence": {
+            "revision": 1,
+            "estimate": {
+              "before": 26583,
+              "after": 12312
+            },
+            "restored_iterations": 5,
+            "preserved_tokens": 15,
+            "blocked": "context_artifact_invalid"
+          }
+        },
+        {
+          "name": "test_context_failure_before_commit_keeps_old_snapshot",
+          "status": "passed",
+          "evidence": {}
+        },
+        {
+          "name": "test_rejected_request_never_reaches_provider_and_legacy_can_run",
+          "status": "passed",
+          "evidence": {}
+        }
+      ]
+    },
+    "memory": {
+      "exit_code": 0,
+      "status": "passed",
+      "cases": [
+        {
+          "name": "test_demo_cross_session_memory_and_revoke",
+          "status": "passed",
+          "evidence": {
+            "same_workspace_before": 1,
+            "foreign_workspace": 0,
+            "same_workspace_after": 0,
+            "bound_run_blocked": "context_source_revoked"
+          }
+        },
+        {
+          "name": "test_erase_failure_keeps_job_failed_and_retry_finishes_cleanup",
+          "status": "passed",
+          "evidence": {}
+        }
+      ]
+    },
+    "mcp": {
+      "exit_code": 0,
+      "status": "passed",
+      "cases": [
+        {
+          "name": "test_demo_mcp_call_change_and_unload",
+          "status": "passed",
+          "evidence": {
+            "catalog_revision": 1,
+            "remote_calls": 1,
+            "frozen_manifest_unchanged": true,
+            "changed_catalog_blocked": "tool_manifest_changed",
+            "unloaded_blocked": "mcp_server_disabled"
+          }
+        },
+        {
+          "name": "test_real_http_sdk_and_api_discovery",
+          "status": "passed",
+          "evidence": {}
+        },
+        {
+          "name": "test_write_uncertain_is_unknown_and_never_replayed[fault0]",
+          "status": "passed",
+          "evidence": {}
+        },
+        {
+          "name": "test_write_uncertain_is_unknown_and_never_replayed[fault1]",
+          "status": "passed",
+          "evidence": {}
+        }
+      ]
+    },
+    "workers": {
+      "exit_code": 0,
+      "status": "passed",
+      "cases": [
+        {
+          "name": "test_two_real_worker_processes_same_label",
+          "status": "passed",
+          "evidence": {}
+        },
+        {
+          "name": "test_api_task_survives_killed_worker[readonly]",
+          "status": "passed",
+          "evidence": {}
+        },
+        {
+          "name": "test_api_task_survives_killed_worker[committed]",
+          "status": "passed",
+          "evidence": {}
+        },
+        {
+          "name": "test_api_task_survives_killed_worker[unknown]",
+          "status": "passed",
+          "evidence": {}
+        },
+        {
+          "name": "test_demo_real_redis_outage_keeps_db_task",
+          "status": "passed",
+          "evidence": {
+            "database_task_claimed": true,
+            "notification_failure_tolerated": true,
+            "external_dispatches": 0,
+            "fault": "real loopback connection refused",
+            "terminal": "failed"
+          }
+        },
+        {
+          "name": "test_real_redis_atomic_bucket_and_duplicate_wakeup",
+          "status": "passed",
+          "evidence": {}
+        }
+      ]
+    }
+  }
+}

@@ -81,6 +81,18 @@ jobs:
           EVOAGENT_TEST_REDIS_URL: redis://127.0.0.1:6379/0
         run: pytest
 
+      - name: Replay phase four demos
+        env:
+          EVOAGENT_TEST_DATABASE_URL: postgresql+asyncpg://evoagent:evoagent@127.0.0.1:5432/evoagent_test
+          EVOAGENT_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+        run: python scripts/phase4_demos.py --output output/phase4-demos.json
+      - name: Preserve demo evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-demos-python-${{ matrix.python-version }}
+          path: output/phase4-demos.json
+
   container:
     runs-on: ubuntu-latest
     needs: [test, frontend]

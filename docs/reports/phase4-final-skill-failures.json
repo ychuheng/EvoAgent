@@ -1,0 +1,118 @@
+[
+  {
+    "run_id": "d0d253e3-6139-4dc5-8bf9-10bfb98e6806",
+    "mode": "pinned_skill",
+    "answer": "## 结论\n\n(7 − 10) ÷ 2 = **−1.5**\n\n## 依据\n\n1. 先算括号内的减法：7 − 10 = −3（由 10 − 7 = 3，且 7 < 10，故结果为负）。\n2. 再做除法：−3 ÷ 2 = −1.5（负数除以正数，结果为负）。\n3. 使用 calculator 工具对表达式 `(7-10)/2` 求值，返回结果为 −1.5，与上述手算一致。\n\n说明：按要求未联网、未写入任何文件；该表达式有定义（除数不为 0），无需另行说明。",
+    "validation_results": [
+      {
+        "validator": "run_completed",
+        "version": "1",
+        "passed": true,
+        "evidence": {
+          "status": "completed"
+        },
+        "failure_reason": null,
+        "duration_ms": 0.001400010660290718
+      },
+      {
+        "validator": "contains_sections",
+        "version": "1",
+        "passed": false,
+        "evidence": {
+          "required": [
+            "结论",
+            "依据",
+            "-1.5"
+          ],
+          "missing": [
+            "-1.5"
+          ]
+        },
+        "failure_reason": "required sections are missing",
+        "duration_ms": 0.0033999967854470015
+      },
+      {
+        "validator": "tool_policy",
+        "version": "1",
+        "passed": true,
+        "evidence": {
+          "used": [
+            "calculator"
+          ],
+          "forbidden": []
+        },
+        "failure_reason": null,
+        "duration_ms": 0.0051000097300857306
+      },
+      {
+        "validator": "no_unknown_effects",
+        "version": "1",
+        "passed": true,
+        "evidence": {
+          "unknown_effect_ids": []
+        },
+        "failure_reason": null,
+        "duration_ms": 0.001100008375942707
+      }
+    ],
+    "analysis": "Exact substring validator requires ASCII -1.5; response uses Unicode minus U+2212. Frozen original verdict retained."
+  },
+  {
+    "run_id": "d1e85d3a-72e6-4be9-ab15-088384c781fc",
+    "mode": "baseline",
+    "answer": "结论\n\n(7 − 10) / 2 = **−1.5**（即 −3/2）。\n\n依据\n\n- 先算括号内：7 − 10 = −3；\n- 再除以 2：−3 / 2 = −1.5。\n- 该结果由计算工具对表达式 `(7-10)/2` 求值得到，未联网、未写入任何文件。",
+    "validation_results": [
+      {
+        "validator": "run_completed",
+        "version": "1",
+        "passed": true,
+        "evidence": {
+          "status": "completed"
+        },
+        "failure_reason": null,
+        "duration_ms": 0.0018999853637069464
+      },
+      {
+        "validator": "contains_sections",
+        "version": "1",
+        "passed": false,
+        "evidence": {
+          "required": [
+            "结论",
+            "依据",
+            "-1.5"
+          ],
+          "missing": [
+            "-1.5"
+          ]
+        },
+        "failure_reason": "required sections are missing",
+        "duration_ms": 0.0035999983083456755
+      },
+      {
+        "validator": "tool_policy",
+        "version": "1",
+        "passed": true,
+        "evidence": {
+          "used": [
+            "calculator"
+          ],
+          "forbidden": []
+        },
+        "failure_reason": null,
+        "duration_ms": 0.0047000066842883825
+      },
+      {
+        "validator": "no_unknown_effects",
+        "version": "1",
+        "passed": true,
+        "evidence": {
+          "unknown_effect_ids": []
+        },
+        "failure_reason": null,
+        "duration_ms": 0.000900006853044033
+      }
+    ],
+    "analysis": "Exact substring validator requires ASCII -1.5; response uses Unicode minus U+2212. Frozen original verdict retained."
+  }
+]
