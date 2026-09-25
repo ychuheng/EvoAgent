@@ -14,7 +14,7 @@ test("Memory 来源、版本冲突、确认与异步删除", async ({ page }) =>
     await r.fulfill({ json: current });
   });
   await page.route("**/api/v1/maintenance-jobs/job-1", r => r.fulfill({ json: { id: "job-1", status: jobStatus, attempts: 1, error_code: null, result: null, next_attempt_at: null } }));
-  await page.goto("/"); await page.getByRole("button", { name: "Memory 管理" }).click();
+  await page.goto("/ui/"); await page.getByRole("button", { name: "Memory 管理" }).click();
   await page.getByLabel("Session ID").fill("s-1"); await page.getByText("读取记忆").click(); await page.getByRole("button", { name: /language/ }).click();
   await expect(page.getByText(/sha256:source/)).toBeVisible();
   await page.getByText("确认事实").click(); await expect(page.getByRole("alert")).toContainText("请刷新后重新审核");
@@ -37,7 +37,7 @@ test("MCP 目录审核、秘密不回显、排空与卸载", async ({ page }) =>
     const body = r.request().postDataJSON(); expect(body.expected_execution_version).toBe(current.execution_version); expect(body.expected_lock_version).toBe(2);
     current = { ...current, execution_state: body.state, execution_version: current.execution_version + 1 }; await r.fulfill({ json: current });
   });
-  await page.goto("/"); await page.getByRole("button", { name: "MCP 管理" }).click(); await page.getByRole("button", { name: /Fixture Server/ }).click();
+  await page.goto("/ui/"); await page.getByRole("button", { name: "MCP 管理" }).click(); await page.getByRole("button", { name: /Fixture Server/ }).click();
   await expect(page.getByText("stale", { exact: true })).toBeVisible(); await expect(page.getByText("private-reference-do-not-render")).toHaveCount(0);
   await page.getByLabel("风险等级").selectOption("R1"); await page.getByLabel("副作用").selectOption("read_only"); await page.getByLabel("审核理由").fill("只读契约已核对"); await page.getByText("批准工具").click();
   await expect(page.getByRole("status")).toContainText("审核已记录");
@@ -49,7 +49,7 @@ test("上下文预算、修订、检索降级与空命中", async ({ page }) => 
   let empty = false;
   await page.route("**/api/v1/runs/run-1/context", r => r.fulfill({ json: context }));
   await page.route("**/api/v1/runs/run-1/retrieval", r => r.fulfill({ json: empty ? { ...retrieval, selections: [] } : retrieval }));
-  await page.goto("/"); await page.getByRole("button", { name: "上下文证据" }).click(); await page.getByLabel("Run ID").fill("run-1"); await page.getByText("查看上下文").click();
+  await page.goto("/ui/"); await page.getByRole("button", { name: "上下文证据" }).click(); await page.getByLabel("Run ID").fill("run-1"); await page.getByText("查看上下文").click();
   await expect(page.getByText(/context_budget_exceeded/)).toBeVisible(); await expect(page.getByText("修订 1", { exact: true })).toBeVisible(); await expect(page.getByText("省略原因：budget")).toBeVisible();
   await expect(page.getByText(/检索状态：已降级/)).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });

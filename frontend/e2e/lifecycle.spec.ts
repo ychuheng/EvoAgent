@@ -49,7 +49,7 @@ test("查看配对报告", async ({ page }) => {
       },
     }),
   );
-  await page.goto("/");
+  await page.goto("/ui/");
   await page.getByRole("button", { name: "Eval 报告" }).click();
   await page.getByLabel("实验 ID").fill("exp-1");
   await page.getByRole("button", { name: "查看报告" }).click();
@@ -96,7 +96,7 @@ test("批准 REVIEW_REQUIRED 版本", async ({ page }) => {
       },
     });
   });
-  await page.goto("/");
+  await page.goto("/ui/");
   await page.getByRole("button", { name: "版本评审" }).click();
   await page.getByLabel("版本 ID", { exact: true }).fill("version-1");
   await page.getByRole("button", { name: "读取" }).click();
@@ -141,7 +141,7 @@ test("回滚到 RETIRED 版本", async ({ page }) => {
       },
     }),
   );
-  await page.goto("/");
+  await page.goto("/ui/");
   await page.getByRole("button", { name: "版本评审" }).click();
   await page.getByLabel("版本 ID", { exact: true }).fill("version-old");
   await page.getByRole("button", { name: "读取" }).click();
