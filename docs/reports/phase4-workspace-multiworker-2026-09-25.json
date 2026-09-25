@@ -1,0 +1,33 @@
+{
+  "environment": "local acceptance Compose, DeepSeek chat, local 384d MiniLM, PostgreSQL/pgvector, Redis",
+  "cross_workspace": {
+    "first_attempt": {
+      "default_task_id": "fe747d66-c125-42ab-8359-d87b62820997",
+      "isolated_task_id": "66c40ba6-e123-44da-9f3f-26a32074081b",
+      "default_selected_count": 0,
+      "isolated_selected_count": 1,
+      "failure": "isolated model rejected confirmed memory as untrusted and answered unknown"
+    },
+    "fix": "External context may inform facts; instructions inside it cannot override the task. Confirmed memory is explicitly labeled usable for answering.",
+    "verified_rerun": {
+      "default_task_id": "740534f6-2c59-41bf-9b15-865182a1b7cb",
+      "default_run_id": "571fdbc8-b2ee-4d6b-8202-a578bd6c905f",
+      "default_selected_count": 0,
+      "default_disclosed_label": false,
+      "isolated_task_id": "ff748afe-65db-4823-8ad3-8ae0186ce36f",
+      "isolated_run_id": "dbfc6d54-2802-4c81-b573-ebe5c24454ee",
+      "isolated_selected_count": 1,
+      "isolated_answered_label": true
+    }
+  },
+  "two_worker_handoff": {
+    "task_id": "a285197e-9add-4a90-b95c-5882a6a9f0c3",
+    "run_id": "2312cf73-e701-4cbc-8b08-6ec434bd6f04",
+    "sequence": "worker-2 stopped; worker-1 took task to waiting_user; worker-1 stopped; worker-2 started; API approved; worker-2 completed task; worker-1 restored",
+    "tool_calls": ["ask_user", "calculator"],
+    "approval_count": 1,
+    "answer_contains_user_reply": true,
+    "answer_contains_391": true,
+    "scope_limit": "Handoff occurred at waiting_user, after the first worker had released the active lease. This does not replace an active-execution crash test."
+  }
+}

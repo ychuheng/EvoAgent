@@ -8,11 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.db.models import (
+    DEFAULT_WORKSPACE_ID,
     ApprovalStatus,
     RunRecord,
     SessionRecord,
     TaskRecord,
     ToolApprovalRecord,
+    WorkspaceRecord,
 )
 from evoagent.db.repositories.base import ConcurrentUpdateError, RecordNotFoundError
 from evoagent.db.unit_of_work import UnitOfWork
@@ -53,12 +55,34 @@ class TaskService:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
-    async def create_session(self, title: str) -> SessionRecord:
+    async def create_workspace(self, name: str) -> WorkspaceRecord:
+        normalized = name.strip()
+        if not normalized:
+            raise ValueError("workspace name cannot be blank")
+        async with UnitOfWork(self._session_factory) as unit:
+            record = WorkspaceRecord(name=normalized)
+            unit.session.add(record)
+            await unit.session.flush()
+            await unit.commit()
+            return record
+
+    async def list_workspaces(self) -> tuple[WorkspaceRecord, ...]:
+        async with self._session_factory() as session:
+            records = await session.scalars(
+                select(WorkspaceRecord).order_by(WorkspaceRecord.created_at, WorkspaceRecord.id)
+            )
+            return tuple(records)
+
+    async def create_session(
+        self, title: str, workspace_id: UUID = DEFAULT_WORKSPACE_ID
+    ) -> SessionRecord:
         normalized = title.strip()
         if not normalized:
             raise ValueError("session title cannot be blank")
         async with UnitOfWork(self._session_factory) as unit:
-            record = SessionRecord(title=normalized)
+            if await unit.session.get(WorkspaceRecord, workspace_id) is None:
+                raise SessionNotFoundError(f"workspace does not exist: {workspace_id}")
+            record = SessionRecord(title=normalized, workspace_id=workspace_id)
             unit.session.add(record)
             await unit.session.flush()
             await unit.commit()

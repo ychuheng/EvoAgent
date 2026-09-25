@@ -69,6 +69,30 @@ async def test_create_task_is_atomic_and_returns_202(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_workspace_can_be_created_and_chosen_for_new_session(tmp_path: Path) -> None:
+    async with api_client(tmp_path) as (client, _database):
+        initial = (await client.get("/api/v1/workspaces")).json()
+        assert len(initial) == 1
+        created = await client.post("/api/v1/workspaces", json={"name": "  隔离项目  "})
+        assert created.status_code == 201
+        workspace = created.json()
+        assert workspace["name"] == "隔离项目"
+        session = await client.post(
+            "/api/v1/sessions",
+            json={"title": "隔离会话", "workspace_id": workspace["id"]},
+        )
+        assert session.status_code == 201
+        assert session.json()["workspace_id"] == workspace["id"]
+        missing = await client.post(
+            "/api/v1/sessions",
+            json={"title": "错误作用域", "workspace_id": "00000000-0000-0000-0000-000000000099"},
+        )
+        assert missing.status_code == 404
+        assert len((await client.get("/api/v1/workspaces")).json()) == 2
+        assert (await client.get("/api/v1/sessions")).json()[0]["workspace_id"] == workspace["id"]
+
+
+@pytest.mark.asyncio
 async def test_session_messages_show_ordered_goals_and_committed_answers(tmp_path: Path) -> None:
     async with api_client(tmp_path) as (client, database):
         created = await client.post("/api/v1/sessions", json={"title": "连续对话"})

@@ -13,7 +13,7 @@ test("Skill 列表为空时显示明确空状态", async () => {
 });
 
 test("后端错误会显示给用户", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: "database_unavailable", message: "数据库不可用" } }), { status: 503 })));
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ error: { code: "database_unavailable", message: "数据库不可用" } }), { status: 503 }))));
   render(<App />);
   expect(await screen.findByRole("alert")).toHaveTextContent("数据库不可用");
 });

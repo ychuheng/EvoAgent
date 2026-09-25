@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 
-import { chat, type ChatMessage, type ChatSession } from "../api/chat";
+import { chat, type ChatMessage, type ChatSession, type ChatWorkspace } from "../api/chat";
+import { failure } from "../components/Evidence";
 import { TaskInspector } from "./TaskInspector";
 import { errorLabel, taskStatusLabel } from "./taskLabels";
 
 const STORAGE_KEY = "evoagent-chat-session";
+const DEFAULT_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
 function displayMessage(message: ChatMessage): string {
@@ -24,6 +26,9 @@ function unfinishedTask(messages: ChatMessage[]): string | null {
 
 export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpenVersion: (id: string) => void; onOpenContext: (id: string) => void; onOpenMemory: (id: string) => void }) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [workspaces, setWorkspaces] = useState<ChatWorkspace[]>([]);
+  const [workspaceId, setWorkspaceId] = useState(DEFAULT_WORKSPACE_ID);
+  const [workspaceName, setWorkspaceName] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -35,12 +40,14 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
 
   useEffect(() => {
     let active = true;
-    void chat.sessions().then((items) => {
+    void Promise.all([chat.sessions(), chat.workspaces()]).then(([items, available]) => {
       if (!active) return;
       setSessions([...items].reverse());
+      setWorkspaces(available);
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved && items.some((item) => item.id === saved)) setSessionId(saved);
-    }).catch((reason: unknown) => { if (active) setError(String(reason)); });
+      const selected = items.find((item) => item.id === saved);
+      if (selected) { setWorkspaceId(selected.workspace_id); setSessionId(selected.id); }
+    }).catch((reason: unknown) => { if (active) setError(failure(reason)); });
     return () => { active = false; };
   }, []);
 
@@ -56,7 +63,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       setMessages(items);
       setPendingTask(unfinishedTask(items));
       setSelectedTask(items.at(-1)?.task_id ?? null);
-    }).catch((reason: unknown) => { if (active) setError(String(reason)); });
+    }).catch((reason: unknown) => { if (active) setError(failure(reason)); });
     return () => { active = false; };
   }, [sessionId]);
 
@@ -77,7 +84,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
           return;
         }
       } catch (reason) {
-        if (active) setError(String(reason));
+        if (active) setError(failure(reason));
       }
       if (active) timer = window.setTimeout(() => { void poll(); }, 900);
     };
@@ -87,6 +94,8 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
 
   function selectSession(id: string) {
     setError("");
+    const selected = sessions.find((item) => item.id === id);
+    if (selected) setWorkspaceId(selected.workspace_id);
     localStorage.setItem(STORAGE_KEY, id);
     setSessionId(id);
   }
@@ -101,6 +110,19 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     setTaskStatus("");
   }
 
+  async function createWorkspace() {
+    const name = workspaceName.trim();
+    if (!name) return;
+    setError("");
+    try {
+      const created = await chat.createWorkspace(name);
+      setWorkspaces(items => [...items, created]);
+      newSession();
+      setWorkspaceId(created.id);
+      setWorkspaceName("");
+    } catch (reason) { setError(failure(reason)); }
+  }
+
   async function send(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const goal = draft.trim();
@@ -110,7 +132,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     try {
       let id = sessionId;
       if (!id) {
-        const created = await chat.createSession(goal.slice(0, 80));
+        const created = await chat.createSession(goal.slice(0, 80), workspaceId);
         id = created.id;
         setSessions((items) => [created, ...items]);
         selectSession(id);
@@ -122,7 +144,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       setSelectedTask(task.id);
       setTaskStatus(task.status);
     } catch (reason) {
-      setError(String(reason));
+      setError(failure(reason));
     } finally {
       setSending(false);
     }
@@ -138,7 +160,9 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
   return <div className="chat-layout">
     <aside className="panel chat-sidebar">
       <div className="panel-title"><h2>对话</h2><button type="button" onClick={newSession}>新对话</button></div>
-      <ul className="skill-list">{sessions.map((item) =>
+      <label>Workspace<select aria-label="当前 Workspace" value={workspaceId} onChange={event => { newSession(); setWorkspaceId(event.target.value); }}>{workspaces.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <div className="form-row"><input aria-label="新 Workspace 名称" value={workspaceName} onChange={event => setWorkspaceName(event.target.value)} placeholder="新建 Workspace" /><button type="button" disabled={!workspaceName.trim()} onClick={() => void createWorkspace()}>创建 Workspace</button></div>
+      <ul className="skill-list">{sessions.filter(item => item.workspace_id === workspaceId).map((item) =>
         <li key={item.id}><button type="button" className={`skill-row ${sessionId === item.id ? "selected" : ""}`} onClick={() => selectSession(item.id)}>{item.title}</button></li>
       )}</ul>
     </aside>

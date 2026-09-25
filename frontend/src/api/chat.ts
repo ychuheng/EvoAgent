@@ -1,6 +1,7 @@
 import { request } from "./client";
 
-export type ChatSession = { id: string; title: string; created_at: string };
+export type ChatWorkspace = { id: string; name: string; created_at: string };
+export type ChatSession = { id: string; title: string; workspace_id: string; created_at: string };
 export type ChatMessage = {
   id: string;
   task_id: string | null;
@@ -42,9 +43,13 @@ export type TaskTrace = {
 };
 
 export const chat = {
+  workspaces: () => request<ChatWorkspace[]>("/workspaces"),
+  createWorkspace: (name: string) => request<ChatWorkspace>("/workspaces", {
+    method: "POST", body: JSON.stringify({ name }),
+  }),
   sessions: () => request<ChatSession[]>("/sessions"),
-  createSession: (title: string) => request<ChatSession>("/sessions", {
-    method: "POST", body: JSON.stringify({ title }),
+  createSession: (title: string, workspaceId: string) => request<ChatSession>("/sessions", {
+    method: "POST", body: JSON.stringify({ title, workspace_id: workspaceId }),
   }),
   messages: (sessionId: string) =>
     request<ChatMessage[]>(`/sessions/${encodeURIComponent(sessionId)}/messages`),

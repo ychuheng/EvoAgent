@@ -31,6 +31,7 @@ class HealthResponse(ApiModel):
 
 class SessionCreateRequest(ApiModel):
     title: str = Field(min_length=1, max_length=256)
+    workspace_id: UUID | None = None
 
     @field_validator("title")
     @classmethod
@@ -44,6 +45,25 @@ class SessionCreateRequest(ApiModel):
 class SessionResponse(ApiModel):
     id: UUID
     title: str
+    workspace_id: UUID
+    created_at: datetime
+
+
+class WorkspaceCreateRequest(ApiModel):
+    name: str = Field(min_length=1, max_length=256)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("workspace name cannot be blank")
+        return normalized
+
+
+class WorkspaceResponse(ApiModel):
+    id: UUID
+    name: str
     created_at: datetime
 
 

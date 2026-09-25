@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/sessions", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/workspaces", (route) => route.fulfill({ json: [{ id: "00000000-0000-0000-0000-000000000001", name: "Local workspace", created_at: "2026-09-25" }] }));
 });
 
 const skill = {

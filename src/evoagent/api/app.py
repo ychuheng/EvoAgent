@@ -119,6 +119,7 @@ def create_app(
     app.include_router(runtime_evals.router, prefix="/api/v1")
     app.include_router(retrieval.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
+    app.include_router(sessions.workspaces_router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")
     app.include_router(approvals.router, prefix="/api/v1")
     app.include_router(events.router, prefix="/api/v1")

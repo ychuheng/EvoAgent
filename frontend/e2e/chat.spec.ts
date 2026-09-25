@@ -1,13 +1,16 @@
 import { expect, test } from "@playwright/test";
 
 test("网页对话可发送、等待回复并在刷新后恢复同一 Session", async ({ page }) => {
-  const sessions: Array<{ id: string; title: string; created_at: string }> = [];
+  const workspaceId = "00000000-0000-0000-0000-000000000001";
+  const sessions: Array<{ id: string; title: string; workspace_id: string; created_at: string }> = [];
   const messages: Array<{ id: string; task_id: string; run_id: string; sequence: number; kind: string; role: string; content: string; created_at: string }> = [];
   let taskCount = 0;
   const now = new Date().toISOString();
+  await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [{ id: workspaceId, name: "Local workspace", created_at: now }] }));
   await page.route("**/api/v1/sessions", async (route) => {
     if (route.request().method() === "POST") {
-      const item = { id: "session-1", title: route.request().postDataJSON().title, created_at: now };
+      expect(route.request().postDataJSON().workspace_id).toBe(workspaceId);
+      const item = { id: "session-1", title: route.request().postDataJSON().title, workspace_id: workspaceId, created_at: now };
       sessions.push(item);
       await route.fulfill({ status: 201, json: item });
     } else await route.fulfill({ json: sessions });
@@ -65,7 +68,9 @@ test("对话中可处理待审批工具并取消任务", async ({ page }) => {
   let approvalStatus = "pending";
   let decision = "";
   const now = new Date().toISOString();
-  await page.route("**/api/v1/sessions", (route) => route.fulfill({ json: [{ id: "session-1", title: "审批", created_at: now }] }));
+  const workspaceId = "00000000-0000-0000-0000-000000000001";
+  await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [{ id: workspaceId, name: "Local workspace", created_at: now }] }));
+  await page.route("**/api/v1/sessions", (route) => route.fulfill({ json: [{ id: "session-1", title: "审批", workspace_id: workspaceId, created_at: now }] }));
   await page.route("**/api/v1/sessions/session-1/messages", (route) => route.fulfill({ json: [
     { id: "goal-1", task_id: "task-1", run_id: "run-1", sequence: 1, kind: "goal", role: "user", content: "请执行任务", created_at: now },
   ] }));
@@ -92,4 +97,39 @@ test("对话中可处理待审批工具并取消任务", async ({ page }) => {
   await expect(page.getByRole("button", { name: "取消任务" })).toBeVisible();
   await page.getByRole("button", { name: "取消任务" }).click();
   await expect(page.getByText("状态：已取消")).toBeVisible();
+});
+
+test("网页可建立 Workspace 并把新对话放入所选作用域", async ({ page }) => {
+  const defaultId = "00000000-0000-0000-0000-000000000001";
+  const isolatedId = "workspace-2";
+  const now = new Date().toISOString();
+  let workspaces = [{ id: defaultId, name: "Local workspace", created_at: now }];
+  const sessions = [{ id: "old-session", title: "默认会话", workspace_id: defaultId, created_at: now }];
+  await page.route("**/api/v1/workspaces", async route => {
+    if (route.request().method() === "POST") {
+      expect(route.request().postDataJSON().name).toBe("隔离项目");
+      workspaces = [...workspaces, { id: isolatedId, name: "隔离项目", created_at: now }];
+      await route.fulfill({ status: 201, json: workspaces.at(-1) });
+    } else await route.fulfill({ json: workspaces });
+  });
+  await page.route("**/api/v1/sessions", async route => {
+    if (route.request().method() === "POST") {
+      expect(route.request().postDataJSON().workspace_id).toBe(isolatedId);
+      const item = { id: "isolated-session", title: "新问题", workspace_id: isolatedId, created_at: now };
+      sessions.push(item); await route.fulfill({ status: 201, json: item });
+    } else await route.fulfill({ json: sessions });
+  });
+  await page.route("**/api/v1/sessions/isolated-session/messages", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/tasks", route => route.fulfill({ status: 202, json: { id: "task-1", status: "queued", latest_run: { id: "run-1", provider: "mock", model: "mock" } } }));
+  await page.route("**/api/v1/tasks/task-1", route => route.fulfill({ json: { id: "task-1", status: "running", latest_run: { id: "run-1", provider: "mock", model: "mock" } } }));
+  await page.route("**/api/v1/runs/run-1/trace", route => route.fulfill({ json: { run_id: "run-1", task_id: "task-1", status: "running", error_code: null, tool_calls: [], tool_effects: [], approvals: [], events: [] } }));
+  await page.goto("/ui/");
+  await expect(page.getByRole("button", { name: "默认会话" })).toBeVisible();
+  await page.getByLabel("新 Workspace 名称").fill("隔离项目");
+  await page.getByRole("button", { name: "创建 Workspace" }).click();
+  await expect(page.getByLabel("当前 Workspace")).toHaveValue(isolatedId);
+  await expect(page.getByRole("button", { name: "默认会话" })).toHaveCount(0);
+  await page.getByLabel("发送消息").fill("新问题");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(page.getByRole("button", { name: "新问题" })).toBeVisible();
 });

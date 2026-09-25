@@ -4,6 +4,7 @@ import { memory, server, catalog, review, context, retrieval } from "../src/test
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/skills", r => r.fulfill({ json: [] }));
   await page.route("**/api/v1/sessions", r => r.fulfill({ json: [] }));
+  await page.route("**/api/v1/workspaces", r => r.fulfill({ json: [{ id: "00000000-0000-0000-0000-000000000001", name: "Local workspace", created_at: "2026-09-25" }] }));
 });
 test("Memory 来源、版本冲突、确认与异步删除", async ({ page }) => {
   let current = { ...memory }; let conflict = true; let jobStatus = "pending";
