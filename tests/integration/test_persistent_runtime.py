@@ -100,6 +100,62 @@ async def test_worker_executes_persistent_runner_to_terminal_state(runtime_envir
 
 
 @pytest.mark.asyncio
+async def test_second_task_receives_committed_session_conversation(runtime_environment) -> None:
+    database, settings, service, session_id = runtime_environment
+    manager = JobLeaseManager(database.session_factory, lease_seconds=3)
+    first = await service.create_task(
+        session_id=session_id, goal="我问的是 EvoAgent", provider="mock", model="mock-model"
+    )
+    first_provider = MockProvider([response("项目是 EvoAgent")])
+    first_worker = JobWorker(
+        worker_id="chat-first",
+        lease_manager=manager,
+        handler=runner(database, settings, first_provider),
+        heartbeat_seconds=1,
+        poll_seconds=0.01,
+    )
+    assert await first_worker.run_once() is True
+    assert (await service.get_task(first.task.id)).task.status is TaskStatus.COMPLETED
+
+    second = await service.create_task(
+        session_id=session_id, goal="刚才是什么项目？", provider="mock", model="mock-model"
+    )
+    second_provider = MockProvider([response("EvoAgent")])
+    second_worker = JobWorker(
+        worker_id="chat-second",
+        lease_manager=manager,
+        handler=runner(database, settings, second_provider),
+        heartbeat_seconds=1,
+        poll_seconds=0.01,
+    )
+    assert await second_worker.run_once() is True
+    assert (await service.get_task(second.task.id)).task.status is TaskStatus.COMPLETED
+    assert [message.content for message in second_provider.requests[0].messages[1:]] == [
+        "我问的是 EvoAgent",
+        "项目是 EvoAgent",
+        "刚才是什么项目？",
+    ]
+
+    isolated = await service.create_session("另一个会话")
+    other = await service.create_task(
+        session_id=isolated.id, goal="新会话的问题", provider="mock", model="mock-model"
+    )
+    other_provider = MockProvider([response("独立回答")])
+    other_worker = JobWorker(
+        worker_id="chat-isolated",
+        lease_manager=manager,
+        handler=runner(database, settings, other_provider),
+        heartbeat_seconds=1,
+        poll_seconds=0.01,
+    )
+    assert await other_worker.run_once() is True
+    assert (await service.get_task(other.task.id)).task.status is TaskStatus.COMPLETED
+    assert [message.content for message in other_provider.requests[0].messages[1:]] == [
+        "新会话的问题"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_recovery_resumes_from_latest_legal_snapshot(runtime_environment) -> None:
     database, settings, service, session_id = runtime_environment
     aggregate = await service.create_task(

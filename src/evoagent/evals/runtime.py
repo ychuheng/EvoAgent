@@ -349,7 +349,7 @@ async def history_for_run(factory, run_id):
             select(RuntimeEvalRunRecord).where(RuntimeEvalRunRecord.run_id == run_id)
         )
         if record is None:
-            return ()
+            return None
         case = await db.get(EvalCaseRecord, record.case_id)
         messages = tuple(
             Message.model_validate(item) for item in case.public_input.get("history", [])

@@ -1,0 +1,11 @@
+# 本地对话验收覆盖层：凭据只来自仓库根目录被忽略的 .env.deepseek。
+# 与 compose.yml 一起使用；监听仍限制在 127.0.0.1。
+services:
+  api:
+    env_file: ../../.env.deepseek
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible
+  worker:
+    env_file: ../../.env.deepseek
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible

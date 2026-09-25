@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -11,6 +12,7 @@ from evoagent.config import Settings
 from evoagent.db.base import Base
 from evoagent.db.models import RunEventRecord, RunRecord, TaskRecord
 from evoagent.db.session import Database
+from evoagent.sessions.service import project_terminal
 from evoagent.tasks.lease import JobLeaseManager
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
@@ -64,6 +66,34 @@ async def test_create_task_is_atomic_and_returns_202(tmp_path: Path) -> None:
         assert task_count == 1
         assert run_count == 1
         assert [(event.sequence, event.event_type) for event in events] == [(1, "task.queued")]
+
+
+@pytest.mark.asyncio
+async def test_session_messages_show_ordered_goals_and_committed_answers(tmp_path: Path) -> None:
+    async with api_client(tmp_path) as (client, database):
+        created = await client.post("/api/v1/sessions", json={"title": "连续对话"})
+        session_id = created.json()["id"]
+        first = await client.post(
+            "/api/v1/tasks", json={"session_id": session_id, "goal": "第一问"}
+        )
+        async with database.session_factory() as session:
+            task = await session.get(TaskRecord, UUID(first.json()["id"]))
+            run = await session.get(RunRecord, UUID(first.json()["latest_run"]["id"]))
+            run.status = PersistentRunStatus.COMPLETED
+            run.final_answer = "第一答"
+            await project_terminal(session, task, run)
+            await session.commit()
+        second = await client.post(
+            "/api/v1/tasks", json={"session_id": session_id, "goal": "第二问"}
+        )
+        response = await client.get(f"/api/v1/sessions/{session_id}/messages")
+        assert response.status_code == 200
+        assert [item["content"] for item in response.json()] == ["第一问", "第一答", "第二问"]
+        assert [item["role"] for item in response.json()] == ["user", "assistant", "user"]
+        assert [item["sequence"] for item in response.json()] == [1, 2, 3]
+        assert response.json()[-1]["task_id"] == second.json()["id"]
+        missing = await client.get("/api/v1/sessions/00000000-0000-0000-0000-000000000001/messages")
+        assert missing.status_code == 404
 
 
 @pytest.mark.asyncio

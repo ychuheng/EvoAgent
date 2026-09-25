@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { memory, server, catalog, review, context, retrieval } from "../src/test/phase4-fixtures";
 
-test.beforeEach(async ({ page }) => { await page.route("**/api/v1/skills", r => r.fulfill({ json: [] })); });
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/skills", r => r.fulfill({ json: [] }));
+  await page.route("**/api/v1/sessions", r => r.fulfill({ json: [] }));
+});
 test("Memory 来源、版本冲突、确认与异步删除", async ({ page }) => {
   let current = { ...memory }; let conflict = true; let jobStatus = "pending";
   await page.route("**/api/v1/sessions/s-1/memories", r => r.fulfill({ json: [current] }));

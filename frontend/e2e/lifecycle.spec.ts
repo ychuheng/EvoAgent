@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/sessions", (route) => route.fulfill({ json: [] }));
+});
+
 const skill = {
   id: "11111111-1111-1111-1111-111111111111",
   name: "math_report",

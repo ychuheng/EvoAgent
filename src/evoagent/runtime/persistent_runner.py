@@ -9,7 +9,7 @@ from evoagent.config import Settings
 from evoagent.core.context import ContextBuilder
 from evoagent.core.context_policy import policy_from_settings
 from evoagent.core.loop import AgentLoop
-from evoagent.core.models import AgentLoopStatus, EventType
+from evoagent.core.models import AgentLoopStatus, EventType, Message, MessageRole
 from evoagent.db.models import RunRecord, TaskRecord
 from evoagent.mcp.adapter import register_run_tools
 from evoagent.mcp.connections import ConnectionManager
@@ -22,6 +22,7 @@ from evoagent.runtime.checkpoints import PersistentCheckpointStore, SnapshotComp
 from evoagent.runtime.context_store import ContextStore
 from evoagent.runtime.retry import RetryPolicy
 from evoagent.runtime.run_config import RunConfigSnapshot, RunMode, sha256_text
+from evoagent.sessions.service import history_for_task
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.rendering import SkillContextRenderer
 from evoagent.skills.retrieval import SkillRetrievalService
@@ -198,6 +199,14 @@ class PersistentAgentRunner:
             from evoagent.evals.runtime import history_for_run
 
             history = await history_for_run(self._session_factory, run.id)
+            if history is None:
+                async with self._session_factory() as session:
+                    records = await history_for_task(session, task)
+                history = tuple(
+                    Message(role=MessageRole(record.role), content=record.content)
+                    for record in records
+                    if record.kind in {"goal", "terminal"} and record.role in {"user", "assistant"}
+                )
             initial_messages = (initial_messages[0], *history, *initial_messages[1:])
         else:
             initial_messages = resume_state.messages

@@ -6,8 +6,9 @@ import { App } from "./App";
 afterEach(() => vi.restoreAllMocks());
 
 test("Skill 列表为空时显示明确空状态", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 })));
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))));
   render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Skill 目录" }));
   expect(await screen.findByText("还没有 Skill。")).toBeInTheDocument();
 });
 

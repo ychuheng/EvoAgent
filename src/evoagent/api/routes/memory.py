@@ -12,6 +12,7 @@ from evoagent.db.models import (
     MemorySourceRecord,
     MessageRecord,
     SessionArchiveRecord,
+    SessionRecord,
 )
 from evoagent.memory.archival import enqueue_archive
 from evoagent.memory.extraction import extract_proposals
@@ -45,6 +46,8 @@ async def messages(
     session_id: UUID, database: DatabaseDependency, before: int | None = Query(default=None, ge=1)
 ):
     async with database.session_factory() as session:
+        if await session.get(SessionRecord, session_id) is None:
+            raise MemoryError("session_not_found")
         query = select(MessageRecord).where(MessageRecord.session_id == session_id)
         if before is not None:
             query = query.where(MessageRecord.session_sequence < before)
@@ -58,7 +61,9 @@ async def messages(
                 "hash": m.content_hash,
                 "backfill": m.backfill,
                 "run_id": m.run_id,
+                "task_id": m.task_id,
                 "kind": m.kind,
+                "created_at": m.created_at,
             }
             for m in rows
         ]
