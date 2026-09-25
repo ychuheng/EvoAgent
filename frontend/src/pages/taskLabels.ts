@@ -9,6 +9,11 @@ export function errorLabel(code: string): string {
     provider_network_error: "模型服务连接失败",
     provider_timeout: "模型服务超时",
     context_budget_exceeded: "上下文超过预算",
+    invalid_arguments: "工具参数无效",
+    tool_timeout: "工具执行超时",
+    run_timeout: "任务执行超时",
+    side_effect_unknown: "外部操作结果不确定",
+    unknown_effect: "外部操作结果不确定",
   };
   const label = known[code];
   return label ? `${label}（${code}）` : code;

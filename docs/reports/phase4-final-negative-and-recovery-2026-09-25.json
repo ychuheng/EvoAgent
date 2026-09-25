@@ -1,0 +1,25 @@
+{
+  "browser_negative_paths": {
+    "playwright_test": "frontend/e2e/chat.spec.ts::页面展示超时、无效参数和 UNKNOWN 副作用",
+    "assertions": [
+      "provider_timeout is shown as 模型服务超时",
+      "invalid_arguments remains visible on the failed tool call",
+      "UNKNOWN approval asks for retry or committed:actual result"
+    ],
+    "note": "The browser test freezes the persisted trace response; it verifies the user-facing contract, not model probability of producing malformed arguments."
+  },
+  "backend_long_context": {
+    "commands": [
+      "tests/unit/test_context_policy.py",
+      "tests/integration/test_phase4_demos.py",
+      "tests/integration/test_persistent_runtime.py"
+    ],
+    "result": "bounded policy rejects protected over-budget requests; optional context is omitted explicitly; snapshot restore keeps the frozen decision",
+    "production_claim": "No claim of arbitrary context-window support; configured budget remains authoritative."
+  },
+  "running_worker_crash": {
+    "test": "tests/e2e/test_worker_process_recovery.py",
+    "result": "3 modes passed: readonly resumes, COMMITTED effect is not duplicated, UNKNOWN waits for user; persisted trace and effect status match",
+    "scope": "subprocess crash fixture with isolated SQLite; this is a real process boundary test, not a browser model-quality claim"
+  }
+}

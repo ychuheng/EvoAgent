@@ -133,3 +133,26 @@ test("网页可建立 Workspace 并把新对话放入所选作用域", async ({ 
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByRole("button", { name: "新问题" })).toBeVisible();
 });
+
+test("页面展示超时、无效参数和 UNKNOWN 副作用", async ({ page }) => {
+  const workspaceId = "00000000-0000-0000-0000-000000000001";
+  const now = new Date().toISOString();
+  let mode: "failed" | "unknown" = "failed";
+  await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [{ id: workspaceId, name: "Local workspace", created_at: now }] }));
+  await page.route("**/api/v1/sessions", route => route.fulfill({ json: [{ id: "session-negative", title: "负路径", workspace_id: workspaceId, created_at: now }] }));
+  await page.route("**/api/v1/sessions/session-negative/messages", route => route.fulfill({ json: [{ id: "goal-negative", task_id: "task-negative", run_id: "run-negative", sequence: 1, kind: "goal", role: "user", content: "负路径", created_at: now }] }));
+  await page.route("**/api/v1/tasks/task-negative", route => route.fulfill({ json: { id: "task-negative", status: mode, cancel_requested: false, latest_run: { id: "run-negative", provider: "mock", model: "fixture" } } }));
+  await page.route("**/api/v1/runs/run-negative/trace", route => route.fulfill({ json: {
+    run_id: "run-negative", task_id: "task-negative", status: mode, error_code: mode === "failed" ? "provider_timeout" : "side_effect_unknown",
+    tool_calls: [{ id: "call-negative", tool_name: "file_write", arguments: { path: "report.md", overwrite: true }, status: mode === "failed" ? "failed" : "waiting_user", result_summary: null, error_code: mode === "failed" ? "invalid_arguments" : "side_effect_unknown" }],
+    tool_effects: mode === "failed" ? [] : [{ tool_call_id: "call-negative", status: "unknown" }],
+    approvals: mode === "failed" ? [] : [{ id: "approval-negative", tool_call_id: "call-negative", status: "pending", risk: "R2", reason: "外部状态需核对" }], events: [],
+  } }));
+  await page.route("**/api/v1/tool-approvals/approval-negative/approve", route => route.fulfill({ json: { id: "approval-negative", status: "approved" } }));
+  await page.goto("/ui/"); await page.getByRole("button", { name: "负路径" }).click();
+  await expect(page.getByRole("alert")).toContainText("模型服务超时");
+  await expect(page.getByText("invalid_arguments")).toBeVisible();
+  mode = "unknown"; await page.reload(); await page.getByRole("button", { name: "负路径" }).click();
+  await expect(page.getByRole("alert")).toContainText("外部操作结果不确定");
+  await expect(page.getByPlaceholder("retry 或 committed:实际结果")).toBeVisible();
+});
