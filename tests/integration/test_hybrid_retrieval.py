@@ -72,6 +72,24 @@ async def test_index_job_and_frozen_context_restore_without_provider(env, tmp_pa
         assert len(tuple(await session.scalars(select(RetrievalBatchRecord)))) == 1
 
 
+async def test_native_dimension_profile_is_indexed_without_padding(env, tmp_path):
+    db, _, sid, store = env
+    service, entry, version, _, _ = await proposed(env)
+    await confirm(service, sid, entry, version)
+    index = IndexService(db.session_factory, MockEmbeddingProvider(), dimension=384)
+    worker = MaintenanceWorker(db.session_factory, store, index)
+    assert await worker.run_once()
+    async with db.session_factory() as session:
+        profile = await session.scalar(select(EmbeddingProfileRecord))
+        vector = await session.scalar(select(DocumentEmbeddingRecord))
+        assert profile.dimension == len(vector.vector) == 384
+    task, resolve = await resolver(env, tmp_path, embedding_dimension=384)
+    result = await resolve.resolve(task.task, task.run)
+    assert len(result.memory_texts) == 1
+    with pytest.raises(EmbeddingError, match="profile identity changed"):
+        await IndexService(db.session_factory, MockEmbeddingProvider()).ensure_profile()
+
+
 async def test_partition_budget_records_non_injection(env, tmp_path):
     db, _, _, _ = env
     await indexed(env)

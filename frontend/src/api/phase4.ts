@@ -9,6 +9,7 @@ export interface Memory {
   sources?: { message_id: string; source_hash: string; locator: unknown }[];
   events?: { action: string; actor: string; reason: string; created_at: string }[];
 }
+export interface SessionMessage { id: string; sequence: number; role: string; content: string; kind: string; }
 export interface MaintenanceJob {
   id: string; kind: string; status: string; attempts: number; result: unknown;
   error_code: string | null; next_attempt_at: string | null;
@@ -50,6 +51,9 @@ export interface RetrievalEvidence {
 const id = encodeURIComponent;
 const json = (body: unknown, method = "POST") => ({ method, body: JSON.stringify(body) });
 export const phase4 = {
+  messages: (session: string) => request<SessionMessage[]>(`/sessions/${id(session)}/messages`),
+  propose: (session: string, sourceMessageId: string, factKey: string, content: string, scope: "session" | "workspace") => request<Memory>(`/sessions/${id(session)}/memories`, json({ source_message_id: sourceMessageId, fact_key: factKey, content, kind: "preference", scope })),
+  extract: (session: string, message: string) => request<Memory[]>(`/sessions/${id(session)}/memory-extractions/${id(message)}`, json({})),
   memories: (session: string) => request<Memory[]>(`/sessions/${id(session)}/memories`),
   memory: (session: string, version: string) => request<Memory>(`/sessions/${id(session)}/memories/${id(version)}`),
   decide: (session: string, memory: Memory, action: "confirm" | "reject" | "revoke" | "erase") => request<Memory>(`/sessions/${id(session)}/memories/${id(memory.version_id)}/decision`, json({ action, expected_lock_version: memory.lock_version })),

@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
 import { phase4, type ContextEvidence, type RetrievalEvidence } from "../api/phase4";
 import { Badge, Empty, ErrorNotice, Loading } from "../components/State";
 import { Evidence, failure } from "../components/Evidence";
 
-export function ContextPage() {
-  const [run, setRun] = useState("");
+export function ContextPage({ initialRunId = "" }: { initialRunId?: string }) {
+  const [run, setRun] = useState(initialRunId);
   const [context, setContext] = useState<ContextEvidence | null>(null);
   const [retrieval, setRetrieval] = useState<RetrievalEvidence | null>(null);
   const [missing, setMissing] = useState(false);
@@ -25,6 +25,7 @@ export function ContextPage() {
       }
     } catch (e) { setError(failure(e)); } finally { setBusy(false); }
   }
+  useEffect(() => { if (initialRunId) void load(); }, [initialRunId]);
   return <section><h2>运行上下文证据</h2><p>查看冻结预算、上下文修订与检索选择。估算值不等于模型账单；没有记录不等于零消耗。</p>
     <form className="form-row" onSubmit={e => { e.preventDefault(); void load(); }}><label>Run ID<input required disabled={busy} value={run} onChange={e => setRun(e.target.value)} /></label><button disabled={busy}>查看上下文</button></form>
     {busy && <Loading />}{error && <ErrorNotice message={error} />}

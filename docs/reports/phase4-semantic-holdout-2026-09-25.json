@@ -1,0 +1,99 @@
+{
+  "dataset": "phase4_semantic_retrieval_holdout",
+  "version": 1,
+  "profile": {
+    "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "dimension": 384,
+    "preprocessing": "fastembed-0.7.4-mean-v1"
+  },
+  "samples": 10,
+  "maximum_distance": 0.7,
+  "lexical_top1_hits": 6,
+  "hybrid_top1_hits": 9,
+  "vector_top1_hits": 10,
+  "embedding_batch_ms": 180,
+  "input_characters": 273,
+  "provider_usage_tokens": 0,
+  "cases": [
+    {
+      "expected": "commute",
+      "lexical_top1": "commute",
+      "hybrid_top1": "commute",
+      "vector_top1": "commute",
+      "expected_distance": 0.65802,
+      "hybrid_candidates": 5
+    },
+    {
+      "expected": "diet",
+      "lexical_top1": "diet",
+      "hybrid_top1": "diet",
+      "vector_top1": "diet",
+      "expected_distance": 0.40445,
+      "hybrid_candidates": 8
+    },
+    {
+      "expected": "music",
+      "lexical_top1": "music",
+      "hybrid_top1": "music",
+      "vector_top1": "music",
+      "expected_distance": 0.27423,
+      "hybrid_candidates": 5
+    },
+    {
+      "expected": "backup",
+      "lexical_top1": "meeting",
+      "hybrid_top1": "meeting",
+      "vector_top1": "backup",
+      "expected_distance": 0.40901,
+      "hybrid_candidates": 2
+    },
+    {
+      "expected": "meeting",
+      "lexical_top1": "meeting",
+      "hybrid_top1": "meeting",
+      "vector_top1": "meeting",
+      "expected_distance": 0.56072,
+      "hybrid_candidates": 7
+    },
+    {
+      "expected": "travel",
+      "lexical_top1": "commute",
+      "hybrid_top1": "travel",
+      "vector_top1": "travel",
+      "expected_distance": 0.45646,
+      "hybrid_candidates": 2
+    },
+    {
+      "expected": "language",
+      "lexical_top1": "device",
+      "hybrid_top1": "language",
+      "vector_top1": "language",
+      "expected_distance": 0.29179,
+      "hybrid_candidates": 2
+    },
+    {
+      "expected": "device",
+      "lexical_top1": "language",
+      "hybrid_top1": "device",
+      "vector_top1": "device",
+      "expected_distance": 0.58213,
+      "hybrid_candidates": 5
+    },
+    {
+      "expected": "plant",
+      "lexical_top1": "plant",
+      "hybrid_top1": "plant",
+      "vector_top1": "plant",
+      "expected_distance": 0.25887,
+      "hybrid_candidates": 1
+    },
+    {
+      "expected": "reading",
+      "lexical_top1": "reading",
+      "hybrid_top1": "reading",
+      "vector_top1": "reading",
+      "expected_distance": 0.25939,
+      "hybrid_candidates": 3
+    }
+  ]
+}

@@ -70,6 +70,17 @@ class ApprovalService:
                 raise ApprovalServiceError(f"approval does not exist: {approval_id}")
             if approval.status is not ApprovalStatus.PENDING:
                 raise ApprovalServiceError("approval has already been decided")
+            if task.status in {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED} or (
+                run.status
+                in {
+                    PersistentRunStatus.COMPLETED,
+                    PersistentRunStatus.FAILED,
+                    PersistentRunStatus.CANCELLED,
+                    PersistentRunStatus.TIMEOUT,
+                    PersistentRunStatus.LIMIT_REACHED,
+                }
+            ):
+                raise ApprovalServiceError("approval task is terminal")
             call = await unit.session.get(ToolCallRecord, approval.tool_call_id)
             if call is None:
                 raise ApprovalServiceError("approval tool call does not exist")

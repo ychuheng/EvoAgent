@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from uuid import UUID
 
@@ -174,7 +175,8 @@ async def test_model_candidate_generator_rejects_invalid_json() -> None:
         message=Message(role=MessageRole.ASSISTANT, content="not json"),
         finish_reason=FinishReason.STOP,
     )
-    generator = ModelCandidateGenerator(MockProvider((response,)), model="mock-model")
+    provider = MockProvider((response,))
+    generator = ModelCandidateGenerator(provider, model="mock-model")
     source = FrozenSkillSource(
         eval_run_id=UUID(int=1),
         run_id=UUID(int=2),
@@ -184,3 +186,6 @@ async def test_model_candidate_generator_rejects_invalid_json() -> None:
     )
     with pytest.raises(CandidateGenerationError):
         await generator.generate((source,))
+    prompt = json.loads(provider.requests[0].messages[1].content or "{}")
+    assert "skill_definition_json_schema" in prompt
+    assert prompt["minimal_example"]["steps"][0]["action"] == "model"

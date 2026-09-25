@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from evoagent.providers.base import ProviderError
 from evoagent.skills.extraction import CandidateGenerator, SkillExtractionService
 from evoagent.skills.lifecycle import SkillStatus
 from evoagent.skills.provenance import ProvenanceService
@@ -125,6 +126,8 @@ async def _extract(payload: SkillExtractionRequest, request: Request) -> SkillEx
             _validator(request),
             max_sources=settings.skill_max_sources,
         ).extract(payload.source_eval_run_ids)
+    except ProviderError as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, error.code) from error
     except ValueError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
     return SkillExtractionResponse(

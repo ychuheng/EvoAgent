@@ -7,6 +7,7 @@ test.beforeEach(async ({ page }) => {
 });
 test("Memory 来源、版本冲突、确认与异步删除", async ({ page }) => {
   let current = { ...memory }; let conflict = true; let jobStatus = "pending";
+  await page.route("**/api/v1/sessions/s-1/messages", r => r.fulfill({ json: [] }));
   await page.route("**/api/v1/sessions/s-1/memories", r => r.fulfill({ json: [current] }));
   await page.route("**/api/v1/sessions/s-1/memories/memory-1", r => r.fulfill({ json: current }));
   await page.route("**/api/v1/sessions/s-1/memories/memory-1/decision", async r => {
@@ -25,6 +26,35 @@ test("Memory 来源、版本冲突、确认与异步删除", async ({ page }) =>
   await page.getByText("撤销并清理内容").click(); await expect(page.getByLabel("删除任务")).toContainText("pending");
   jobStatus = "completed"; current.content = null;
   await page.getByText("刷新事实").click(); await expect(page.getByLabel("删除任务")).toContainText("completed");
+});
+
+test("从用户消息创建作用域明确的记忆候选", async ({ page }) => {
+  let items: typeof memory[] = [];
+  await page.route("**/api/v1/sessions/s-1/messages", r => r.fulfill({ json: [
+    { id: "message-1", sequence: 1, role: "user", kind: "goal", content: "请记住我偏好中文回答。" },
+    { id: "message-2", sequence: 2, role: "assistant", kind: "answer", content: "知道了" },
+  ] }));
+  await page.route("**/api/v1/sessions/s-1/memories", async r => {
+    if (r.request().method() === "POST") {
+      expect(r.request().postDataJSON()).toEqual({
+        source_message_id: "message-1", fact_key: "preference.language",
+        content: "偏好中文回答", kind: "preference", scope: "workspace",
+      });
+      items = [{ ...memory, fact_key: "preference.language", content: "偏好中文回答" }];
+      await r.fulfill({ json: items[0] });
+      return;
+    }
+    await r.fulfill({ json: items });
+  });
+  await page.goto("/ui/"); await page.getByRole("button", { name: "Memory 管理" }).click();
+  await page.getByLabel("Session ID").fill("s-1"); await page.getByText("读取记忆").click();
+  await page.getByLabel("记忆来源消息").selectOption("message-1");
+  await page.getByLabel("事实键").fill("preference.language");
+  await page.getByLabel("事实原文").fill("偏好中文回答");
+  await page.getByLabel("记忆作用域").selectOption("workspace");
+  await page.getByText("创建候选").click();
+  await expect(page.getByRole("status")).toContainText("未确认的事实不会注入新任务");
+  await expect(page.getByRole("button", { name: /preference.language/ })).toContainText("proposed");
 });
 
 test("MCP 目录审核、秘密不回显、排空与卸载", async ({ page }) => {

@@ -41,9 +41,19 @@ async def enqueue_source(session, key):
 
 
 class IndexService:
-    def __init__(self, factory, provider, model="mock-hash-v1", service_gate=None):
+    def __init__(
+        self,
+        factory,
+        provider,
+        model="mock-hash-v1",
+        service_gate=None,
+        dimension=1536,
+        preprocessing="text-v1",
+    ):
         self.factory, self.provider, self.model = factory, provider, model
         self.service_gate = service_gate
+        self.dimension = dimension
+        self.preprocessing = preprocessing
 
     async def ensure_profile(self):
         async with self.factory() as session:
@@ -57,7 +67,11 @@ class IndexService:
             )
             if row is None:
                 row = EmbeddingProfileRecord(
-                    model=self.model, active_generation=1, next_generation=2
+                    model=self.model,
+                    dimension=self.dimension,
+                    preprocessing=self.preprocessing,
+                    active_generation=1,
+                    next_generation=2,
                 )
                 session.add(row)
                 await session.flush()
@@ -66,6 +80,8 @@ class IndexService:
                         profile_id=row.id, generation=1, status="active", manifest=[]
                     )
                 )
+            elif row.dimension != self.dimension or row.preprocessing != self.preprocessing:
+                raise EmbeddingError("embedding profile identity changed; use a new model name")
             await session.commit()
             return row
 

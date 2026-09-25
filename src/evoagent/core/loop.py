@@ -118,6 +118,27 @@ class AgentLoop:
             first_iteration = 1
 
         self._known_usage = known_usage
+        if (
+            resume_state is not None
+            and messages[-1].role is MessageRole.ASSISTANT
+            and (messages[-1].tool_calls)
+        ):
+            (
+                previous_tool_fingerprint,
+                repeated_tool_calls,
+                early_result,
+            ) = await self._execute_tool_iteration(
+                calls=messages[-1].tool_calls,
+                messages=messages,
+                iteration=first_iteration,
+                known_usage=known_usage,
+                usage_is_complete=usage_is_complete,
+                previous_tool_fingerprint=previous_tool_fingerprint,
+                repeated_tool_calls=repeated_tool_calls,
+            )
+            if early_result is not None:
+                return early_result
+            first_iteration += 1
         for iteration in range(first_iteration, self._max_iterations + 1):
             request = ModelRequest(
                 messages=tuple(messages),
@@ -244,56 +265,29 @@ class AgentLoop:
             messages.append(response.message)
 
             if response.message.tool_calls:
-                results = await self._executor.execute_many(response.message.tool_calls)
-                messages.extend(self._tool_message(result) for result in results)
-
-                fingerprint = self._tool_fingerprint(response.message.tool_calls, results)
-                if fingerprint == previous_tool_fingerprint:
-                    repeated_tool_calls += 1
-                else:
-                    previous_tool_fingerprint = fingerprint
-                    repeated_tool_calls = 1
                 await self._save_checkpoint(
                     messages=messages,
-                    completed_iterations=iteration,
+                    completed_iterations=iteration - 1,
                     usage=known_usage if usage_is_complete else None,
                     usage_is_complete=usage_is_complete,
                     previous_tool_fingerprint=previous_tool_fingerprint,
                     repeated_tool_calls=repeated_tool_calls,
                 )
-                if any(result.error_code == "rate_limited" for result in results):
-                    return self._failure(
-                        messages,
-                        iteration,
-                        known_usage if usage_is_complete else None,
-                        "rate_limited",
-                        "tool quota unavailable",
-                    )
-                if repeated_tool_calls >= self._max_repeated_tool_calls:
-                    return AgentLoopResult(
-                        status=AgentLoopStatus.LIMIT_REACHED,
-                        messages=tuple(messages),
-                        iterations=iteration,
-                        usage=known_usage if usage_is_complete else None,
-                        error_code="repeated_tool_calls",
-                        error_message=(
-                            "identical tool calls produced identical results "
-                            f"{repeated_tool_calls} times"
-                        ),
-                    )
-
-                if known_usage.total_tokens >= self._max_total_tokens:
-                    return AgentLoopResult(
-                        status=AgentLoopStatus.LIMIT_REACHED,
-                        messages=tuple(messages),
-                        iterations=iteration,
-                        usage=known_usage if usage_is_complete else None,
-                        error_code="token_budget_reached",
-                        error_message=(
-                            f"token budget reached: {known_usage.total_tokens} "
-                            f">= {self._max_total_tokens}"
-                        ),
-                    )
+                (
+                    previous_tool_fingerprint,
+                    repeated_tool_calls,
+                    early_result,
+                ) = await self._execute_tool_iteration(
+                    calls=response.message.tool_calls,
+                    messages=messages,
+                    iteration=iteration,
+                    known_usage=known_usage,
+                    usage_is_complete=usage_is_complete,
+                    previous_tool_fingerprint=previous_tool_fingerprint,
+                    repeated_tool_calls=repeated_tool_calls,
+                )
+                if early_result is not None:
+                    return early_result
                 continue
 
             if response.finish_reason is FinishReason.STOP:
@@ -330,6 +324,76 @@ class AgentLoop:
             error_code="max_iterations_reached",
             error_message=f"maximum iterations reached: {self._max_iterations}",
         )
+
+    async def _execute_tool_iteration(
+        self,
+        *,
+        calls: tuple[ToolCall, ...],
+        messages: list[Message],
+        iteration: int,
+        known_usage: TokenUsage,
+        usage_is_complete: bool,
+        previous_tool_fingerprint: str | None,
+        repeated_tool_calls: int,
+    ) -> tuple[str | None, int, AgentLoopResult | None]:
+        """在已保存的完整模型响应后执行工具，恢复时复用原始调用。"""
+
+        results = await self._executor.execute_many(calls)
+        messages.extend(self._tool_message(result) for result in results)
+        fingerprint = self._tool_fingerprint(calls, results)
+        if fingerprint == previous_tool_fingerprint:
+            repeated_tool_calls += 1
+        else:
+            previous_tool_fingerprint = fingerprint
+            repeated_tool_calls = 1
+        usage = known_usage if usage_is_complete else None
+        await self._save_checkpoint(
+            messages=messages,
+            completed_iterations=iteration,
+            usage=usage,
+            usage_is_complete=usage_is_complete,
+            previous_tool_fingerprint=previous_tool_fingerprint,
+            repeated_tool_calls=repeated_tool_calls,
+        )
+        if any(result.error_code == "rate_limited" for result in results):
+            return (
+                previous_tool_fingerprint,
+                repeated_tool_calls,
+                self._failure(messages, iteration, usage, "rate_limited", "tool quota unavailable"),
+            )
+        if repeated_tool_calls >= self._max_repeated_tool_calls:
+            return (
+                previous_tool_fingerprint,
+                repeated_tool_calls,
+                AgentLoopResult(
+                    status=AgentLoopStatus.LIMIT_REACHED,
+                    messages=tuple(messages),
+                    iterations=iteration,
+                    usage=usage,
+                    error_code="repeated_tool_calls",
+                    error_message=(
+                        "identical tool calls produced identical results "
+                        f"{repeated_tool_calls} times"
+                    ),
+                ),
+            )
+        if known_usage.total_tokens >= self._max_total_tokens:
+            return (
+                previous_tool_fingerprint,
+                repeated_tool_calls,
+                AgentLoopResult(
+                    status=AgentLoopStatus.LIMIT_REACHED,
+                    messages=tuple(messages),
+                    iterations=iteration,
+                    usage=usage,
+                    error_code="token_budget_reached",
+                    error_message=(
+                        f"token budget reached: {known_usage.total_tokens} "
+                        f">= {self._max_total_tokens}"
+                    ),
+                ),
+            )
+        return previous_tool_fingerprint, repeated_tool_calls, None
 
     async def _save_checkpoint(
         self,

@@ -23,6 +23,9 @@ async function mockEmptySkills(page: Page) {
 
 test("查看配对报告", async ({ page }) => {
   await mockEmptySkills(page);
+  await page.route("**/api/v1/eval-datasets", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/eval-experiments/exp-1", (route) => route.fulfill({ json: { id: "exp-1", status: "completed", skill_version_id: null } }));
+  await page.route("**/api/v1/eval-experiments/exp-1/pairs", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/eval-experiments/*/report", (route) =>
     route.fulfill({
       status: 200,
@@ -56,7 +59,7 @@ test("查看配对报告", async ({ page }) => {
   await page.goto("/ui/");
   await page.getByRole("button", { name: "Eval 报告" }).click();
   await page.getByLabel("实验 ID").fill("exp-1");
-  await page.getByRole("button", { name: "查看报告" }).click();
+  await page.getByRole("button", { name: "刷新实验" }).click();
   await expect(page.getByText("100.0%")).toBeVisible();
   await expect(page.getByText("case-1")).toBeVisible();
 });
@@ -104,6 +107,8 @@ test("批准 REVIEW_REQUIRED 版本", async ({ page }) => {
   await page.getByRole("button", { name: "版本评审" }).click();
   await page.getByLabel("版本 ID", { exact: true }).fill("version-1");
   await page.getByRole("button", { name: "读取" }).click();
+  await page.getByLabel("评审人").fill("tester");
+  await page.getByLabel("评审依据").fill("逐例结果和门禁均已核对");
   await page.getByRole("button", { name: "批准并发布" }).click();
   await expect(page.getByText("版本已发布")).toBeVisible();
 });

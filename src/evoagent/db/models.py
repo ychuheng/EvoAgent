@@ -445,7 +445,7 @@ def protect_memory_content(_mapper, _connection, record):
 
 class EmbeddingProfileRecord(Base):
     __tablename__ = "embedding_profiles"
-    __table_args__ = (CheckConstraint("dimension = 1536", name="fixed_dimension"),)
+    __table_args__ = (CheckConstraint("dimension BETWEEN 1 AND 2000", name="supported_dimension"),)
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     model: Mapped[str] = mapped_column(String(256), unique=True)
     dimension: Mapped[int] = mapped_column(Integer, default=1536)

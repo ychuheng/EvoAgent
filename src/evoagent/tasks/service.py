@@ -7,7 +7,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from evoagent.db.models import RunRecord, SessionRecord, TaskRecord
+from evoagent.db.models import (
+    ApprovalStatus,
+    RunRecord,
+    SessionRecord,
+    TaskRecord,
+    ToolApprovalRecord,
+)
 from evoagent.db.repositories.base import ConcurrentUpdateError, RecordNotFoundError
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.runtime.run_config import RunMode
@@ -208,6 +214,16 @@ class TaskService:
                 )
             except (ConcurrentUpdateError, ValueError) as error:
                 raise TaskOperationConflictError(str(error)) from error
+            if task_target is TaskStatus.CANCELLED:
+                approvals = await unit.session.scalars(
+                    select(ToolApprovalRecord).where(
+                        ToolApprovalRecord.task_id == task.id,
+                        ToolApprovalRecord.status == ApprovalStatus.PENDING,
+                    )
+                )
+                for approval in approvals:
+                    approval.status = ApprovalStatus.CANCELLED
+                    approval.decided_at = datetime.now(UTC)
             await project_terminal(unit.session, task, run)
             await unit.events.append(
                 run_id=run.id,

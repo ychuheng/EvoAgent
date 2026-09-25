@@ -1,0 +1,28 @@
+{
+  "name": "phase4_semantic_retrieval_holdout",
+  "version": 1,
+  "documents": [
+    {"fact_key": "commute", "text": "我每天坐地铁去公司。"},
+    {"fact_key": "diet", "text": "晚餐我不吃花生，因为会过敏。"},
+    {"fact_key": "music", "text": "我练钢琴时最喜欢弹肖邦的夜曲。"},
+    {"fact_key": "backup", "text": "重要照片每周日备份到移动硬盘。"},
+    {"fact_key": "meeting", "text": "团队例会固定在周三上午十点。"},
+    {"fact_key": "travel", "text": "我计划秋天去云南徒步。"},
+    {"fact_key": "language", "text": "写工作邮件时请使用英语。"},
+    {"fact_key": "device", "text": "我的主要开发电脑运行 Windows 11。"},
+    {"fact_key": "plant", "text": "阳台上的绿萝需要每两周浇一次水。"},
+    {"fact_key": "reading", "text": "睡前我通常读半小时历史书。"}
+  ],
+  "queries": [
+    {"text": "上下班采用哪种公共交通？", "expected_fact_key": "commute"},
+    {"text": "有什么食物会引起我的不良反应？", "expected_fact_key": "diet"},
+    {"text": "弹奏乐器时偏爱哪位作曲家的作品？", "expected_fact_key": "music"},
+    {"text": "影像资料在星期几做离线副本？", "expected_fact_key": "backup"},
+    {"text": "部门的定期会议安排在何时？", "expected_fact_key": "meeting"},
+    {"text": "换季后想去哪里远足？", "expected_fact_key": "travel"},
+    {"text": "给同事发电邮该用哪种语言？", "expected_fact_key": "language"},
+    {"text": "平时写代码的机器是什么操作系统？", "expected_fact_key": "device"},
+    {"text": "窗边盆栽多久补充一次水？", "expected_fact_key": "plant"},
+    {"text": "临睡前常看哪一类书？", "expected_fact_key": "reading"}
+  ]
+}

@@ -19,6 +19,7 @@ from evoagent.evals.gates import GateReport, QualityGate, SkillEvaluationService
 from evoagent.evals.lifecycle import EvalExperimentStatus
 from evoagent.evals.metrics import EvaluationReportService
 from evoagent.evals.schema import EvalDatasetDefinition
+from evoagent.evals.service import SourceValidationError, SourceValidationService
 from evoagent.evals.validators import default_validator_registry
 from evoagent.skills.validation import SkillDefinitionValidator
 from evoagent.tools.registry import ToolRegistry
@@ -36,6 +37,11 @@ class EvaluationStartRequest(StrictModel):
     provider: str | None = Field(default=None, min_length=1, max_length=64)
     model: str | None = Field(default=None, min_length=1, max_length=256)
     repeats: int | None = Field(default=None, ge=1, le=100)
+
+
+class SourceValidationRequest(StrictModel):
+    run_id: UUID
+    eval_case_id: UUID
 
 
 def _components(request: Request):
@@ -111,6 +117,49 @@ async def list_datasets(request: Request) -> tuple[dict[str, Any], ...]:
         }
         for item in rows
     )
+
+
+@router.get("/eval-datasets/{dataset_id}/cases")
+async def list_dataset_cases(dataset_id: UUID, request: Request) -> tuple[dict[str, Any], ...]:
+    database = request.app.state.database
+    async with database.session_factory() as session:
+        if await session.get(EvalDatasetRecord, dataset_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "evaluation dataset not found")
+        rows = tuple(
+            await session.scalars(
+                select(EvalCaseRecord)
+                .where(EvalCaseRecord.dataset_id == dataset_id)
+                .order_by(EvalCaseRecord.case_key)
+            )
+        )
+    return tuple(
+        {
+            "id": str(case.id),
+            "case_key": case.case_key,
+            "task_family": case.task_family,
+            "split": case.split.value,
+            "public_input": case.public_input,
+        }
+        for case in rows
+    )
+
+
+@router.post("/eval-sources/validate", status_code=status.HTTP_201_CREATED)
+async def validate_source(payload: SourceValidationRequest, request: Request) -> dict[str, Any]:
+    service = SourceValidationService(
+        request.app.state.database.session_factory, default_validator_registry()
+    )
+    try:
+        source = await service.validate(run_id=payload.run_id, eval_case_id=payload.eval_case_id)
+    except (SourceValidationError, LookupError) as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    return {
+        "source_eval_run_id": str(source.id),
+        "run_id": str(source.run_id),
+        "eval_case_id": str(source.eval_case_id),
+        "passed": source.passed,
+        "validation_results": source.validation_results,
+    }
 
 
 @router.post("/eval-datasets/{dataset_id}/freeze")

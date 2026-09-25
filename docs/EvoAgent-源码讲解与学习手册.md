@@ -7995,3 +7995,77 @@ Demo incomplete 时先看是哪组、失败还是 skipped，再检查对应 TEST
 先在专用测试环境执行一组 Demo，再故意移除该组要求的环境配置，检查它变成 incomplete 而非 passed。复制一份报告到独立临时目录，改变内容后用 verify 验证哈希不一致；不要修改仓库中的冻结报告来做练习。最后阅读一次真实 Skill 失败样本，分别写出“模型回答事实”和“验证器判定”，解释为何两者需要分开。
 
 理解这些边界之后，才能把项目收尾做成可核验的交付，而不是把所有待办统一改成勾选。
+
+## 102. 补完：网页对话不是一层新的 Agent
+
+### 102.1 从输入框到持久化 Run
+
+入口 `frontend/src/pages/ChatPage.tsx` 持有当前 Session、消息列表与被选中的 Task；`frontend/src/api/chat.ts` 只调用已有 `/api/v1/sessions`、`/api/v1/tasks`、消息和任务读取接口。页面第一次发言先建 Session，后续发言复用同一 ID。请求提交后，页面定时读取 Task 状态；最终回复来自服务端已提交的消息记录，而不是模型流中的临时字符串。刷新时页面用本地保存的 Session ID 恢复同一会话，服务端才是消息内容的权威来源。
+
+`src/evoagent/tasks/service.py::create_task` 在一个事务中写 Task、首个 Run 和 goal 消息，并保存创建时的历史截止序号。普通 Worker 在 `runtime/persistent_runner.py` 组装模型请求时，只装入同一 Session 在截止序号之前的已提交历史。这样两个并发 Task 即使后来都完成，也不会把未来消息倒灌进早创建的 Task；Runtime Eval 的固定样本又走独立历史入口。网页显示上文并不意味着模型看到上文，所以测试须检查**实际传给 Provider 的消息序列**，而不只看 DOM。
+
+### 102.2 TaskInspector 的证据关系
+
+`frontend/src/pages/TaskInspector.tsx` 根据 Task ID 拉取状态与 Run ID，再用 Run ID 拉 Trace。工具名、参数、输出与错误都取 Trace，不解析模型自然语言。待审批时，页面把工具参数、风险与审核原因同时显示；`ask_user` 的输入框把用户回复作为决定送回审批 API。取消按钮调用 Task 取消，页面继续轮询到服务端终态；取消请求不是“立刻把 UI 改成已取消”。已选 Skill、Memory 检索数量与上下文证据是可点击的路径，不是对模型行为的猜测。
+
+这仍是终态轮询。Agent Loop 内部的 Provider 可以分块接收模型响应，但网页没有逐 Token 事件传输。想增加流式页面，需要新的事件顺序、重连与终态一致性契约；不能把内部流式称为用户流式。
+
+### 102.3 取消与审批竞态
+
+`tasks/service.py` 将 Task/Run 进入取消终态时同步关闭仍在等待的 ToolApproval；`tools/approvals.py` 决定前重新读取终态。两个入口共同使用数据库状态，而不是分别维护浏览器标志。否则页面取消后，旧审批链接仍能被提交，甚至恢复已经取消的任务。测试同时断言服务端审批状态和旧决定冲突，避免只看到按钮消失就认定竞态已处理。
+
+## 103. 补完：冻结工具调用，避免重启后重新提问
+
+### 103.1 失败的具体时序
+
+真实 `ask_user` 首次故障试验中，模型已经输出待执行的工具调用，Worker 停在审批；重启后原实现重新询问模型。模型可能生成措辞不同的新工具参数，形成第二次审批。即便用户只看见“还在等待”，持久化 Trace 已经包含两次不同调用。这说明只保存轮次计数不足以恢复一个已完成的模型决定。
+
+`src/evoagent/core/loop.py` 现在在模型完整响应之后、进入 ToolExecutor 之前，先把 assistant 消息和规范化的 ToolCall 集合写入检查点。恢复时按检查点中的调用继续执行，工具返回后再将结果交给模型；不重新生成这次调用。检查点只接受完整响应，不把半截流当成可执行决定。Task/Run 租约、审批和副作用账本仍分别校验，冻结 ToolCall 不是绕过风险审批的许可证。
+
+### 103.2 与副作用账本的边界
+
+只读工具可以在原许可下重试；写工具必须依据 `ToolEffect` 的提交/不确定状态处理。`COMMITTED` 的外部效果不应再调用一次，`UNKNOWN` 必须由用户核对外部事实后作一次性决定。冻结模型调用只解决“模型重生参数”的问题，不能凭文本相同推断外部写入没有发生。测试通过新进程重领同一 Task、检查工具调用数和审批数，辅以旧 COMMITTED/UNKNOWN 的专项故障测试。完整网页联合路径尚需继续验收。
+
+## 104. 补完：从真实来源到可撤回 Skill
+
+### 104.1 候选数据如何流转
+
+`frontend/src/pages/EvalPage.tsx` 先读取冻结数据集 TRAIN Case，并用 `POST /eval-sources/validate` 核对选择的 Run 是否满足已完成、来源类型和评测条件。后台提炼入口 `api/routes/skills.py` 调用 `skills/extraction.py::ModelCandidateGenerator`；提示中实际包含 `SkillDefinition.model_json_schema()` 和最小合法示例，不能只说“请遵守 Schema”。模型返回先经 Pydantic 校验，再保存候选版本；服务调用断线映射为明确的 503 Provider 错误，不把网络失败假扮成无效 Skill。
+
+候选不能直接发布。`EvalCoordinator` 按冻结 HOLDOUT 建 baseline 与 pinned Skill 配对运行，保存每个 EvalRun、可比性、Token/工具调用及安全回归。前端允许查看失败 Case 和最终冻结报告，默认重复次数只是页面参数，不改变服务端配对规则。`ReviewPage` 显示候选定义、来源和门禁实际值，要求审核者与理由，再提交发布决定。进入普通会话后，检索只会选已启用的活动版本；页面禁用后新 Run 不能再命中旧版本。
+
+### 104.2 怎样解释本轮真实实验
+
+本轮两条 DeepSeek TRAIN 来源生成 `verified_arithmetic_answer`；六对 HOLDOUT 两臂各 6/6，门禁通过，但 Skill 臂每对多消耗 534～2017 Token。发布只证明**用户链路可复用**，不证明 Skill 提升正确率、成本或泛化。真实新任务选中 Skill 并用 calculator 得到 42；禁用后下一任务不再选中，得到 43。旧 Run 的选择证据仍可查，新 Run 遵守当前版本状态。源码读者应把“发布流程正确”和“候选有效益”写成两个独立断言。
+
+## 105. 补完：记忆、MCP 与原生维度语义检索
+
+### 105.1 记忆由用户原话约束
+
+`MemoryPage.tsx` 读取当前 Session 的用户消息，选择来源后填事实键、逐字片段和作用域。`memory/service.py::propose` 检查来源确属该 Session 的已完成任务、正文逐字包含候选内容，并按 Workspace/Session 身份写 Entry、Version、Source、Event。自动提取也只建待确认候选。`decide(confirm)` 以 lock_version 做并发保护，并入队索引任务；只有当前确认版本可成为检索来源。撤销先更新权威状态，再排队清理派生索引；旧 Run 在请求前再验证引用。确认前、确认后、撤销后的真实普通任务分别为零命中、一次命中、零命中。跨 Workspace 的真实用户任务仍需单独验收，不能由本例推导。
+
+### 105.2 MCP 为什么需要两次明确决定
+
+`compose.mcp-fixture.yml` 只配置命名受信 stdio profile，Server 注册与发现不会自动暴露工具。目录版本保存实际 Schema/hash，人工先审核单个工具的风险和副作用，再单独启用执行。普通 Worker 在 Run 开始时冻结可用工具契约；执行仍经过 `ToolExecutor` 的参数验证、审批和效果账本。真实 DeepSeek 调用了审核后的 `fixture_echo` 得到 `MCP-ACCEPT-42`；网页卸载后新 Task 无该调用。留着未审核的 `fixture_health` 证明“目录中存在”不等于“模型可用”。本地受信 fixture 不代表第三方远端服务已通过安全验收。
+
+### 105.3 为什么从 1536 改为 profile 原生维度
+
+旧迁移将 PostgreSQL 列固定为 `vector(1536)`，Mock profile 也为 1536。实际可在本机运行的多语 MiniLM 输出 **384** 维。将 384 向量补零或截断成 1536 会伪造模型空间，也使 profile 身份失真。`migrations/versions/20260925_0013_embedding_profile_dimensions.py` 将列改为无固定维度的 `vector`，同时保留 profile 的 1～2000 维约束。`retrieval/vector.py::exact_distances` 用无维度 cast 发出 pgvector 余弦查询；`retrieval/indexing.py::IndexService.ensure_profile` 将模型名、维度和预处理作为不可变身份，变更须使用新模型名/profile。旧 1536 profile 保留；若非 1536 profile 存在，downgrade 明确拒绝。
+
+`deploy/embedding/server.py` 是本地 OpenAI-compatible `/v1/embeddings` 适配层，背后为 FastEmbed 0.7.4 ONNX 推理。客户端仍走 `OpenAIEmbeddingProvider` 的批量、顺序、有限值、维度和身份校验；模型返回的向量不经补齐。`compose.embedding.yml` 只给本模型设置 384 维、预处理标识和 0.7 距离阈值。索引维护事务外请求模型，提交前复验来源状态、租约 epoch 与 generation；`ContextResolver` 在同一允许来源集合内先硬过滤，再按词法/向量阈值及 RRF 排序，冻结入选文本。服务失败时降级为已授权集合的词法路径，不能越过作用域边界。
+
+### 105.4 阈值、留出集和已知失败
+
+默认 0.35 距离阈值在六条校准样本上过滤了一条真正相关的向量，混合只中 5/6；本模型覆盖层校准到 0.7 后为 6/6。随后在**不同事实和问法**的十条冻结留出样本上，词法 6/10、混合 9/10、纯向量 10/10。`backup` 样本的正确文档在向量路排第一，但 RRF 与词法证据结合后被 `meeting` 错排；不能改写标签或删样本。逐项记录在[报告](reports/phase4-semantic-holdout-2026-09-25.json)。`scripts/acceptance_semantic.py` 可重跑质量对照；加专用 PostgreSQL URL 可写真实记忆并验证维护索引与 pgvector 精确查询。脚本只允许指向隔离迁移库，不能把含现有用户 Run 的业务库当作实验库。
+
+## 106. 补完学习验收与故障定位
+
+1. 打开新 Session 发两轮问题，刷新后同时检查网页消息和 Provider 请求序列。为什么两份证据都需要？
+2. 在 `ask_user` 待审批时停 Worker，批准并重启。比较工具调用、审批和快照数量。若出现第二次审批，先查哪份检查点？
+3. 用同一来源 Run 生成 Skill，查看 TRAIN 来源、HOLDOUT 配对和门禁，再发布与禁用。为什么两臂都 6/6 不能写成收益？
+4. 从已完成用户消息建 Workspace 记忆，分别在确认前、确认后、撤销后创建新 Task。旧 Run 的冻结检索证据为何不应该被当作新 Task 的召回结果？
+5. 在 MCP 目录中仅审核一个工具，再启用/卸载。为什么另一个未审核工具即使在目录中也不应进模型 manifest？
+6. 查看迁移后 `embedding_profiles.dimension` 与 `document_embeddings.vector` 长度。为什么 384 维向量不能写成 `vector(1536)`？
+7. 用 0.35 与 0.7 分别跑校准集，再用 0.7 跑留出集。解释 `backup` 错排中阈值、BM25、向量距离和 RRF 各自的作用，不应通过修改冻结标签提高报告分数。
+
+故障定位时，先确认 API/Worker/维护 Worker 使用相同的模型、维度、预处理和阈值；再看 Embedding 健康、维护 Job 状态、活动 generation 与 RetrievalBatch 的降级原因。若只有页面显示“没有记忆”，先查事实是否确认及作用域，而不是立即重建索引。若模型服务断线，检查是否已经记录 `vector_unavailable` 词法降级；没有任何检索候选也可能是授权过滤后的正确空命中。

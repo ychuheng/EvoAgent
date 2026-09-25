@@ -33,6 +33,14 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listDatasets: () => request<Array<{ id: string; name: string; version: number; status: string }>>("/eval-datasets"),
+  listDatasetCases: (id: string) => request<Array<{ id: string; case_key: string; split: string; public_input: { goal?: string } }>>(`/eval-datasets/${id}/cases`),
+  validateSource: (runId: string, caseId: string) => request<{ source_eval_run_id: string; passed: boolean; validation_results: unknown[] }>("/eval-sources/validate", { method: "POST", body: JSON.stringify({ run_id: runId, eval_case_id: caseId }) }),
+  extractSkill: (sourceIds: string[]) => request<{ skill_id: string; skill_version_id: string; lifecycle_status: string }>("/skills/extractions", { method: "POST", body: JSON.stringify({ source_eval_run_ids: sourceIds }) }),
+  startEvaluation: (versionId: string, datasetId: string, repeats: number) => request<{ experiment_id: string; status: string }>(`/skill-versions/${versionId}/evaluations`, { method: "POST", body: JSON.stringify({ dataset_id: datasetId, repeats }) }),
+  getExperiment: (id: string) => request<{ id: string; status: string; skill_version_id: string | null }>(`/eval-experiments/${id}`),
+  getPairs: (id: string) => request<Array<{ id: string; case_key: string; mode: string; passed: boolean | null; run_id: string; validation_results: unknown[] }>>(`/eval-experiments/${id}/pairs`),
+  finalizeExperiment: (id: string) => request<ReportEnvelope>(`/eval-experiments/${id}/finalize`, { method: "POST" }),
   listSkills: () => request<SkillSummary[]>("/skills"),
   getSkill: (id: string) => request<SkillDetail>(`/skills/${id}`),
   getVersion: (id: string) => request<VersionDetail>(`/skill-versions/${id}`),

@@ -23,7 +23,11 @@ async def rebuild(database: DatabaseDependency, settings: SettingsDependency):
     provider = provider_from_settings(settings)
     try:
         job = await IndexService(
-            database.session_factory, provider, settings.embedding_model
+            database.session_factory,
+            provider,
+            settings.embedding_model,
+            dimension=settings.embedding_dimension,
+            preprocessing=settings.embedding_preprocessing,
         ).queue_rebuild()
         return {"job_id": job.id, "status": job.status, "generation": job.payload["generation"]}
     finally:
@@ -41,6 +45,7 @@ async def profiles(database: DatabaseDependency):
                 "dimension": p.dimension,
                 "active_generation": p.active_generation,
                 "metric": p.metric,
+                "preprocessing": p.preprocessing,
             }
             for p in await session.scalars(select(EmbeddingProfileRecord))
         ]

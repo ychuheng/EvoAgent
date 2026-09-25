@@ -14,7 +14,14 @@ from evoagent.core.models import (
     ToolCall,
 )
 from evoagent.db.base import Base
-from evoagent.db.models import RunEventRecord, RunRecord, TaskRecord
+from evoagent.db.models import (
+    ApprovalStatus,
+    RunEventRecord,
+    RunRecord,
+    TaskRecord,
+    ToolApprovalRecord,
+    ToolCallRecord,
+)
 from evoagent.db.session import Database
 from evoagent.providers.mock import MockProvider
 from evoagent.runtime.persistent_runner import PersistentAgentRunner
@@ -22,6 +29,8 @@ from evoagent.runtime.recovery import RecoveryAction, RecoveryService
 from evoagent.tasks.lease import JobLeaseManager
 from evoagent.tasks.service import TaskService
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
+from evoagent.tools.approvals import ApprovalService
+from evoagent.tools.builtin.ask_user import AskUserTool
 from evoagent.tools.builtin.calculator import CalculatorTool
 from evoagent.tools.registry import ToolRegistry
 from evoagent.workers.main import JobWorker
@@ -207,6 +216,82 @@ async def test_recovery_resumes_from_latest_legal_snapshot(runtime_environment) 
     assert "recovery.started" in event_types
     assert "recovery.decided" in event_types
     assert "recovery.completed" in event_types
+
+
+@pytest.mark.asyncio
+async def test_approved_tool_call_replays_frozen_request_after_worker_restart(
+    runtime_environment,
+) -> None:
+    database, settings, service, session_id = runtime_environment
+    aggregate = await service.create_task(
+        session_id=session_id, goal="请先询问我", provider="mock", model="mock-model"
+    )
+    manager = JobLeaseManager(database.session_factory, lease_seconds=3)
+    registry = ToolRegistry([AskUserTool()])
+    call = ToolCall(call_id="ask-frozen", name="ask_user", arguments={"question": "继续？"})
+    first_provider = MockProvider(
+        [
+            ModelResponse(
+                message=Message(role=MessageRole.ASSISTANT, tool_calls=(call,)),
+                finish_reason=FinishReason.TOOL_CALLS,
+            )
+        ]
+    )
+    first_worker = JobWorker(
+        worker_id="approval-before-restart",
+        lease_manager=manager,
+        handler=PersistentAgentRunner(
+            settings=settings,
+            session_factory=database.session_factory,
+            context_builder=ContextBuilder(),
+            provider=first_provider,
+            registry=registry,
+        ),
+        heartbeat_seconds=1,
+        poll_seconds=0.01,
+    )
+    assert await first_worker.run_once() is True
+    assert (await service.get_task(aggregate.task.id)).task.status is TaskStatus.WAITING_USER
+    async with database.session_factory() as session:
+        approval = await session.scalar(
+            select(ToolApprovalRecord).where(ToolApprovalRecord.task_id == aggregate.task.id)
+        )
+    assert approval is not None and approval.status is ApprovalStatus.PENDING
+    await ApprovalService(database.session_factory).decide(
+        approval.id, approved=True, response="继续"
+    )
+
+    second_provider = MockProvider([response("你已选择继续")])
+    second_worker = JobWorker(
+        worker_id="approval-after-restart",
+        lease_manager=manager,
+        handler=PersistentAgentRunner(
+            settings=settings,
+            session_factory=database.session_factory,
+            context_builder=ContextBuilder(),
+            provider=second_provider,
+            registry=registry,
+        ),
+        heartbeat_seconds=1,
+        poll_seconds=0.01,
+    )
+    assert await second_worker.run_once() is True
+    assert (await service.get_task(aggregate.task.id)).task.status is TaskStatus.COMPLETED
+    assert len(second_provider.requests) == 1
+    assert second_provider.requests[0].messages[-1].content == "继续"
+    async with database.session_factory() as session:
+        approvals = tuple(
+            await session.scalars(
+                select(ToolApprovalRecord).where(ToolApprovalRecord.task_id == aggregate.task.id)
+            )
+        )
+        calls = tuple(
+            await session.scalars(
+                select(ToolCallRecord).where(ToolCallRecord.run_id == aggregate.run.id)
+            )
+        )
+    assert len(approvals) == 1
+    assert len(calls) == 1
 
 
 async def test_changed_context_policy_fails_recovery_without_calling_provider(runtime_environment):

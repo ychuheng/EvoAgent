@@ -5,6 +5,7 @@ services:
     env_file: ../../.env.deepseek
     environment:
       EVOAGENT_PROVIDER: openai_compatible
+      EVOAGENT_SKILL_EXTRACTOR_MODEL: deepseek-flash
   worker:
     env_file: ../../.env.deepseek
     environment:

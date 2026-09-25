@@ -266,6 +266,8 @@ async def run_maintenance_worker():
                 provider,
                 settings.embedding_model,
                 service_gate=ServiceGate(settings, client),
+                dimension=settings.embedding_dimension,
+                preprocessing=settings.embedding_preprocessing,
             ),
         )
         try:

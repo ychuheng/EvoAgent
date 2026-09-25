@@ -22,5 +22,5 @@ test("可以切换到评测报告页", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 })));
   render(<App />);
   fireEvent.click(screen.getByRole("button", { name: "Eval 报告" }));
-  await waitFor(() => expect(screen.getByText("配对评测报告")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText("Skill 来源与配对评测")).toBeInTheDocument());
 });

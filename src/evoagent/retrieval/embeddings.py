@@ -8,6 +8,7 @@ from typing import Protocol
 import httpx
 
 DIMENSION = 1536
+MAX_INDEXED_DIMENSION = 2000
 
 
 class EmbeddingError(ValueError):
@@ -33,9 +34,9 @@ class EmbeddingResult:
 
 def validate(result, profile, count):
     if (
-        profile.dimension != DIMENSION
+        not 1 <= profile.dimension <= MAX_INDEXED_DIMENSION
         or profile.metric != "cosine"
-        or profile.preprocessing != "text-v1"
+        or profile.preprocessing not in {"text-v1", "fastembed-0.7.4-mean-v1"}
     ):
         raise EmbeddingError("embedding profile unsupported")
     if result.model != profile.model or len(result.vectors) != count:

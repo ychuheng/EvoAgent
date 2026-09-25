@@ -14,7 +14,31 @@ export type ChatMessage = {
 export type ChatTask = {
   id: string;
   status: string;
+  cancel_requested: boolean;
   latest_run: { id: string; provider: string; model: string };
+};
+export type TaskTrace = {
+  run_id: string;
+  task_id: string;
+  status: string;
+  error_code: string | null;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  tool_calls: Array<{
+    id: string;
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    status: string;
+    result_summary: string | null;
+    error_code: string | null;
+  }>;
+  tool_effects: Array<{ tool_call_id: string; status: string }>;
+  approvals: Array<{
+    id: string;
+    tool_call_id: string;
+    status: string;
+    risk: string;
+    reason: string;
+  }>;
 };
 
 export const chat = {
@@ -28,4 +52,10 @@ export const chat = {
     method: "POST", body: JSON.stringify({ session_id: sessionId, goal }),
   }),
   task: (taskId: string) => request<ChatTask>(`/tasks/${encodeURIComponent(taskId)}`),
+  trace: (runId: string) => request<TaskTrace>(`/runs/${encodeURIComponent(runId)}/trace`),
+  cancel: (taskId: string) => request<ChatTask>(`/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST" }),
+  decideApproval: (approvalId: string, decision: "approve" | "reject", response: string) =>
+    request(`/tool-approvals/${encodeURIComponent(approvalId)}/${decision}`, {
+      method: "POST", body: JSON.stringify({ response: response.trim() || null }),
+    }),
 };

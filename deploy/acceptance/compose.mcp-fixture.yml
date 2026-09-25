@@ -1,0 +1,7 @@
+# 仅用于本地协议验收：命名的受信 stdio fixture，不接受网页传入可执行命令。
+services:
+  api:
+    environment: &fixture-profile
+      EVOAGENT_MCP_LAUNCH_PROFILES: '{"acceptance-fixture":{"command":"/usr/local/bin/python","args":["-m","evoagent.mcp.fixture"],"cwd":"/app","trusted_fixture":true}}'
+  worker:
+    environment: *fixture-profile

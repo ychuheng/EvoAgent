@@ -1,0 +1,20 @@
+{
+  "name": "phase4_semantic_retrieval",
+  "version": 1,
+  "documents": [
+    {"fact_key": "breakfast_drink", "text": "我的早餐常喝燕麦奶。"},
+    {"fact_key": "folder_color", "text": "我把项目文件放在蓝色文件夹里。"},
+    {"fact_key": "pet_name", "text": "我的宠物是一只橘猫，名字叫团团。"},
+    {"fact_key": "weekend_activity", "text": "周末我喜欢去河边骑自行车。"},
+    {"fact_key": "terminology_style", "text": "遇到技术术语时，请先用简单中文解释。"},
+    {"fact_key": "study_time", "text": "我通常在晚上九点学习编程。"}
+  ],
+  "queries": [
+    {"text": "早上最常喝的植物饮品是什么？", "expected_fact_key": "breakfast_drink"},
+    {"text": "工作资料收纳在什么颜色的目录？", "expected_fact_key": "folder_color"},
+    {"text": "家中小动物叫什么？", "expected_fact_key": "pet_name"},
+    {"text": "休息日偏爱哪种户外运动？", "expected_fact_key": "weekend_activity"},
+    {"text": "碰到专业词汇应该怎样说明？", "expected_fact_key": "terminology_style"},
+    {"text": "每天何时练习写代码？", "expected_fact_key": "study_time"}
+  ]
+}

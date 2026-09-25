@@ -66,6 +66,7 @@ class ContextResolver:
             "route_top_n": ROUTE_TOP_N,
             "backend": s.retrieval_backend,
             "model": s.embedding_model,
+            "embedding_preprocessing": s.embedding_preprocessing,
             "memory": s.memory_retrieval_enabled,
             "archive": s.archive_retrieval_enabled,
             "rrf_k": s.retrieval_rrf_k,
@@ -112,6 +113,11 @@ class ContextResolver:
                     EmbeddingProfileRecord.model == config["model"]
                 )
             )
+            if profile and (
+                profile.dimension != self.settings.embedding_dimension
+                or profile.preprocessing != self.settings.embedding_preprocessing
+            ):
+                profile = None
             profile_id = profile.id if profile else None
             generation = profile.active_generation if profile else None
             docs = tuple(

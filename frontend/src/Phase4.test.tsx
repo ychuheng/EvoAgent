@@ -9,6 +9,7 @@ import { memory, server, catalog, review, context, retrieval } from "./test/phas
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function openMemory() {
   vi.spyOn(phase4, "memories").mockResolvedValue([memory]);
+  vi.spyOn(phase4, "messages").mockResolvedValue([]);
   vi.spyOn(phase4, "memory").mockResolvedValue(memory);
   render(<MemoryPage />);
   fireEvent.change(screen.getByLabelText("Session ID"), { target: { value: "session-1" } });
@@ -27,6 +28,7 @@ async function openMCP() {
 }
 test("Memory 空列表与读取错误", async () => {
   const list = vi.spyOn(phase4, "memories").mockResolvedValue([]);
+  vi.spyOn(phase4, "messages").mockResolvedValue([]);
   render(<MemoryPage />);
   fireEvent.change(screen.getByLabelText("Session ID"), { target: { value: "session-1" } });
   fireEvent.click(screen.getByText("读取记忆"));

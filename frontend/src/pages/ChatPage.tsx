@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { chat, type ChatMessage, type ChatSession } from "../api/chat";
+import { TaskInspector } from "./TaskInspector";
+import { errorLabel, taskStatusLabel } from "./taskLabels";
 
 const STORAGE_KEY = "evoagent-chat-session";
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
@@ -9,7 +11,8 @@ function displayMessage(message: ChatMessage): string {
   if (message.kind !== "terminal") return message.content;
   try {
     const failure = JSON.parse(message.content) as { status?: string; error_code?: string };
-    if (failure.status && failure.error_code) return `任务${failure.status}：${failure.error_code}`;
+    if (failure.status === "cancelled") return "任务已取消。";
+    if (failure.status && failure.error_code) return `任务${taskStatusLabel[failure.status] ?? failure.status}：${errorLabel(failure.error_code)}`;
   } catch { /* Normal replies are plain text. */ }
   return message.content;
 }
@@ -19,7 +22,7 @@ function unfinishedTask(messages: ChatMessage[]): string | null {
   return last?.kind === "goal" ? last.task_id : null;
 }
 
-export function ChatPage() {
+export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpenVersion: (id: string) => void; onOpenContext: (id: string) => void; onOpenMemory: (id: string) => void }) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -27,6 +30,7 @@ export function ChatPage() {
   const [sending, setSending] = useState(false);
   const [pendingTask, setPendingTask] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState("");
+  const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -41,15 +45,17 @@ export function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!sessionId) { setMessages([]); setPendingTask(null); return; }
+    if (!sessionId) { setMessages([]); setPendingTask(null); setSelectedTask(null); return; }
     let active = true;
     setMessages([]);
     setPendingTask(null);
+    setSelectedTask(null);
     setTaskStatus("");
     void chat.messages(sessionId).then((items) => {
       if (!active) return;
       setMessages(items);
       setPendingTask(unfinishedTask(items));
+      setSelectedTask(items.at(-1)?.task_id ?? null);
     }).catch((reason: unknown) => { if (active) setError(String(reason)); });
     return () => { active = false; };
   }, [sessionId]);
@@ -91,6 +97,7 @@ export function ChatPage() {
     setSessionId(null);
     setMessages([]);
     setPendingTask(null);
+    setSelectedTask(null);
     setTaskStatus("");
   }
 
@@ -112,6 +119,7 @@ export function ChatPage() {
       setDraft("");
       setMessages(await chat.messages(id));
       setPendingTask(task.id);
+      setSelectedTask(task.id);
       setTaskStatus(task.status);
     } catch (reason) {
       setError(String(reason));
@@ -135,14 +143,17 @@ export function ChatPage() {
       )}</ul>
     </aside>
     <section className="panel chat-main" aria-label="对话内容">
+      {sessionId && <button type="button" className="chat-detail-button" onClick={() => onOpenMemory(sessionId)}>查看本会话记忆</button>}
       <div className="chat-history" role="log" aria-live="polite">
         {messages.length === 0 && <p className="state">输入问题开始对话。消息会保存在当前 Session 中。</p>}
         {messages.map((message) => <article className={`chat-bubble ${message.role}`} key={message.id}>
           <small>{message.role === "user" ? "你" : "EvoAgent"}</small>
           <p>{displayMessage(message)}</p>
+          {message.task_id && <button type="button" className="chat-detail-button" onClick={() => setSelectedTask(message.task_id)}>{selectedTask === message.task_id ? "正在查看执行过程" : "查看执行过程"}</button>}
         </article>)}
-        {pendingTask && <p role="status" className="state">{taskStatus === "waiting_user" ? "等待人工确认，请查看任务审批。" : `Agent 正在处理… ${taskStatus}`}</p>}
+        {pendingTask && <p role="status" className="state">{taskStatus === "waiting_user" ? "等待人工决定，请在下方处理。" : `Agent 正在处理… ${taskStatusLabel[taskStatus] ?? taskStatus}`}</p>}
       </div>
+      {selectedTask && <TaskInspector key={selectedTask} taskId={selectedTask} onOpenVersion={onOpenVersion} onOpenContext={onOpenContext} />}
       {error && <p role="alert" className="error">{error}</p>}
       <form onSubmit={(event) => { void send(event); }} className="chat-compose">
         <label htmlFor="chat-input">发送消息</label>

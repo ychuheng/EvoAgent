@@ -162,9 +162,11 @@ async def test_agent_loop_resumes_after_complete_tool_boundary() -> None:
         ContextBuilder().build("计算答案")
     )
     assert interrupted.status is AgentLoopStatus.FAILED
-    assert len(writer.states) == 1
-    assert writer.states[0].completed_iterations == 1
-    assert writer.states[0].messages[-1].content == "42"
+    assert len(writer.states) == 2
+    assert writer.states[0].completed_iterations == 0
+    assert writer.states[0].messages[-1].tool_calls == (call,)
+    assert writer.states[1].completed_iterations == 1
+    assert writer.states[1].messages[-1].content == "42"
 
     final_response = ModelResponse(
         message=Message(role=MessageRole.ASSISTANT, content="答案是 42"),
@@ -172,9 +174,17 @@ async def test_agent_loop_resumes_after_complete_tool_boundary() -> None:
     )
     resumed = await make_resumable_loop(MockProvider([final_response]), writer).run(
         ContextBuilder().build("该输入不会覆盖快照"),
-        resume_state=writer.states[0],
+        resume_state=writer.states[1],
     )
 
     assert resumed.status is AgentLoopStatus.COMPLETED
     assert resumed.iterations == 2
     assert resumed.final_answer == "答案是 42"
+
+    replay_provider = MockProvider([final_response])
+    replayed = await make_resumable_loop(replay_provider, MemoryCheckpointWriter()).run(
+        ContextBuilder().build("不能用新模型响应替代已冻结工具调用"),
+        resume_state=writer.states[0],
+    )
+    assert replayed.status is AgentLoopStatus.COMPLETED
+    assert replay_provider.requests[0].messages[-1].content == "42"

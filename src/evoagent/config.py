@@ -126,6 +126,8 @@ class Settings(BaseSettings):
     memory_retrieval_enabled: bool = False
     archive_retrieval_enabled: bool = False
     embedding_model: str = "mock-hash-v1"
+    embedding_dimension: int = Field(default=1536, ge=1, le=2000)
+    embedding_preprocessing: Literal["text-v1", "fastembed-0.7.4-mean-v1"] = "text-v1"
     embedding_api_key: SecretStr | None = None
     embedding_base_url: AnyHttpUrl | None = None
     memory_retrieval_top_k: int = Field(default=3, ge=0, le=10)

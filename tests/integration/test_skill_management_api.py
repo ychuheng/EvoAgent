@@ -194,6 +194,10 @@ async def test_dataset_api_never_returns_private_validators(tmp_path: Path) -> N
         )
         frozen = await client.post(f"/api/v1/eval-datasets/{imported.json()['id']}/freeze")
         listed = await client.get("/api/v1/eval-datasets")
+        cases = await client.get(f"/api/v1/eval-datasets/{imported.json()['id']}/cases")
         assert imported.status_code == 201
         assert frozen.json()["status"] == "frozen"
         assert "private_validators" not in listed.text
+        assert cases.status_code == 200
+        assert cases.json()[0]["public_input"] == {"goal": "公开任务"}
+        assert "private_validators" not in cases.text

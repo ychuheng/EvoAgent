@@ -1,4 +1,4 @@
-"""PostgreSQL 固定 vector(1536)，SQLite JSON 仅为功能测试替身。"""
+"""PostgreSQL 按 profile 记录原生维度；SQLite JSON 仅为功能测试替身。"""
 
 import json
 import math
@@ -7,18 +7,19 @@ from sqlalchemy import JSON, Float, String, bindparam, cast, select
 from sqlalchemy.dialects.postgresql.base import ischema_names
 from sqlalchemy.types import UserDefinedType
 
-from evoagent.retrieval.embeddings import DIMENSION
+from evoagent.retrieval.embeddings import DIMENSION, MAX_INDEXED_DIMENSION
 
 
 class PGVector(UserDefinedType):
     cache_ok = True
 
-    def __init__(self, dimension=1536):
-        if int(dimension) != DIMENSION:
+    def __init__(self, dimension: int | None = DIMENSION):
+        if dimension is not None and not 1 <= int(dimension) <= MAX_INDEXED_DIMENSION:
             raise ValueError("unsupported vector dimension")
+        self.dimension = dimension
 
     def get_col_spec(self, **kwargs):
-        return f"VECTOR({DIMENSION})"
+        return f"VECTOR({self.dimension})" if self.dimension is not None else "VECTOR"
 
     def bind_processor(self, dialect):
         return lambda value: json.dumps(value) if value is not None else None
@@ -27,7 +28,7 @@ class PGVector(UserDefinedType):
         return lambda value: json.loads(value) if isinstance(value, str) else value
 
 
-VECTOR = PGVector().with_variant(JSON(), "sqlite")
+VECTOR = PGVector(None).with_variant(JSON(), "sqlite")
 
 ischema_names["vector"] = PGVector
 
@@ -54,7 +55,7 @@ async def exact_distances(session, *, profile_id, generation, allowed_documents,
     )
     if session.bind.dialect.name == "postgresql":
         distance = table.vector.op("<=>", return_type=Float)(
-            cast(bindparam("query_vector", json.dumps(vector), type_=String), PGVector())
+            cast(bindparam("query_vector", json.dumps(vector), type_=String), PGVector(None))
         )
         rows = await session.execute(
             select(table.document_id, distance.label("distance"))

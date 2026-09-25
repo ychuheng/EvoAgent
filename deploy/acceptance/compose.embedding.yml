@@ -1,0 +1,38 @@
+# 阶段四真实语义检索验收：使用原生 384 维多语 MiniLM，不补零为 1536 维。
+services:
+  embedding:
+    build:
+      context: ../..
+      dockerfile: deploy/embedding/Dockerfile
+    image: evoagent:embedding-minilm-384
+    environment:
+      EMBEDDING_MODEL: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    ports: ["127.0.0.1:18100:8100"]
+    volumes: ["embedding-model:/models"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health/ready', timeout=10)"]
+      interval: 10s
+      timeout: 15s
+      retries: 30
+    restart: unless-stopped
+  api:
+    environment: &embedding-config
+      EVOAGENT_EMBEDDING_MODEL: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+      EVOAGENT_EMBEDDING_DIMENSION: "384"
+      EVOAGENT_EMBEDDING_PREPROCESSING: fastembed-0.7.4-mean-v1
+      EVOAGENT_EMBEDDING_API_KEY: local-acceptance
+      EVOAGENT_EMBEDDING_BASE_URL: http://embedding:8100/v1
+      EVOAGENT_RETRIEVAL_BACKEND: hybrid
+      EVOAGENT_RETRIEVAL_MAX_VECTOR_DISTANCE: "0.7"
+    depends_on:
+      embedding: {condition: service_healthy}
+  worker:
+    environment: *embedding-config
+    depends_on:
+      embedding: {condition: service_healthy}
+  maintenance-worker:
+    environment: *embedding-config
+    depends_on:
+      embedding: {condition: service_healthy}
+volumes:
+  embedding-model:

@@ -57,6 +57,14 @@ services:
     stop_grace_period: 310s
     depends_on:
       api: {condition: service_healthy}
+  eval-worker:
+    profiles: [app]
+    image: evoagent:phase4-final
+    command: [evoagent-eval-worker]
+    environment: *app-env
+    volumes: ["acceptance-workspace:/app/workspace"]
+    depends_on:
+      api: {condition: service_healthy}
   maintenance-worker:
     profiles: [app]
     image: evoagent:phase4-final

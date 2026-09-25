@@ -20,7 +20,11 @@ from evoagent.db.models import (
 )
 from evoagent.db.session import Database
 from evoagent.tasks.service import TaskService
-from evoagent.tools.approvals import ApprovalRequiredError, ApprovalService
+from evoagent.tools.approvals import (
+    ApprovalRequiredError,
+    ApprovalService,
+    ApprovalServiceError,
+)
 from evoagent.tools.builtin.ask_user import AskUserTool
 from evoagent.tools.builtin.file_write import FileWriteTool
 from evoagent.tools.effects import PersistentToolMiddleware
@@ -206,4 +210,45 @@ async def test_ask_user_response_survives_a_new_provider_call_id(tmp_path: Path)
 
     assert result.status is ToolResultStatus.SUCCESS
     assert result.content == "是，请使用 Markdown。"
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_waiting_task_closes_approval_and_rejects_late_decision(
+    tmp_path: Path,
+) -> None:
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'cancel-approval.db'}")
+    async with database.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    service = TaskService(database.session_factory)
+    session = await service.create_session("取消审批测试")
+    aggregate = await service.create_task(
+        session_id=session.id, goal="等待确认", provider="mock", model="mock-model"
+    )
+    executor = ToolExecutor(
+        ToolRegistry([AskUserTool()]),
+        InMemoryEventSink(aggregate.run.id),
+        timeout_seconds=2,
+        max_result_chars=1_000,
+        middleware=PersistentToolMiddleware(
+            task_id=aggregate.task.id,
+            run_id=aggregate.run.id,
+            session_factory=database.session_factory,
+            policy=PermissionPolicy(),
+        ),
+    )
+    with pytest.raises(ApprovalRequiredError) as raised:
+        await executor.execute(
+            ToolCall(call_id="ask-cancel", name="ask_user", arguments={"question": "继续？"})
+        )
+
+    cancelled = await service.cancel_task(aggregate.task.id)
+    approval = await ApprovalService(database.session_factory).get(raised.value.approval_id)
+    assert cancelled.task.status.value == "cancelled"
+    assert approval.status is ApprovalStatus.CANCELLED
+    assert approval.decided_at is not None
+    with pytest.raises(ApprovalServiceError, match="already been decided"):
+        await ApprovalService(database.session_factory).decide(
+            approval.id, approved=True, response="继续"
+        )
     await database.dispose()
