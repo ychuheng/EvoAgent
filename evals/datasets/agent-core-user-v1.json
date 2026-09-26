@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "name": "agent-core-user-v1",
+  "description": "Synthetic, deterministic user tasks for the local real-model Agent loop. Freeze before the first run; do not tune against this set.",
+  "minimum_pass_rate": 0.8,
+  "cases": [
+    {
+      "id": "arithmetic-01",
+      "category": "calculator",
+      "steps": [{"goal": "请调用 calculator 计算 17*23，然后写出结果。", "acceptance": {"answer_contains": ["391"], "required_tools": ["calculator"]}}]
+    },
+    {
+      "id": "arithmetic-02",
+      "category": "calculator",
+      "steps": [{"goal": "请调用 calculator 计算 19*29，然后写出结果。", "acceptance": {"answer_contains": ["551"], "required_tools": ["calculator"]}}]
+    },
+    {
+      "id": "arithmetic-03",
+      "category": "calculator",
+      "steps": [{"goal": "请用 calculator 计算 144/12，给出结果。", "acceptance": {"answer_contains": ["12"], "required_tools": ["calculator"]}}]
+    },
+    {
+      "id": "arithmetic-04",
+      "category": "calculator",
+      "steps": [{"goal": "请用 calculator 计算 (8+5)*7，给出结果。", "acceptance": {"answer_contains": ["91"], "required_tools": ["calculator"]}}]
+    },
+    {
+      "id": "arithmetic-05",
+      "category": "calculator",
+      "steps": [{"goal": "请用 calculator 计算 1000-378，给出结果。", "acceptance": {"answer_contains": ["622"], "required_tools": ["calculator"]}}]
+    },
+    {
+      "id": "arithmetic-06",
+      "category": "calculator",
+      "steps": [{"goal": "请用 calculator 计算 48*25，给出结果。", "acceptance": {"answer_contains": ["1200"], "required_tools": ["calculator"]}}]
+    },
+    {
+      "id": "multi-tool-01",
+      "category": "multi_calculation",
+      "steps": [{"goal": "请分别用 calculator 计算 17*23 和 19*29，再用 calculator 求两者差值；回答中列出三个结果。", "acceptance": {"answer_contains": ["391", "551", "160"], "required_tools": ["calculator"]}, "minimum_tool_calls": {"calculator": 2}}]
+    },
+    {
+      "id": "multi-tool-02",
+      "category": "multi_calculation",
+      "steps": [{"goal": "请分别用 calculator 计算 12*13 和 14*15，再用 calculator 求和；回答中列出两个乘积与总和。", "acceptance": {"answer_contains": ["156", "210", "366"], "required_tools": ["calculator"]}, "minimum_tool_calls": {"calculator": 2}}]
+    },
+    {
+      "id": "file-01",
+      "category": "file_write",
+      "steps": [{"goal": "请使用 file_write 在本次运行目录创建 result.txt，内容写“任务完成：松果”。最后回答文件名。", "acceptance": {"answer_contains": ["result.txt"], "required_tools": ["file_write"], "required_files": [{"path": "result.txt"}]}}]
+    },
+    {
+      "id": "file-02",
+      "category": "file_write",
+      "steps": [{"goal": "请使用 file_write 创建 report.md，内容包含标题“验收报告”和句子“样本结果为 42”。最后回答文件名。", "acceptance": {"answer_contains": ["report.md"], "required_tools": ["file_write"], "required_files": [{"path": "report.md"}]}}]
+    },
+    {
+      "id": "file-03",
+      "category": "file_write",
+      "steps": [{"goal": "请使用 file_write 创建 notes.txt，写入两行：第一行 Alpha，第二行 Beta。最后回答文件名。", "acceptance": {"answer_contains": ["notes.txt"], "required_tools": ["file_write"], "required_files": [{"path": "notes.txt"}]}}]
+    },
+    {
+      "id": "artifact-01",
+      "category": "artifact_write",
+      "steps": [{"goal": "请使用 artifact_write 创建名为 evidence.txt 的文本 Artifact，内容为“EvoAgent 验收样本”。完成后在回答中写出 evidence.txt。", "acceptance": {"answer_contains": ["evidence.txt"], "required_tools": ["artifact_write"]}, "minimum_artifacts": 1}]
+    },
+    {
+      "id": "history-01",
+      "category": "multi_turn",
+      "steps": [
+        {"goal": "请记住：我的测试项目代号是蓝松七二。只回复收到。"},
+        {"goal": "我刚才说的测试项目代号是什么？", "acceptance": {"answer_contains": ["蓝松七二"]}}
+      ]
+    },
+    {
+      "id": "history-02",
+      "category": "multi_turn",
+      "steps": [
+        {"goal": "接下来请用中文回答我。只回复收到。"},
+        {"goal": "现在请说出我要求你使用的回答语言。", "acceptance": {"answer_contains": ["中文"]}}
+      ]
+    },
+    {
+      "id": "history-03",
+      "category": "multi_turn",
+      "steps": [
+        {"goal": "请记住：城市甲的预算是 73，城市乙的预算是 58。先回复收到。"},
+        {"goal": "城市甲比城市乙多多少？请用 calculator 计算。", "acceptance": {"answer_contains": ["15"], "required_tools": ["calculator"]}}
+      ]
+    },
+    {
+      "id": "approval-01",
+      "category": "ask_user",
+      "steps": [{"goal": "完成前必须用 ask_user 问我选的颜色是什么。得到我的回复后，再用一句话回答该颜色。", "approval_response": "蓝色", "acceptance": {"answer_contains": ["蓝色"], "required_tools": ["ask_user"]}}]
+    }
+  ]
+}
