@@ -8,7 +8,7 @@ import { errorLabel, taskStatusLabel } from "./taskLabels";
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const TOOL_STATUS: Record<string, string> = {
   pending: "待执行", running: "执行中", succeeded: "成功", failed: "失败",
-  waiting_user: "等待人工处理", rejected: "已拒绝", cancelled: "已取消",
+  denied: "已拒绝", unknown: "结果不确定",
 };
 
 export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId: string; onOpenVersion: (id: string) => void; onOpenContext: (id: string) => void }) {
@@ -90,7 +90,7 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
       <li key={call.id}><strong>{call.tool_name}</strong> · {trace.approvals.some((approval) => approval.tool_call_id === call.id && approval.status === "approved") && call.status === "pending" ? "已审批，等待恢复" : TOOL_STATUS[call.status] ?? call.status}
         <details><summary>查看输入参数</summary><pre>{JSON.stringify(call.arguments, null, 2)}</pre></details>
         {call.result_summary && <p>{call.result_summary}</p>}
-        {call.error_code && <p className="error">{call.error_code}</p>}
+        {call.error_code && <p className="error">{errorLabel(call.error_code)}</p>}
       </li>
     )}</ol></div> : <p className="chat-meta">此任务尚无工具调用记录。</p>}
     <div className="chat-evidence"><h4>检索与 Skill</h4>
