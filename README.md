@@ -183,7 +183,7 @@ SQLite 只用于本地快速测试；PostgreSQL 迁移、跨连接事件序号�
 - `docs/阶段二-演示与故障注入.md`
 - `docs/阶段三-可验证Skill生命周期架构与实现指南.md`
 - `docs/阶段三-演示与安全边界.md`
-- [阶段四：记忆、检索与协议扩展架构与实现指南（设计，尚未实施）](docs/阶段四-记忆检索与协议扩展架构与实现指南.md)
+- [阶段四：记忆、检索与协议扩展架构与实现指南](docs/阶段四-记忆检索与协议扩展架构与实现指南.md)
 - `docs/ADR-006-配对评测硬门禁与人工发布.md`
 - `docs/ADR-007-租约隔离与请求上下文预算.md`
 - `docs/阶段四-模块0至2验收与运行说明.md`
@@ -199,4 +199,4 @@ SQLite 只用于本地快速测试；PostgreSQL 迁移、跨连接事件序号�
 .venv\Scripts\python.exe scripts/phase4_release_check.py
 ```
 
-第二条命令当前预期退出 2：报告哈希有效，但 `real_embedding` 为 pending。`--allow-pending` 只审计已有证据，不改变 `release_ready=false`。本轮后端全量 408 passed/13 skipped，新增证据门禁两项另行通过；Linux Docker 11 项、前端组件 12 项/浏览器 6 项通过。真实算术 Skill 12 对均可比，两臂各 11/12，无安全回归；保留 Unicode 负号导致的字面验证失败，不宣称成功率提升。完整范围见模块 14 说明。
+上述是模块 14 当时冻结的交付清单：第二条命令对该历史 manifest 预期退出 2，因为其中 `real_embedding` 仍为 pending；后续真实 Embedding 实验已另行记录，但尚未重新制作完整发布清单。`--allow-pending` 只审计已有证据，不改变 `release_ready=false`。当次后端全量 408 passed/13 skipped，新增证据门禁两项另行通过；Linux Docker 11 项、前端组件 12 项/浏览器 6 项通过。真实算术 Skill 12 对均可比，两臂各 11/12，无安全回归；保留 Unicode 负号导致的字面验证失败，不宣称成功率提升。最新能力与缺口见[整体 Agent 能力核查](docs/整体Agent能力核查-2026-09-26.md)。
