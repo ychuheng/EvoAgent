@@ -8073,3 +8073,51 @@ Demo incomplete 时先看是哪组、失败还是 skipped，再检查对应 TEST
 故障定位时，先确认 API/Worker/维护 Worker 使用相同的模型、维度、预处理和阈值；再看 Embedding 健康、维护 Job 状态、活动 generation 与 RetrievalBatch 的降级原因。若只有页面显示“没有记忆”，先查事实是否确认及作用域，而不是立即重建索引。若模型服务断线，检查是否已经记录 `vector_unavailable` 词法降级；没有任何检索候选也可能是授权过滤后的正确空命中。
 
 双 Worker 交接另有真实样本：Worker 1 运行至 `waiting_user`，停进程后由 Worker 2 接收网页/API 审批并继续，`ask_user` 与 calculator 各一次，结果为 391。等待审批时原租约已经释放，所以这项只验证持久化状态交接；运行中进程崩溃须看租约 epoch、RecoveryService 与独立故障测试，不能用这项样本替代。
+
+## 107. 补完：运行模式可见与显式任务验收
+
+### 107.1 页面看到的“真实模型”从哪里来
+
+`api/app.py::runtime_info` 只从 API 进程的 `Settings` 构造一个不含密钥的响应：Provider 模式、模型名、搜索模式、Memory 开关和代码版本。`remote_model_checked=false` 是有意的；查询页面状态不调用付费模型，也不能把数据库健康误写成模型远端健康。`ChatPage.tsx` 取此响应显示 Mock 演示或真实配置，同时明确真实模型的连接要等任务执行才知道。请求失败时显示“运行模式未确认”，不猜测为真实。默认 Compose 和 `.env.example` 保留 Mock，首次运行可做确定性演示，但页面会说明它不是 AI 回答。
+
+仅显示 API 设置还不够：API 与 Worker 是独立进程，旧版本可能把真实模型 Run 交给 Mock Worker。`workers/bootstrap.py::ConfiguredTaskHandler._handle` 在构造 Provider 前读取该 Run 的 `provider/model`，与本 Worker 当前设置比较；不一致返回 `provider_configuration_mismatch`，不会先运行 Mock 工具链。这道检查放在实际 Worker 装配层，而不是可注入的 `PersistentAgentRunner` 中：集成测试可以传入受控 Provider 来验证上下文、MCP、记忆，不应被部署一致性检查误伤。配置一致只证明两侧声明一致，实际网络请求是否成功仍由 Provider 错误和 Task Trace 说明。
+
+### 107.2 为什么验收条件必须随 Task 冻结
+
+普通 Task 的 `completed` 原本由 `AgentLoop` 在模型正常停止并给出非空文本后产生。那是**执行终态**，不是正确性判定。`tasks/acceptance.py::AcceptanceSpec` 定义可选、明确、确定性的条件；`api/schemas.py::TaskCreateRequest` 在入站时校验，`TaskService.create_task` 将其与 goal 同事务写入 `TaskRecord.acceptance`。迁移 `20260926_0014` 使用可空 JSON 列兼容旧任务。服务端没有修改已创建条件的 API，因此 Worker 恢复时读取同一份冻结事实，不根据模型输出重写验收标准。
+
+三类条件各有清楚边界：`answer_contains` 是大小写折叠后的字面包含，不是语义事实核查；`required_tools` 查询当前 Run 的成功 ToolCall，不能因为模型声称“已搜索”而算通过；`required_files` 在本 Run 的目录下检查路径、存在性、16 MB 上限和可选 SHA-256，不接受逃逸路径。三类可组合，逐项结果写入 `acceptance.checked` 事件。只有所有项通过，`PersistentAgentRunner` 才返回完成；失败时返回 `acceptance_failed` 并保留原始模型答复供 Trace 查看。未配置条件则沿用旧任务语义，页面必须提示“未独立核验”，不能将其粉饰为验收通过。
+
+### 107.3 终态提交为何还要复验事件
+
+Runner 判断通过后，`JobLeaseManager.finalize` 才在当前租约下提交 Task/Run 终态、消息投影和事件。如果只在 Runner 内核验，其他 Handler 或错误接线仍可能直接交来 `COMPLETED`。因此 `finalize` 对带条件的 Task 查询本 Run 最后的 `acceptance.checked`；没有 `passed=true` 事件就转为 `FAILED/acceptance_evidence_missing`。这是一道持久化边界，不代替停旧 Worker、迁移后再同版本启动 API/Worker 的部署顺序。浏览器 `TaskInspector` 也只在 Trace 真有通过事件时显示“已通过设定条件”，不能仅看 Task 的 `completed` 和非空条件。
+
+验收失败不是模型没有说话：`RunRecord.final_answer` 仍保存原答，但 Session 的终态消息展示失败码，页面可展开原答。这样用户不会把未通过的草稿当成成功答复，也仍能看到模型哪里偏离了要求。工具执行错误在循环中作为 ToolResult 回传模型，允许它在迭代与预算上限内修正；最终条件失败后不无限重试。任何字面条件只能证明自己被满足，开放式回答的事实性仍需要外部判分或人工核对。
+
+### 107.4 测试地图与练习
+
+- `tests/integration/test_task_api.py`：模式响应不暴露连接信息，空条件和逃逸路径在提交时拒绝。
+- `tests/e2e/test_api_worker_flow.py`：真实 API→Mock Worker 持久化链路中，配置不一致不能伪装成功；回答、工具、文件条件分别有通过与失败样本，失败保留模型原答。
+- `tests/integration/test_job_lease.py`：直接传入已完成结果而没有验收事件时，终态提交拒绝绕过。
+- `frontend/e2e/chat.spec.ts`：Mock 明示、真实模型配置提示、提交条件和失败草稿可见。
+- 独立 PostgreSQL 库从 base 升到 `20260926_0014` 并执行 `alembic check`，验证 SQLite 结构测试之外的真实迁移路径。
+
+练习：让模型回答中出现指定数字但不调用要求的工具，为什么仍要判失败？反过来，若工具成功但回答没有要求的文本，又说明哪项条件未满足？若一个任务没有条件却返回 `completed`，页面应如何解释这个状态？最后将 API 配为真实模型、Worker 保持 Mock，观察 Run 的错误码及 ToolCall 数量；这说明模式提示和执行验证各负责什么。
+
+## 108. 冻结用户任务集与真实模型评测
+
+### 108.1 数据集为何先于运行提交
+
+`evals/datasets/agent-core-user-v1.json` 定义 16 个合成用户场景：单步和多步计算、文件与 Artifact 写入、同 Session 的两轮历史，以及 `ask_user` 人工问答。每个 `steps` 包含实际发送给模型的 `goal`；可选 `acceptance` 是服务端独立核对条件，`minimum_tool_calls` 和 `minimum_artifacts` 是评测器额外要求。数据集提交 `0608180` 早于真实运行，SHA-256 进入报告，使之后的条件修改可以被发现。`minimum_pass_rate=0.8` 是事先写入的版本门槛，不能看见失败后修改。数据集只有程序可机械判定的目标，不声称覆盖开放式事实问答。
+
+### 108.2 运行器如何得到真实链路证据
+
+`scripts/agent_user_eval.py::main` 只接受 `127.0.0.1` 的 `/api/v1` 地址，先读 `runtime-info` 并拒绝 Mock，避免把离线回复计入真实模型成绩。它逐例创建独立 Session；同一例的多个 Step 沿用该 Session，这样历史题测的正是实际会话上下文。每个 Step 通过普通 `POST /tasks` 创建任务，轮询终态并读取 Run Trace。只在 Task `waiting_user` 且预设了 `approval_response` 时，检查待审批 ToolCall 的工具名确实为 `ask_user`，才提交答复；其他审批绝不自动批准。终态超过 120 秒时请求取消并记为失败。
+
+`run_case` 对每步要求 Task `completed`；有条件时还要求最后一条 `acceptance.checked` 的 `passed=true`。它从 `trace.tool_calls` 中只计 `succeeded`，因此模型仅提出工具调用而工具报错不能充数；Artifact 数量从真实 Trace 读。多步场景必须所有 Step 都通过。报告保存数据集哈希、模型、搜索模式、逐例 Task/Run ID、错误码及工具统计，便于回查原始 Trace；本地 `output/` 保存完整运行结果，脱敏后的副本在 `docs/reports/`。质量门槛通过只表示该冻结集达到预设比率，与 `AgentLoop` 的单任务 `completed`、显式条件通过、正式版本放行是三个不同层级。
+
+### 108.3 失败样本怎样分析
+
+首次运行 14/16。`arithmetic-03` 有一次成功 calculator 调用，仍因后续模型请求网络错误失败；`arithmetic-04` 未取得成功工具调用。两者的 Task `attempt_count=3`，最终错误均为 `provider_network_error`。`PersistentAgentRunner` 将该码交给 `RetryPolicy`；预算耗尽后 `JobLeaseManager` 持久化失败终态。由于模型未正常完成，验收器没有写 `acceptance.checked`；不能把这归因于验收表达式不满足，也不能只看末次 Run 的工具数量断定模型在所有尝试中从未用工具。`frontend/scripts/verify-live-task.mjs` 从真实网页重新打开这两条 Session，核对中文错误、Task ID 与 Workspace 归属；真实页面与 API/Trace 的一致性由此得到一次负路径实测。
+
+若复现时某一例失败，先看 `task.status`、`attempt_count` 和各次 Run 的 `error_code`，再看最后一条 `acceptance.checked` 是否存在，以及成功 ToolCall 和 Artifact 数量。网络错误应查 Provider 链路与重试预算；`acceptance_failed` 则应查看每项 `checks` 和模型原答。不要为了让分数好看删除网络失败或把它记为通过。这个流程也提醒我们：评测器和页面可以忠实报告失败，但不能保证远端模型永远可用。

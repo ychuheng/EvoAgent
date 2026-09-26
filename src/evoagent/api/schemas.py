@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from evoagent.db.models import ApprovalStatus
 from evoagent.runtime.run_config import RunMode
+from evoagent.tasks.acceptance import AcceptanceSpec
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
 
@@ -27,6 +28,16 @@ class ErrorResponse(ApiModel):
 
 class HealthResponse(ApiModel):
     status: str
+
+
+class RuntimeInfoResponse(ApiModel):
+    provider_mode: str
+    provider: str
+    model: str
+    search_mode: str
+    memory_enabled: bool
+    code_version: str
+    remote_model_checked: bool = False
 
 
 class SessionCreateRequest(ApiModel):
@@ -70,6 +81,7 @@ class WorkspaceResponse(ApiModel):
 class TaskCreateRequest(ApiModel):
     session_id: UUID
     goal: str = Field(min_length=1, max_length=100_000)
+    acceptance: AcceptanceSpec | None = None
     provider: str | None = Field(default=None, min_length=1, max_length=64)
     model: str | None = Field(default=None, min_length=1, max_length=256)
     run_mode: RunMode = RunMode.RETRIEVAL
@@ -114,6 +126,7 @@ class TaskResponse(ApiModel):
     id: UUID
     session_id: UUID
     goal: str
+    acceptance: AcceptanceSpec | None
     status: TaskStatus
     cancel_requested: bool
     attempt_count: int

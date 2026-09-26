@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 
-import { chat, type ChatMessage, type ChatSession, type ChatWorkspace } from "../api/chat";
+import { chat, type ChatMessage, type ChatSession, type ChatWorkspace, type RuntimeInfo } from "../api/chat";
 import { failure } from "../components/Evidence";
 import { TaskInspector } from "./TaskInspector";
 import { errorLabel, taskStatusLabel } from "./taskLabels";
@@ -27,16 +27,27 @@ function unfinishedTask(messages: ChatMessage[]): string | null {
 export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpenVersion: (id: string) => void; onOpenContext: (id: string) => void; onOpenMemory: (id: string) => void }) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [workspaces, setWorkspaces] = useState<ChatWorkspace[]>([]);
+  const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [workspaceId, setWorkspaceId] = useState(DEFAULT_WORKSPACE_ID);
   const [workspaceName, setWorkspaceName] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [requiredText, setRequiredText] = useState("");
+  const [requiredTool, setRequiredTool] = useState("");
+  const [requiredFile, setRequiredFile] = useState("");
   const [sending, setSending] = useState(false);
   const [pendingTask, setPendingTask] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState("");
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void chat.runtimeInfo().then((info) => { if (active) setRuntimeInfo(info); })
+      .catch(() => { if (active) setRuntimeInfo(null); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -137,8 +148,16 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
         setSessions((items) => [created, ...items]);
         selectSession(id);
       }
-      const task = await chat.createTask(id, goal);
+      const acceptance = requiredText.trim() || requiredTool.trim() || requiredFile.trim() ? {
+        answer_contains: requiredText.trim() ? [requiredText.trim()] : [],
+        required_tools: requiredTool.trim() ? [requiredTool.trim()] : [],
+        required_files: requiredFile.trim() ? [{ path: requiredFile.trim() }] : [],
+      } : null;
+      const task = await chat.createTask(id, goal, acceptance);
       setDraft("");
+      setRequiredText("");
+      setRequiredTool("");
+      setRequiredFile("");
       setMessages(await chat.messages(id));
       setPendingTask(task.id);
       setSelectedTask(task.id);
@@ -167,6 +186,11 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       )}</ul>
     </aside>
     <section className="panel chat-main" aria-label="对话内容">
+      <div className="chat-runtime" role="status">
+        {runtimeInfo?.provider_mode === "mock" ? <><strong>当前是 Mock 演示</strong><span>回复由离线脚本生成，不是 AI 对话。请按运行说明配置真实模型。</span></> :
+          runtimeInfo?.provider_mode === "real" ? <><strong>真实模型已配置：{runtimeInfo.model}</strong><span>连接及 Worker 配置会在任务执行时验证。{runtimeInfo.search_mode === "mock" ? "网页搜索仍是 Mock。" : ""}{!runtimeInfo.memory_enabled ? "记忆召回未开启。" : ""}</span></> :
+          <><strong>运行模式未确认</strong><span>请检查 API 服务；任务详情会显示实际使用的模型。</span></>}
+      </div>
       {sessionId && <button type="button" className="chat-detail-button" onClick={() => onOpenMemory(sessionId)}>查看本会话记忆</button>}
       <div className="chat-history" role="log" aria-live="polite">
         {messages.length === 0 && <p className="state">输入问题开始对话。消息会保存在当前 Session 中。</p>}
@@ -182,6 +206,12 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       <form onSubmit={(event) => { void send(event); }} className="chat-compose">
         <label htmlFor="chat-input">发送消息</label>
         <textarea id="chat-input" rows={3} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} placeholder="向 Agent 提问，或让它使用工具完成任务" />
+        <details className="chat-acceptance"><summary>设置可核对的验收条件（可选）</summary>
+          <p className="chat-meta">请在任务文字中说明要求；这里的条件只用于结果核对，不会代替任务指令。未填写时回答不会被独立判定为正确。</p>
+          <label>回答必须包含<input value={requiredText} maxLength={200} onChange={(event) => setRequiredText(event.target.value)} placeholder="例如：391" /></label>
+          <label>必须成功调用的工具<input value={requiredTool} maxLength={64} onChange={(event) => setRequiredTool(event.target.value)} placeholder="例如：calculator" /></label>
+          <label>必须生成的文件<input value={requiredFile} maxLength={1024} onChange={(event) => setRequiredFile(event.target.value)} placeholder="例如：report.md" /></label>
+        </details>
         <div className="chat-actions"><small>Enter 发送 · Shift+Enter 换行</small><button disabled={!draft.trim() || sending || !!pendingTask}>{sending ? "提交中…" : "发送"}</button></div>
       </form>
     </section>

@@ -12,6 +12,10 @@ export function errorLabel(code: string): string {
     invalid_arguments: "工具参数无效",
     tool_timeout: "工具执行超时",
     run_timeout: "任务执行超时",
+    provider_configuration_mismatch: "API 与 Worker 的模型配置不一致",
+    acceptance_failed: "回答未通过设定的验收条件",
+    acceptance_evidence_missing: "任务缺少验收记录",
+    acceptance_check_error: "验收条件检查失败",
   };
   const label = known[code];
   return label ? `${label}（${code}）` : code;

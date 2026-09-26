@@ -1,0 +1,79 @@
+{
+  "environment": {
+    "image": "evoagent:agent-audit-20260926",
+    "api": "http://127.0.0.1:18001",
+    "database": "evoagent_acceptance_check",
+    "provider": "openai_compatible",
+    "model": "deepseek-flash",
+    "scope": "dedicated local acceptance database and workspace volume; existing 18000 deployment unchanged",
+    "image_id": "sha256:a73eee666b9eb6d1cb31b885eeb30818d0054f163c4fe233c4945b1e42ddf918"
+  },
+  "migration": {
+    "head": "20260926_0014",
+    "from_base": "passed",
+    "alembic_check": "no new upgrade operations"
+  },
+  "live_cases": [
+    {
+      "name": "explicit_acceptance_pass",
+      "task_id": "7b7912e1-3def-41ef-ab7d-56c3ed61d998",
+      "status": "completed",
+      "tool": "calculator",
+      "answer": "391",
+      "acceptance_checked": true
+    },
+    {
+      "name": "explicit_acceptance_fail",
+      "task_id": "0c46cd64-ffca-4504-8cc1-e7c5761877a7",
+      "status": "failed",
+      "error_code": "acceptance_failed",
+      "model_answer": "4",
+      "required_text": "999999",
+      "acceptance_checked": false
+    },
+    {
+      "name": "real_browser_workspace_and_tool",
+      "workspace_id": "272c3096-4568-4c61-943c-d2a62d510603",
+      "session_id": "2196bc25-b3e7-4480-82e6-15fa7a6d6b6e",
+      "task_id": "805e0286-894a-4f9e-b044-eee2311ca287",
+      "run_id": "de140126-fc69-4911-b3c0-dc048244c3d0",
+      "status": "completed",
+      "calculator_calls": 1,
+      "acceptance_checked": true,
+      "browser_script": "frontend/scripts/acceptance-live-browser.mjs"
+    },
+    {
+      "name": "latest_image_real_browser_workspace_and_tool",
+      "workspace_id": "3115121c-172f-4a7b-8c42-5a72383fc4a9",
+      "session_id": "bf33f00e-c1af-44b0-8860-cf548725fc4b",
+      "task_id": "78890439-1b88-4d94-8988-ea94f6ac869a",
+      "run_id": "ab2c7b45-c8ce-40c9-a241-a80aadf1eb13",
+      "status": "completed",
+      "calculator_calls": 1,
+      "acceptance_checked": true,
+      "browser_script": "frontend/scripts/acceptance-live-browser.mjs"
+    }
+  ],
+  "regression": {
+    "backend_postgres_redis": "426 passed, 13 skipped",
+    "frontend_vitest": "12 passed",
+    "frontend_playwright_fixture": "13 passed",
+    "frontend_build": "passed"
+  },
+  "limits": [
+    "The three live cases are not a representative task-quality estimate.",
+    "The real browser script performs writes to a dedicated acceptance database.",
+    "Dual-worker active crash and COMMITTED/UNKNOWN live browser recovery remain unverified."
+  ],
+  "evaluation": {
+    "dataset": "evals/datasets/agent-core-user-v1.json",
+    "dataset_commit": "0608180",
+    "dataset_sha256": "7e310097f8b78fc74a9481a388533e6a4710aec9203405b8b684d0b5c7653ffa",
+    "report": "docs/reports/agent-core-user-v1-2026-09-26.json",
+    "passed": 14,
+    "total": 16,
+    "minimum_pass_rate": 0.8,
+    "actual_pass_rate": 0.875,
+    "failures": "arithmetic-03 and arithmetic-04 exhausted 3 provider_network_error attempts each; both failure pages matched Trace"
+  }
+}

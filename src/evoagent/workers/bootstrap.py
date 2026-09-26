@@ -17,6 +17,7 @@ from evoagent.core.models import (
     ProviderEvent,
     ToolCall,
 )
+from evoagent.db.models import RunRecord
 from evoagent.db.session import Database
 from evoagent.memory.maintenance import MaintenanceWorker
 from evoagent.providers.base import ModelProvider
@@ -28,6 +29,7 @@ from evoagent.runtime.persistent_runner import PersistentAgentRunner
 from evoagent.sandbox.client import ControllerExecutor, DisabledSandboxExecutor
 from evoagent.tasks.lease import JobLease, JobLeaseManager, TaskExecutionResult
 from evoagent.tasks.lease_guard import LeaseGuard
+from evoagent.tasks.state_machine import PersistentRunStatus
 from evoagent.tools.builtin.artifact_read import ArtifactReadTool
 from evoagent.tools.builtin.artifact_write import ArtifactWriteTool
 from evoagent.tools.builtin.ask_user import AskUserTool
@@ -130,6 +132,19 @@ class ConfiguredTaskHandler:
         return await handler._handle(lease)
 
     async def _handle(self, lease: JobLease) -> TaskExecutionResult:
+        async with self._database.session_factory() as session:
+            run = await session.get(RunRecord, lease.run_id)
+        expected_model = self._settings.model or "mock-model"
+        if (
+            run is None
+            or run.provider != self._settings.provider.value
+            or run.model != expected_model
+        ):
+            return TaskExecutionResult(
+                status=PersistentRunStatus.FAILED,
+                error_code="provider_configuration_mismatch",
+                error_message="worker model configuration differs from the queued run",
+            )
         provider = self._provider(lease.run_id)
 
         async def check():

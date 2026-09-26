@@ -1,0 +1,359 @@
+{
+  "dataset": "agent-core-user-v1",
+  "dataset_sha256": "7e310097f8b78fc74a9481a388533e6a4710aec9203405b8b684d0b5c7653ffa",
+  "run_at": "2026-09-26T10:39:34.318859+00:00",
+  "provider": "openai_compatible",
+  "model": "deepseek-flash",
+  "search_mode": "mock",
+  "case_count": 16,
+  "passed": 14,
+  "pass_rate": 0.875,
+  "minimum_pass_rate": 0.8,
+  "gate_passed": true,
+  "cases": [
+    {
+      "case_id": "arithmetic-01",
+      "category": "calculator",
+      "session_id": "03726674-bc1d-48aa-9563-012543bf9c78",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "cbc8a246-ee06-47c1-b69c-a23ecfe1dc83",
+          "run_id": "c641987a-1fd3-4db3-8932-9c19c719e65c",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "calculator": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "arithmetic-02",
+      "category": "calculator",
+      "session_id": "8248b4f5-a4dd-4ea8-876f-feabfd1e0d70",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "da79393b-4a17-48d5-9738-8849754f9d14",
+          "run_id": "6d10184c-467e-45d5-895c-e02b19716d59",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "calculator": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "arithmetic-03",
+      "category": "calculator",
+      "session_id": "a6ecd422-b37b-4dbf-9e34-45a969e9fc43",
+      "passed": false,
+      "steps": [
+        {
+          "task_id": "6fc6a0cf-88c3-4b9d-9e2e-5a002d5f8294",
+          "run_id": "a9a704fd-fa25-4e57-83ce-7f0194ca702f",
+          "status": "failed",
+          "error_code": "provider_network_error",
+          "tool_successes": {
+            "calculator": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": null,
+          "passed": false
+        }
+      ]
+    },
+    {
+      "case_id": "arithmetic-04",
+      "category": "calculator",
+      "session_id": "df11916a-9c07-4b28-ade8-4fb624a1c4a1",
+      "passed": false,
+      "steps": [
+        {
+          "task_id": "dda653f9-6942-4330-8e3b-41560978c371",
+          "run_id": "152504d2-70ec-47d0-ace5-32c1bb4ff144",
+          "status": "failed",
+          "error_code": "provider_network_error",
+          "tool_successes": {},
+          "artifact_count": 0,
+          "acceptance_passed": null,
+          "passed": false
+        }
+      ]
+    },
+    {
+      "case_id": "arithmetic-05",
+      "category": "calculator",
+      "session_id": "f6441712-48d6-49ac-983a-905fe64ccb80",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "050ec848-24af-4e12-ae76-de086696ff25",
+          "run_id": "30ec332f-8e24-4931-82cb-4fd28cdebdb7",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "calculator": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "arithmetic-06",
+      "category": "calculator",
+      "session_id": "dd43e1d0-d7ad-4f02-a9ce-1e0573cb19a6",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "948d66c7-42b7-4b5f-9552-5b9f13c1dbe0",
+          "run_id": "c1b68e68-e46f-4339-ad96-6be8af13ab53",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "calculator": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "multi-tool-01",
+      "category": "multi_calculation",
+      "session_id": "688913ad-b3e7-4e78-8f88-039241a89967",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "4f584779-d35c-4d20-8c7d-f7c1ad5df1e7",
+          "run_id": "474a24c7-267f-42ab-901c-a7da444b978f",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "calculator": 3
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "multi-tool-02",
+      "category": "multi_calculation",
+      "session_id": "a6c5533f-ed6f-4b95-893e-3ae4e46075a2",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "44b615b6-c477-4da0-91bd-d9a765875a2b",
+          "run_id": "ee556742-69b5-4ec9-a8d0-d7f4020ac1d8",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "calculator": 3
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "file-01",
+      "category": "file_write",
+      "session_id": "94cad250-c77c-4b8a-aabb-ab262a2cf672",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "94cbb941-187c-4034-9fae-8a5229e7df03",
+          "run_id": "d35bb7f8-cf7a-484b-b1a6-515d71c9c744",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "file_write": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "file-02",
+      "category": "file_write",
+      "session_id": "a5fb0af7-672e-4800-b245-1ede594fb986",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "ebed6446-5389-44f5-ac57-e9a24a6a5fde",
+          "run_id": "23db33dd-7892-4c7d-8b3f-48882a03eb34",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "file_write": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "file-03",
+      "category": "file_write",
+      "session_id": "fa3f7bef-35f8-4701-9b9a-9e5d1adb270d",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "c7b75359-1d3a-4064-85b8-318d36b29348",
+          "run_id": "d734d895-e68b-409c-a936-223852c0edda",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "file_write": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "artifact-01",
+      "category": "artifact_write",
+      "session_id": "131da311-8dd2-4a24-829b-2874bc66a002",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "e4d94baf-4c38-4917-b2d3-8dbe545feb14",
+          "run_id": "4ce5b7be-03cd-4c11-85ab-c7faa59b50a1",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "artifact_write": 1
+          },
+          "artifact_count": 1,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "history-01",
+      "category": "multi_turn",
+      "session_id": "c200edea-34e5-43e3-ba95-53d96218a0ab",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "7f7433eb-673a-4cb6-bf77-a057fcb88add",
+          "run_id": "61492c05-bfd3-41fc-acab-369204fcdfdb",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {},
+          "artifact_count": 0,
+          "acceptance_passed": null,
+          "passed": true
+        },
+        {
+          "task_id": "fa30870c-36ad-4924-a1aa-a1fa83da79bf",
+          "run_id": "9d49b5c5-4cad-4fd8-bb7c-e443d0cf72c2",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {},
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "history-02",
+      "category": "multi_turn",
+      "session_id": "aa40b3be-2beb-4903-a78b-392f3c659208",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "3ed025c2-e860-402e-8c5b-7d9f4dca9c1b",
+          "run_id": "ed72cab5-cc11-42c8-ae25-e5ca5bade017",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {},
+          "artifact_count": 0,
+          "acceptance_passed": null,
+          "passed": true
+        },
+        {
+          "task_id": "bb3709fd-bf64-4a03-832d-89ac7c80be94",
+          "run_id": "b7cba095-b9f9-4f65-a463-57a344d97f3f",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {},
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "history-03",
+      "category": "multi_turn",
+      "session_id": "47ea5e51-f55e-4bd4-a490-fdb4a454ee0c",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "4c1af250-cfde-4421-9686-2d4f64da7d62",
+          "run_id": "9a7f5d26-8f51-4ccf-b4e8-118bb95063ab",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {},
+          "artifact_count": 0,
+          "acceptance_passed": null,
+          "passed": true
+        },
+        {
+          "task_id": "cdc3013d-208b-4e94-b2b4-149c0e78a8f6",
+          "run_id": "135be951-b124-45b4-a78f-2fd5b257597c",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "calculator": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "case_id": "approval-01",
+      "category": "ask_user",
+      "session_id": "73d56087-7d9c-4151-a83c-55ba5d57523e",
+      "passed": true,
+      "steps": [
+        {
+          "task_id": "448aebc2-f03f-491e-aac4-3dabdfd07704",
+          "run_id": "a364c9b6-4685-4815-9f9e-02209cd67ca9",
+          "status": "completed",
+          "error_code": null,
+          "tool_successes": {
+            "ask_user": 1
+          },
+          "artifact_count": 0,
+          "acceptance_passed": true,
+          "passed": true
+        }
+      ]
+    }
+  ]
+}

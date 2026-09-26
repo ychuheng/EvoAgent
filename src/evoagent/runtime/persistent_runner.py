@@ -3,6 +3,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.config import Settings
@@ -26,6 +27,7 @@ from evoagent.sessions.service import history_for_task
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.rendering import SkillContextRenderer
 from evoagent.skills.retrieval import SkillRetrievalService
+from evoagent.tasks.acceptance import AcceptanceSpec, check_acceptance
 from evoagent.tasks.lease import JobLease, LeaseLostError, TaskExecutionResult
 from evoagent.tasks.lease_guard import LeaseGuard
 from evoagent.tasks.state_machine import PersistentRunStatus
@@ -300,6 +302,38 @@ class PersistentAgentRunner:
             )
 
         if result.status is AgentLoopStatus.COMPLETED:
+            if task.acceptance is not None:
+                try:
+                    spec = AcceptanceSpec.model_validate(task.acceptance)
+                    outcome = await check_acceptance(
+                        spec,
+                        answer=result.final_answer or "",
+                        run_id=run.id,
+                        session_factory=self._session_factory,
+                        artifact_root=self._settings.artifact_root,
+                    )
+                except (OSError, ValidationError) as error:
+                    await sink.emit(
+                        EventType.ACCEPTANCE_CHECKED,
+                        {"passed": False, "error": type(error).__name__},
+                    )
+                    return TaskExecutionResult(
+                        status=PersistentRunStatus.FAILED,
+                        final_answer=result.final_answer,
+                        error_code="acceptance_check_error",
+                        error_message="task acceptance could not be checked",
+                    )
+                await sink.emit(
+                    EventType.ACCEPTANCE_CHECKED,
+                    {"passed": outcome.passed, "checks": list(outcome.checks)},
+                )
+                if not outcome.passed:
+                    return TaskExecutionResult(
+                        status=PersistentRunStatus.FAILED,
+                        final_answer=result.final_answer,
+                        error_code="acceptance_failed",
+                        error_message="the answer did not satisfy the task acceptance conditions",
+                    )
             return TaskExecutionResult(
                 status=PersistentRunStatus.COMPLETED,
                 final_answer=result.final_answer,

@@ -69,6 +69,34 @@ async def test_create_task_is_atomic_and_returns_202(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_info_discloses_demo_mode_without_secrets(tmp_path: Path) -> None:
+    async with api_client(tmp_path) as (client, _database):
+        response = await client.get("/api/v1/runtime-info")
+        assert response.status_code == 200
+        assert response.json() == {
+            "provider_mode": "mock",
+            "provider": "mock",
+            "model": "mock-model",
+            "search_mode": "mock",
+            "memory_enabled": False,
+            "code_version": "0.4.0.dev0",
+            "remote_model_checked": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_task_acceptance_rejects_unsafe_path_and_empty_contract(tmp_path: Path) -> None:
+    async with api_client(tmp_path) as (client, _database):
+        session = (await client.post("/api/v1/sessions", json={"title": "验收输入"})).json()
+        for acceptance in ({}, {"required_files": [{"path": "../outside.txt"}]}):
+            response = await client.post(
+                "/api/v1/tasks",
+                json={"session_id": session["id"], "goal": "写文件", "acceptance": acceptance},
+            )
+            assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_workspace_can_be_created_and_chosen_for_new_session(tmp_path: Path) -> None:
     async with api_client(tmp_path) as (client, _database):
         initial = (await client.get("/api/v1/workspaces")).json()

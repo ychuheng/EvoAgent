@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { memory, server, catalog, review, context, retrieval } from "../src/test/phase4-fixtures";
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/runtime-info", route => route.fulfill({ json: { provider_mode: "mock", provider: "mock", model: "mock-model", search_mode: "mock", memory_enabled: false, code_version: "0.4.0.dev0", remote_model_checked: false } }));
   await page.route("**/api/v1/skills", r => r.fulfill({ json: [] }));
   await page.route("**/api/v1/sessions", r => r.fulfill({ json: [] }));
   await page.route("**/api/v1/workspaces", r => r.fulfill({ json: [{ id: "00000000-0000-0000-0000-000000000001", name: "Local workspace", created_at: "2026-09-25" }] }));

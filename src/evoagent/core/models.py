@@ -84,6 +84,7 @@ class EventType(StrEnum):
     RUN_LIMIT_REACHED = "run.limit_reached"
     RECOVERY_COMPLETED = "recovery.completed"
     APPROVAL_REQUIRED = "approval.required"
+    ACCEPTANCE_CHECKED = "acceptance.checked"
 
 
 class ToolDefinition(ContractModel):

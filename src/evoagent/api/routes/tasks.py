@@ -19,6 +19,7 @@ def _response(aggregate: TaskAggregate) -> TaskResponse:
         id=task.id,
         session_id=task.session_id,
         goal=task.goal,
+        acceptance=task.acceptance,
         status=task.status,
         cancel_requested=task.cancel_requested,
         attempt_count=task.attempt_count,
@@ -37,6 +38,7 @@ async def create_task(
     aggregate = await service.create_task(
         session_id=request.session_id,
         goal=request.goal,
+        acceptance=request.acceptance,
         provider=request.provider or settings.provider.value,
         model=request.model or settings.model or "mock-model",
         run_mode=request.run_mode,

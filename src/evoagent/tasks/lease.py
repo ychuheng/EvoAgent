@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from evoagent.db.models import RunRecord, RuntimeEvalRunRecord, TaskRecord
+from evoagent.db.models import RunEventRecord, RunRecord, RuntimeEvalRunRecord, TaskRecord
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.tasks.lease_guard import LeaseGuard, database_now
 from evoagent.tasks.lease_guard import LeaseLostError as LeaseLostError
@@ -216,6 +216,24 @@ class JobLeaseManager:
                     error_message="memory source was revoked",
                 )
                 task_target = TaskStatus.FAILED
+            if task.acceptance is not None and result.status is PersistentRunStatus.COMPLETED:
+                checked = await unit.session.scalar(
+                    select(RunEventRecord)
+                    .where(
+                        RunEventRecord.run_id == run.id,
+                        RunEventRecord.event_type == "acceptance.checked",
+                    )
+                    .order_by(RunEventRecord.sequence.desc())
+                    .limit(1)
+                )
+                if checked is None or checked.payload.get("passed") is not True:
+                    result = TaskExecutionResult(
+                        status=PersistentRunStatus.FAILED,
+                        final_answer=result.final_answer,
+                        error_code="acceptance_evidence_missing",
+                        error_message="task acceptance was not verified by the worker",
+                    )
+                    task_target = TaskStatus.FAILED
             ensure_task_transition(task.status, task_target)
             ensure_run_transition(run.status, result.status)
             task.status = task_target

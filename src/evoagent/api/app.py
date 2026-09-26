@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from evoagent.api.routes import approvals, evals, events, memory, sessions, skills, tasks, traces
-from evoagent.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
+from evoagent.api.schemas import ErrorDetail, ErrorResponse, HealthResponse, RuntimeInfoResponse
 from evoagent.config import ProviderName, Settings
 from evoagent.db.repositories.base import RecordNotFoundError
 from evoagent.db.session import Database
@@ -220,6 +220,17 @@ def create_app(
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])
     async def liveness() -> HealthResponse:
         return HealthResponse(status="ok")
+
+    @app.get("/api/v1/runtime-info", response_model=RuntimeInfoResponse, tags=["runtime"])
+    async def runtime_info() -> RuntimeInfoResponse:
+        return RuntimeInfoResponse(
+            provider_mode=("mock" if resolved_settings.provider is ProviderName.MOCK else "real"),
+            provider=resolved_settings.provider.value,
+            model=resolved_settings.model or "mock-model",
+            search_mode=resolved_settings.search_provider,
+            memory_enabled=resolved_settings.memory_retrieval_enabled,
+            code_version=resolved_settings.code_version,
+        )
 
     @app.get(
         "/health/ready",

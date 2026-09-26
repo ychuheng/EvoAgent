@@ -20,6 +20,7 @@ from evoagent.db.repositories.base import ConcurrentUpdateError, RecordNotFoundE
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.runtime.run_config import RunMode
 from evoagent.sessions.service import append_message, project_terminal
+from evoagent.tasks.acceptance import AcceptanceSpec
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
 
@@ -93,6 +94,7 @@ class TaskService:
         *,
         session_id: UUID,
         goal: str,
+        acceptance: AcceptanceSpec | None = None,
         provider: str,
         model: str,
         run_mode: RunMode = RunMode.RETRIEVAL,
@@ -115,6 +117,7 @@ class TaskService:
             task = TaskRecord(
                 session_id=session_id,
                 goal=normalized_goal,
+                acceptance=acceptance.model_dump(mode="json") if acceptance else None,
                 status=TaskStatus.QUEUED,
             )
             unit.tasks.add(task)

@@ -1,11 +1,16 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/runtime-info", route => route.fulfill({ json: { provider_mode: "mock", provider: "mock", model: "mock-model", search_mode: "mock", memory_enabled: false, code_version: "0.4.0.dev0", remote_model_checked: false } }));
+});
+
 test("网页对话可发送、等待回复并在刷新后恢复同一 Session", async ({ page }) => {
   const workspaceId = "00000000-0000-0000-0000-000000000001";
   const sessions: Array<{ id: string; title: string; workspace_id: string; created_at: string }> = [];
   const messages: Array<{ id: string; task_id: string; run_id: string; sequence: number; kind: string; role: string; content: string; created_at: string }> = [];
   let taskCount = 0;
   const now = new Date().toISOString();
+  await page.route("**/api/v1/runtime-info", route => route.fulfill({ json: { provider_mode: "real", provider: "openai_compatible", model: "deepseek-flash", search_mode: "mock", memory_enabled: false, code_version: "0.4.0.dev0", remote_model_checked: false } }));
   await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [{ id: workspaceId, name: "Local workspace", created_at: now }] }));
   await page.route("**/api/v1/sessions", async (route) => {
     if (route.request().method() === "POST") {
@@ -43,6 +48,7 @@ test("网页对话可发送、等待回复并在刷新后恢复同一 Session", 
   } }));
 
   await page.goto("/ui/");
+  await expect(page.getByText("真实模型已配置：deepseek-flash")).toBeVisible();
   await page.getByLabel("发送消息").fill("第一问");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByText("回复 task-1")).toBeVisible();
@@ -61,6 +67,42 @@ test("网页对话可发送、等待回复并在刷新后恢复同一 Session", 
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByText("回复 task-2")).toBeVisible();
   expect(sessions).toHaveLength(1);
+});
+
+test("Mock 模式明确提示不是 AI 对话", async ({ page }) => {
+  await page.route("**/api/v1/runtime-info", route => route.fulfill({ json: { provider_mode: "mock", provider: "mock", model: "mock-model", search_mode: "mock", memory_enabled: false, code_version: "0.4.0.dev0", remote_model_checked: false } }));
+  await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/sessions", route => route.fulfill({ json: [] }));
+  await page.goto("/ui/");
+  await expect(page.getByText("当前是 Mock 演示")).toBeVisible();
+  await expect(page.getByText(/不是 AI 对话/)).toBeVisible();
+});
+
+test("用户可设置验收条件并查看未通过的模型回答", async ({ page }) => {
+  const now = new Date().toISOString();
+  const acceptance = { answer_contains: ["391"], required_tools: ["calculator"], required_files: [{ path: "report.md" }] };
+  await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [{ id: "00000000-0000-0000-0000-000000000001", name: "Local workspace", created_at: now }] }));
+  await page.route("**/api/v1/sessions", route => route.fulfill({ status: route.request().method() === "POST" ? 201 : 200, json: route.request().method() === "POST" ? { id: "session-acceptance", title: "报告", workspace_id: "00000000-0000-0000-0000-000000000001", created_at: now } : [] }));
+  await page.route("**/api/v1/sessions/session-acceptance/messages", route => route.fulfill({ json: [
+    { id: "goal-acceptance", task_id: "task-acceptance", run_id: "run-acceptance", sequence: 1, kind: "goal", role: "user", content: "生成报告", created_at: now },
+    { id: "answer-acceptance", task_id: "task-acceptance", run_id: "run-acceptance", sequence: 2, kind: "terminal", role: "assistant", content: JSON.stringify({ status: "failed", error_code: "acceptance_failed" }), created_at: now },
+  ] }));
+  await page.route("**/api/v1/tasks", route => {
+    expect(route.request().postDataJSON().acceptance).toEqual(acceptance);
+    return route.fulfill({ status: 202, json: { id: "task-acceptance", status: "queued", acceptance, latest_run: { id: "run-acceptance", provider: "mock", model: "mock-model" } } });
+  });
+  await page.route("**/api/v1/tasks/task-acceptance", route => route.fulfill({ json: { id: "task-acceptance", status: "failed", acceptance, latest_run: { id: "run-acceptance", provider: "mock", model: "mock-model" } } }));
+  await page.route("**/api/v1/runs/run-acceptance/trace", route => route.fulfill({ json: { run_id: "run-acceptance", task_id: "task-acceptance", status: "failed", final_answer: "报告没有完成", error_code: "acceptance_failed", tool_calls: [], tool_effects: [], approvals: [], events: [{ event_type: "acceptance.checked", payload: { passed: false, checks: [] } }] } }));
+  await page.goto("/ui/");
+  await page.getByLabel("发送消息").fill("生成报告");
+  await page.getByText("设置可核对的验收条件（可选）").click();
+  await page.getByLabel("回答必须包含").fill("391");
+  await page.getByLabel("必须成功调用的工具").fill("calculator");
+  await page.getByLabel("必须生成的文件").fill("report.md");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(page.getByRole("alert").first()).toContainText("回答未通过设定的验收条件");
+  await page.getByText("查看未通过验收的模型回答").click();
+  await expect(page.getByText("报告没有完成")).toBeVisible();
 });
 
 test("对话中可处理待审批工具并取消任务", async ({ page }) => {

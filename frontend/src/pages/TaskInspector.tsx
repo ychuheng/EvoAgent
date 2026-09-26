@@ -79,10 +79,13 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
   const showError = trace?.error_code && task?.status !== "cancelled" && !(
     trace.error_code === "approval_required" && task && !TERMINAL.has(task.status)
   );
+  const acceptancePassed = trace?.events.some((event) => event.event_type === "acceptance.checked" && event.payload.passed === true);
   return <section className="chat-inspector" aria-label="任务执行过程">
     <h3>执行过程</h3>
     <p>{task ? `状态：${taskStatusLabel[task.status] ?? task.status}` : "正在读取任务状态…"}{task?.cancel_requested ? " · 已请求取消" : ""}</p>
     {task && <p className="chat-meta">模型：{task.latest_run.provider} / {task.latest_run.model} · Task {task.id} · Run {task.latest_run.id}</p>}
+    {task?.status === "completed" && <p className="chat-meta">{task.acceptance ? (acceptancePassed ? "已通过设定的验收条件；其他内容仍需核对。" : "验收记录缺失，结果不能视为已核验。") : "模型已给出回答；未设置独立验收条件，正确性尚未核验。"}</p>}
+    {trace?.error_code === "acceptance_failed" && trace.final_answer && <details><summary>查看未通过验收的模型回答</summary><p>{trace.final_answer}</p></details>}
     {task && <button type="button" className="chat-detail-button" onClick={() => onOpenContext(task.latest_run.id)}>查看上下文与检索证据</button>}
     {task && !TERMINAL.has(task.status) && !task.cancel_requested && <button type="button" className="danger" disabled={busy} onClick={() => { void act(() => chat.cancel(taskId)); }}>取消任务</button>}
     {showError && <p role="alert" className="error">{task && TERMINAL.has(task.status) ? "失败原因" : "最近错误"}：{errorLabel(trace.error_code!)}</p>}

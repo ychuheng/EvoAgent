@@ -152,6 +152,7 @@ class TaskRecord(Base):
         ForeignKey("sessions.id", ondelete="RESTRICT"), index=True
     )
     goal: Mapped[str] = mapped_column(Text)
+    acceptance: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     status: Mapped[TaskStatus] = mapped_column(
         enum_column(TaskStatus, "task_status"), default=TaskStatus.CREATED
     )

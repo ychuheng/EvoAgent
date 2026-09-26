@@ -1,6 +1,15 @@
 import { request } from "./client";
 
 export type ChatWorkspace = { id: string; name: string; created_at: string };
+export type RuntimeInfo = {
+  provider_mode: "mock" | "real";
+  provider: string;
+  model: string;
+  search_mode: string;
+  memory_enabled: boolean;
+  code_version: string;
+  remote_model_checked: boolean;
+};
 export type ChatSession = { id: string; title: string; workspace_id: string; created_at: string };
 export type ChatMessage = {
   id: string;
@@ -16,12 +25,18 @@ export type ChatTask = {
   id: string;
   status: string;
   cancel_requested: boolean;
+  acceptance: {
+    answer_contains: string[];
+    required_tools: string[];
+    required_files: Array<{ path: string; sha256?: string | null }>;
+  } | null;
   latest_run: { id: string; provider: string; model: string };
 };
 export type TaskTrace = {
   run_id: string;
   task_id: string;
   status: string;
+  final_answer: string | null;
   error_code: string | null;
   events: Array<{ event_type: string; payload: Record<string, unknown> }>;
   tool_calls: Array<{
@@ -43,6 +58,7 @@ export type TaskTrace = {
 };
 
 export const chat = {
+  runtimeInfo: () => request<RuntimeInfo>("/runtime-info"),
   workspaces: () => request<ChatWorkspace[]>("/workspaces"),
   createWorkspace: (name: string) => request<ChatWorkspace>("/workspaces", {
     method: "POST", body: JSON.stringify({ name }),
@@ -53,8 +69,8 @@ export const chat = {
   }),
   messages: (sessionId: string) =>
     request<ChatMessage[]>(`/sessions/${encodeURIComponent(sessionId)}/messages`),
-  createTask: (sessionId: string, goal: string) => request<ChatTask>("/tasks", {
-    method: "POST", body: JSON.stringify({ session_id: sessionId, goal }),
+  createTask: (sessionId: string, goal: string, acceptance?: ChatTask["acceptance"]) => request<ChatTask>("/tasks", {
+    method: "POST", body: JSON.stringify({ session_id: sessionId, goal, acceptance: acceptance ?? null }),
   }),
   task: (taskId: string) => request<ChatTask>(`/tasks/${encodeURIComponent(taskId)}`),
   trace: (runId: string) => request<TaskTrace>(`/runs/${encodeURIComponent(runId)}/trace`),

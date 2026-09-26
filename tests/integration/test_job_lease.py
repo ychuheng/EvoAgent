@@ -7,6 +7,7 @@ from sqlalchemy import select
 from evoagent.db.base import Base
 from evoagent.db.models import RunEventRecord, RunRecord, TaskRecord
 from evoagent.db.session import Database
+from evoagent.tasks.acceptance import AcceptanceSpec
 from evoagent.tasks.lease import (
     JobLease,
     JobLeaseManager,
@@ -73,6 +74,32 @@ async def test_claim_heartbeat_and_finalize(database: Database) -> None:
     assert stored_run is not None and stored_run.status is PersistentRunStatus.COMPLETED
     assert stored_run.final_answer == "处理完成"
     assert event_types == ("task.queued", "worker.claimed", "run.completed")
+
+
+@pytest.mark.asyncio
+async def test_completed_result_cannot_bypass_explicit_acceptance(database: Database) -> None:
+    service = TaskService(database.session_factory)
+    session = await service.create_session("核验不能绕过")
+    aggregate = await service.create_task(
+        session_id=session.id,
+        goal="需要实际验收",
+        provider="mock",
+        model="mock-model",
+        acceptance=AcceptanceSpec(answer_contains=["目标值"]),
+    )
+    manager = JobLeaseManager(database.session_factory, lease_seconds=30)
+    lease = await manager.claim_next("worker-a")
+    assert lease is not None
+    await manager.finalize(
+        lease,
+        TaskExecutionResult(status=PersistentRunStatus.COMPLETED, final_answer="随便回答"),
+    )
+    async with database.session_factory() as db:
+        task = await db.get(TaskRecord, aggregate.task.id)
+        run = await db.get(RunRecord, aggregate.run.id)
+    assert task is not None and task.status is TaskStatus.FAILED
+    assert run is not None and run.error_code == "acceptance_evidence_missing"
+    assert run.final_answer == "随便回答"
 
 
 @pytest.mark.asyncio
