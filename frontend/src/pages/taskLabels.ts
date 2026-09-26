@@ -16,6 +16,7 @@ export function errorLabel(code: string): string {
     acceptance_failed: "回答未通过设定的验收条件",
     acceptance_evidence_missing: "任务缺少验收记录",
     acceptance_check_error: "验收条件检查失败",
+    side_effect_unknown: "副作用结果不确定，需要人工确认",
   };
   const label = known[code];
   return label ? `${label}（${code}）` : code;

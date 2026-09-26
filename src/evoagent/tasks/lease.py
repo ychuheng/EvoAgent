@@ -7,7 +7,17 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from evoagent.db.models import RunEventRecord, RunRecord, RuntimeEvalRunRecord, TaskRecord
+from evoagent.db.models import (
+    ApprovalStatus,
+    RunEventRecord,
+    RunRecord,
+    RuntimeEvalRunRecord,
+    TaskRecord,
+    ToolApprovalRecord,
+    ToolCallRecord,
+    ToolEffectRecord,
+    ToolEffectStatus,
+)
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.tasks.lease_guard import LeaseGuard, database_now
 from evoagent.tasks.lease_guard import LeaseLostError as LeaseLostError
@@ -216,6 +226,53 @@ class JobLeaseManager:
                     error_message="memory source was revoked",
                 )
                 task_target = TaskStatus.FAILED
+            if result.status is not PersistentRunStatus.CANCELLED:
+                unsafe_effects = tuple(
+                    await unit.session.scalars(
+                        select(ToolEffectRecord)
+                        .join(ToolCallRecord, ToolCallRecord.id == ToolEffectRecord.tool_call_id)
+                        .where(
+                            ToolCallRecord.run_id == run.id,
+                            ToolEffectRecord.status.in_(
+                                (
+                                    ToolEffectStatus.PREPARED,
+                                    ToolEffectStatus.EXECUTING,
+                                    ToolEffectStatus.UNKNOWN,
+                                )
+                            ),
+                        )
+                        .with_for_update()
+                    )
+                )
+                for effect in unsafe_effects:
+                    effect.status = ToolEffectStatus.UNKNOWN
+                    approval = await unit.session.scalar(
+                        select(ToolApprovalRecord).where(
+                            ToolApprovalRecord.tool_call_id == effect.tool_call_id
+                        )
+                    )
+                    if approval is None:
+                        call = await unit.session.get(ToolCallRecord, effect.tool_call_id)
+                        approval = ToolApprovalRecord(
+                            task_id=task.id,
+                            tool_call_id=effect.tool_call_id,
+                            risk=call.risk,
+                        )
+                        unit.session.add(approval)
+                    approval.status = ApprovalStatus.PENDING
+                    approval.response = None
+                    approval.decided_at = None
+                    approval.reason = (
+                        "副作用结果未知；请用 response=retry 表示确认未提交，"
+                        "或 response=committed:<结果> 表示确认已提交"
+                    )
+                if unsafe_effects:
+                    result = TaskExecutionResult(
+                        status=PersistentRunStatus.WAITING_USER,
+                        error_code="side_effect_unknown",
+                        error_message="side effect outcome requires user confirmation",
+                    )
+                    task_target = TaskStatus.WAITING_USER
             if task.acceptance is not None and result.status is PersistentRunStatus.COMPLETED:
                 checked = await unit.session.scalar(
                     select(RunEventRecord)

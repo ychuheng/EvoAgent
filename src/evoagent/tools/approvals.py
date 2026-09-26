@@ -1,5 +1,6 @@
 """工具审批的创建、决策与任务恢复。"""
 
+import hashlib
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from evoagent.db.models import (
     TaskRecord,
     ToolApprovalRecord,
     ToolCallRecord,
+    ToolCallStatus,
     ToolEffectRecord,
     ToolEffectStatus,
 )
@@ -97,6 +99,10 @@ class ApprovalService:
                     ToolEffectRecord.tool_call_id == approval.tool_call_id
                 )
             )
+            if not approved and effect is not None and effect.status is ToolEffectStatus.UNKNOWN:
+                raise ApprovalServiceError(
+                    "unknown effect needs an outcome confirmation or task cancellation"
+                )
             if (
                 approved
                 and effect is not None
@@ -107,6 +113,33 @@ class ApprovalService:
                 raise ApprovalServiceError(
                     "unknown effect response must be retry or committed:<result>"
                 )
+            if (
+                approved
+                and effect is not None
+                and effect.status is ToolEffectStatus.UNKNOWN
+                and normalized_response == "retry"
+                and call.status is ToolCallStatus.FAILED
+            ):
+                raise ApprovalServiceError(
+                    "failed tool checkpoint cannot replay; cancel and submit a new task"
+                )
+            if (
+                approved
+                and effect is not None
+                and effect.status is ToolEffectStatus.UNKNOWN
+                and normalized_response is not None
+                and normalized_response.startswith("committed:")
+            ):
+                # A resumed checkpoint may be past the failed tool result, so the tool
+                # might never be called again. The human decision must settle the ledger.
+                content = normalized_response.removeprefix("committed:")
+                effect.status = ToolEffectStatus.COMMITTED
+                effect.result_content = content
+                effect.result_hash = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
+                effect.committed_at = datetime.now(UTC)
+                call.status = ToolCallStatus.SUCCEEDED
+                call.error_code = None
+                call.result_summary = content
             approval.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
             approval.response = normalized_response
             approval.decided_at = datetime.now(UTC)

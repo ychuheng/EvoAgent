@@ -1,6 +1,7 @@
 """独立 Worker 进程：仅在指定的真实提交边界暂停，供父进程强制终止。"""
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -19,7 +20,9 @@ async def main():
     mode = sys.argv[2]
     settings = Settings(
         _env_file=None,
-        database_url=f"sqlite+aiosqlite:///{root / 'process.db'}",
+        database_url=os.getenv(
+            "EVOAGENT_WORKER_CRASH_DATABASE_URL", f"sqlite+aiosqlite:///{root / 'process.db'}"
+        ),
         workspace=root / "workspace",
         lease_seconds=0.9,
         heartbeat_seconds=0.2,
@@ -65,7 +68,10 @@ async def main():
             poll_seconds=0.02,
             snapshot_schema_version=settings.snapshot_schema_version,
         )
-        await worker.run_once()
+        if mode == "standby":
+            await worker.run_forever()
+        else:
+            await worker.run_once()
 
 
 if __name__ == "__main__":

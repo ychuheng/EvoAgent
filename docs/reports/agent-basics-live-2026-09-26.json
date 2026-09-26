@@ -1,12 +1,13 @@
 {
   "environment": {
-    "image": "evoagent:agent-audit-20260926",
+    "image": "evoagent:agent-audit-20260927",
     "api": "http://127.0.0.1:18001",
     "database": "evoagent_acceptance_check",
     "provider": "openai_compatible",
     "model": "deepseek-flash",
     "scope": "dedicated local acceptance database and workspace volume; existing 18000 deployment unchanged",
-    "image_id": "sha256:a73eee666b9eb6d1cb31b885eeb30818d0054f163c4fe233c4945b1e42ddf918"
+    "image_id_initial_evaluation": "sha256:a73eee666b9eb6d1cb31b885eeb30818d0054f163c4fe233c4945b1e42ddf918",
+    "image_id_latest_smoke": "sha256:dd8bfa17b442f47e8febd427d59c39daed922aa7460d6c8a321f2378a4d94bf5"
   },
   "migration": {
     "head": "20260926_0014",
@@ -52,19 +53,62 @@
       "calculator_calls": 1,
       "acceptance_checked": true,
       "browser_script": "frontend/scripts/acceptance-live-browser.mjs"
+    },
+    {
+      "name": "intermediate_image_real_browser_workspace_and_tool",
+      "workspace_id": "cfa107af-1180-4d88-8253-0e7d911090c9",
+      "session_id": "930ece31-6282-44e6-b40e-50fdc74c4104",
+      "task_id": "0e3e3237-3f21-404e-b547-5ed57bc2f46f",
+      "run_id": "3ea56432-d7d3-4e1a-91af-971f7534f95c",
+      "status": "completed",
+      "calculator_calls": 1,
+      "acceptance_checked": true,
+      "browser_script": "frontend/scripts/acceptance-live-browser.mjs"
+    },
+    {
+      "name": "final_20260927_image_real_browser_workspace_and_tool",
+      "workspace_id": "e4b83aae-b892-43ab-97d1-2c6d7baa43d3",
+      "session_id": "0ae5bd06-c34b-4557-bef7-8205bae99eb0",
+      "task_id": "e0eed4ce-9838-4ecc-b429-f4d236e75561",
+      "run_id": "e059eb5c-780a-43ae-9ce5-bdbfeaf2513a",
+      "status": "completed",
+      "calculator_calls": 1,
+      "acceptance_checked": true,
+      "browser_script": "frontend/scripts/acceptance-live-browser.mjs"
+    },
+    {
+      "name": "final_20260927_cancel_warning_image_real_browser_workspace_and_tool",
+      "workspace_id": "ab4356d5-b7d3-4ea1-aa07-3465c3aa56db",
+      "session_id": "5240c3c8-34e3-46d9-97e2-6d53fff755cc",
+      "task_id": "961034b1-2740-41c4-90c2-11427f7ad5fe",
+      "run_id": "378d4940-29b9-414c-80d3-2289c20f79dd",
+      "status": "completed",
+      "calculator_calls": 1,
+      "acceptance_checked": true,
+      "browser_script": "frontend/scripts/acceptance-live-browser.mjs"
     }
   ],
   "regression": {
-    "backend_postgres_redis": "426 passed, 13 skipped",
+    "backend_postgres_redis": "430 passed, 13 skipped after dual-worker crash and unknown-effect guard tests",
     "frontend_vitest": "12 passed",
     "frontend_playwright_fixture": "13 passed",
     "frontend_build": "passed"
   },
   "limits": [
-    "The three live cases are not a representative task-quality estimate.",
+    "The controlled live cases are not a representative task-quality estimate.",
     "The real browser script performs writes to a dedicated acceptance database.",
-    "Dual-worker active crash and COMMITTED/UNKNOWN live browser recovery remain unverified."
+    "Dual-worker active crash has PostgreSQL subprocess evidence; a separate Mock browser run resolved UNKNOWN approval and confirmed one file write. Other external tools remain unverified."
   ],
+  "long_context_browser": {
+    "session_id": "5561d12b-c4fc-49b6-aa0f-c9b88bf169da",
+    "task_id": "75577df5-ff09-4214-9526-72b764635b20",
+    "run_id": "70cb136c-1ed2-4e93-9c1d-c8dcee4a0d20",
+    "status": "failed",
+    "error_code": "context_budget_exceeded",
+    "tool_calls": 0,
+    "browser_verified": true,
+    "script": "frontend/scripts/verify-live-context.mjs"
+  },
   "evaluation": {
     "dataset": "evals/datasets/agent-core-user-v1.json",
     "dataset_commit": "0608180",

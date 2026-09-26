@@ -8121,3 +8121,29 @@ Runner 判断通过后，`JobLeaseManager.finalize` 才在当前租约下提交 
 首次运行 14/16。`arithmetic-03` 有一次成功 calculator 调用，仍因后续模型请求网络错误失败；`arithmetic-04` 未取得成功工具调用。两者的 Task `attempt_count=3`，最终错误均为 `provider_network_error`。`PersistentAgentRunner` 将该码交给 `RetryPolicy`；预算耗尽后 `JobLeaseManager` 持久化失败终态。由于模型未正常完成，验收器没有写 `acceptance.checked`；不能把这归因于验收表达式不满足，也不能只看末次 Run 的工具数量断定模型在所有尝试中从未用工具。`frontend/scripts/verify-live-task.mjs` 从真实网页重新打开这两条 Session，核对中文错误、Task ID 与 Workspace 归属；真实页面与 API/Trace 的一致性由此得到一次负路径实测。
 
 若复现时某一例失败，先看 `task.status`、`attempt_count` 和各次 Run 的 `error_code`，再看最后一条 `acceptance.checked` 是否存在，以及成功 ToolCall 和 Artifact 数量。网络错误应查 Provider 链路与重试预算；`acceptance_failed` 则应查看每项 `checks` 和模型原答。不要为了让分数好看删除网络失败或把它记为通过。这个流程也提醒我们：评测器和页面可以忠实报告失败，但不能保证远端模型永远可用。
+
+## 109. PostgreSQL 双 Worker 运行中崩溃
+
+`tests/e2e/test_worker_process_recovery.py` 原有三个 SQLite 子进程故障样本，每次只在主 Worker 被杀后启动替补。新增的 `test_postgres_standby_worker_recovers_active_crash` 使用真实测试 PostgreSQL 库，先让主 Worker 领到租约，并在选定持久化边界暂停，再启动**已经在线轮询**的备用 Worker，然后强制终止主进程。备用进程通过 `JobWorker.run_forever` 执行 `recover_expired`、`recover_pending` 和 `claim_next`，而不是由父测试直接调用这些方法模拟接管。API 侧同一时间读取 Task 终态和 Run Trace；测试结束销毁两个子进程并清理专用测试库的表。
+
+暂停点在 `worker_crash_fixture.py` 中注入：`readonly` 是检查点保存之后，`committed` 是副作用账本记为已提交之后，`unknown` 是文件写入已实际调用、账本还未记为提交之前。三种情况下 `invocations` 文件都必须恰好一行 `write`。前两种最终 `completed` 且 ToolEffect 为 `committed`，说明第二进程没有重复执行文件写入；第三种 Task 保持 `waiting_user`、ToolEffect 为 `unknown`，并存在待处理 Approval，说明系统没有擅自重放结果不确定的操作。`LeaseGuard` 和租约 epoch 防止旧进程在失去租约后继续写 Trace；测试直接强杀进程，验证的是持久化恢复而非优雅关停。
+
+这项测试运行在真实 PostgreSQL、多进程和 API/Trace 路径，但模型是确定性 Mock，API 使用 ASGI 测试客户端，尚未接入实际网页处理 UNKNOWN 决策。它补齐“并行 Worker 在运行中崩溃”的后端实证，不能被写成远端模型故障或浏览器联合验收。执行时设置 `EVOAGENT_TEST_DATABASE_URL` 指向**专用测试库**，运行 `pytest tests/e2e/test_worker_process_recovery.py -q`；不应指向保存用户任务的业务库。
+
+### 109.1 工具超时后为何还要查副作用账本
+
+独立页面联验发现一种不同于进程崩溃的路径：文件写入已发生，但工具协程在账本提交前超时。`PersistentToolMiddleware.after_failure` 把 ToolCall 标为失败、ToolEffect 标为 UNKNOWN；模型收到 `tool_timeout` 后仍可能产生终答。旧版 `JobLeaseManager.finalize` 只看 Runner 的 `COMPLETED`，使 Task 误变成 `completed`，同时 UNKNOWN 没有人工审批。这既误导用户，也让“操作是否已发生”无法在页面处理。
+
+现在 `finalize` 在提交终态前，以同一租约事务查询当前 Run 的 `PREPARED`、`EXECUTING` 和 `UNKNOWN` ToolEffect。若存在未决副作用，就统一冻结为 UNKNOWN，为每个 ToolCall 创建或重置 pending Approval，并把 Task/Run 转为 `waiting_user/side_effect_unknown`。显式验收和模型终答都不能越过此检查。`tests/integration/test_job_lease.py::test_unknown_effect_blocks_completed_result_and_requires_user` 直接模拟工具超时后模型交来 `COMPLETED`，断言任务不会进入成功终态。该边界与 `RecoveryService` 的崩溃恢复互补：一个拦截仍持有租约的正常终态提交，另一个处理租约已经过期的进程故障。
+
+联验的真实页面使用独立 PostgreSQL 和 Mock API。Worker 在外部写入后被强制终止，备用 Worker 把 Task 转为 `waiting_user`；页面显示 UNKNOWN、要求输入 `retry` 或 `committed:实际结果`。操作者先查到 `report.md` 实际存在、写入记录一次，再输入 `committed:report.md`；备用 Worker 恢复，ToolEffect 转为 COMMITTED，Task 完成，写入次数仍为一。这里选择“已提交”有外部文件证据，不能不核对就自动填写。运行标识和首次错误终态均保存在[故障报告](reports/agent-dual-worker-crash-2026-09-26.json)。
+
+工具超时与进程崩溃还有一个恢复差异：超时后保存的检查点可能已包含失败 ToolResult，重排后不会再次调用原工具。若 `ApprovalService.decide` 只保存 `committed:` 答复，账本仍 UNKNOWN，终态保护就会再次要求审批。服务现在在人工确认已提交的同一事务内直接把 ToolEffect 记为 COMMITTED，保存结果哈希与时间，并把 ToolCall 记为成功；再次恢复即使没有工具调用也能安全完成。对于已失败的工具调用，`retry` 不能在旧检查点上安全重放，API 明确拒绝，页面要求核对未提交后取消并新建任务。对尚在恢复前工具边界的 UNKNOWN，原有 `retry` 决策仍可交由中间件续接。测试同时覆盖 `retry` 拒绝与 `committed:` 结清，不把无限审批循环当成可接受的降级。
+
+UNKNOWN 的裸“拒绝”同样不是结果确认：外部动作可能已经发生，单纯拒绝后重新排队会再次碰到 UNKNOWN。`ApprovalService` 因此拒绝该决定，`TaskInspector` 对 UNKNOWN 不显示“拒绝”，仍保留任务取消入口。普通无副作用或结果已知的审批继续支持拒绝。
+
+取消任务只停止继续执行，不会逆转已经发生的外部动作。若取消时 Trace 仍有 UNKNOWN，`TaskInspector` 在终态继续显示“外部操作结果仍不确定”的警示，要求用户核对实际状态，避免把“任务已取消”误解成“写入一定未发生”。
+
+### 109.2 页面长正文的预算拒绝
+
+`frontend/scripts/verify-live-context.mjs` 通过真实模型页面提交 20,000 个汉字的用户正文。当前部署的 `ConservativeTokenCounter` 按 UTF-8 字节加封装余量估算，`BoundedContextPolicy` 对受保护用户正文不能静默裁剪；输入超过 `context_window_tokens - max_output_tokens - safety_margin` 时，Runner 在 Provider 请求前返回 `context_budget_exceeded`。测试断言页面中文错误、Trace 错误码一致、工具调用为零。此例验证超预算拒绝与可见性，不代表接近窗口上限的长任务质量或真实模型 tokenizer 精确度。

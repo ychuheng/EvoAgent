@@ -179,15 +179,15 @@ test("网页可建立 Workspace 并把新对话放入所选作用域", async ({ 
 test("页面展示超时、无效参数和 UNKNOWN 副作用", async ({ page }) => {
   const workspaceId = "00000000-0000-0000-0000-000000000001";
   const now = new Date().toISOString();
-  let mode: "timeout" | "invalid" | "waiting_user" = "timeout";
+  let mode: "timeout" | "invalid" | "waiting_user" | "cancelled" = "timeout";
   await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [{ id: workspaceId, name: "Local workspace", created_at: now }] }));
   await page.route("**/api/v1/sessions", route => route.fulfill({ json: [{ id: "session-negative", title: "负路径", workspace_id: workspaceId, created_at: now }] }));
   await page.route("**/api/v1/sessions/session-negative/messages", route => route.fulfill({ json: [{ id: "goal-negative", task_id: "task-negative", run_id: "run-negative", sequence: 1, kind: "goal", role: "user", content: "负路径", created_at: now }] }));
-  await page.route("**/api/v1/tasks/task-negative", route => route.fulfill({ json: { id: "task-negative", status: mode === "waiting_user" ? mode : "failed", cancel_requested: false, latest_run: { id: "run-negative", provider: "mock", model: "fixture" } } }));
+  await page.route("**/api/v1/tasks/task-negative", route => route.fulfill({ json: { id: "task-negative", status: mode === "waiting_user" || mode === "cancelled" ? mode : "failed", cancel_requested: false, latest_run: { id: "run-negative", provider: "mock", model: "fixture" } } }));
   await page.route("**/api/v1/runs/run-negative/trace", route => route.fulfill({ json: {
-    run_id: "run-negative", task_id: "task-negative", status: mode === "waiting_user" ? mode : "failed", error_code: mode === "timeout" ? "provider_timeout" : mode === "invalid" ? "invalid_arguments" : null,
+    run_id: "run-negative", task_id: "task-negative", status: mode === "waiting_user" || mode === "cancelled" ? mode : "failed", error_code: mode === "timeout" ? "provider_timeout" : mode === "invalid" ? "invalid_arguments" : "side_effect_unknown",
     tool_calls: mode === "timeout" ? [] : [{ id: "call-negative", tool_name: "file_write", arguments: { path: "report.md", overwrite: true }, status: mode === "invalid" ? "failed" : "running", result_summary: null, error_code: mode === "invalid" ? "invalid_arguments" : null }],
-    tool_effects: mode === "waiting_user" ? [{ tool_call_id: "call-negative", status: "unknown" }] : [],
+    tool_effects: mode === "waiting_user" || mode === "cancelled" ? [{ tool_call_id: "call-negative", status: "unknown" }] : [],
     approvals: mode === "waiting_user" ? [{ id: "approval-negative", tool_call_id: "call-negative", status: "pending", risk: "R2", reason: "外部状态需核对" }] : [], events: [],
   } }));
   await page.route("**/api/v1/tool-approvals/approval-negative/approve", route => route.fulfill({ json: { id: "approval-negative", status: "approved" } }));
@@ -198,6 +198,10 @@ test("页面展示超时、无效参数和 UNKNOWN 副作用", async ({ page }) 
   await expect(page.locator(".chat-tool-list")).toContainText("工具参数无效（invalid_arguments）");
   mode = "waiting_user"; await page.reload(); await page.getByRole("button", { name: "负路径" }).click();
   await expect(page.getByText("状态：等待人工处理")).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("副作用结果不确定，需要人工确认（side_effect_unknown）");
   await expect(page.getByText(/外部操作结果不确定。确认重试/)).toBeVisible();
   await expect(page.getByPlaceholder("retry 或 committed:实际结果")).toBeVisible();
+  await expect(page.getByRole("button", { name: "拒绝" })).toHaveCount(0);
+  mode = "cancelled"; await page.reload(); await page.getByRole("button", { name: "负路径" }).click();
+  await expect(page.getByText(/外部操作结果仍不确定；任务结束不代表外部动作未发生/)).toBeVisible();
 });

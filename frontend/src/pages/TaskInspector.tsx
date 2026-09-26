@@ -79,6 +79,7 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
   const showError = trace?.error_code && task?.status !== "cancelled" && !(
     trace.error_code === "approval_required" && task && !TERMINAL.has(task.status)
   );
+  const unresolvedEffect = trace?.tool_effects.some((effect) => effect.status === "unknown");
   const acceptancePassed = trace?.events.some((event) => event.event_type === "acceptance.checked" && event.payload.passed === true);
   return <section className="chat-inspector" aria-label="任务执行过程">
     <h3>执行过程</h3>
@@ -89,6 +90,7 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
     {task && <button type="button" className="chat-detail-button" onClick={() => onOpenContext(task.latest_run.id)}>查看上下文与检索证据</button>}
     {task && !TERMINAL.has(task.status) && !task.cancel_requested && <button type="button" className="danger" disabled={busy} onClick={() => { void act(() => chat.cancel(taskId)); }}>取消任务</button>}
     {showError && <p role="alert" className="error">{task && TERMINAL.has(task.status) ? "失败原因" : "最近错误"}：{errorLabel(trace.error_code!)}</p>}
+    {unresolvedEffect && task && TERMINAL.has(task.status) && <p role="alert" className="error">外部操作结果仍不确定；任务结束不代表外部动作未发生，请核对实际状态。</p>}
     {trace?.tool_calls.length ? <div className="chat-tool-list"><h4>工具调用</h4><ol>{trace.tool_calls.map((call) =>
       <li key={call.id}><strong>{call.tool_name}</strong> · {trace.approvals.some((approval) => approval.tool_call_id === call.id && approval.status === "approved") && call.status === "pending" ? "已审批，等待恢复" : TOOL_STATUS[call.status] ?? call.status}
         <details><summary>查看输入参数</summary><pre>{JSON.stringify(call.arguments, null, 2)}</pre></details>
@@ -108,11 +110,11 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
       return <div className="chat-approval" key={approval.id}>
         <h4>需要人工决定：{call?.tool_name ?? "工具调用"}</h4>
         <p>风险 {approval.risk} · {approval.reason}</p>
-        {unknown && <p>外部操作结果不确定。确认重试请输入 retry；确认已提交请输入 committed:实际结果。请先核对外部状态。</p>}
-        <label>回复或确认依据<input value={response} onChange={(event) => setResponses((values) => ({ ...values, [approval.id]: event.target.value }))} placeholder={unknown ? "retry 或 committed:实际结果" : "ask_user 工具需要填写回复"} /></label>
+        {unknown && <p>{call?.status === "failed" ? "外部操作结果不确定，且工具已失败，无法在本任务安全重试。若确认未提交，请取消后新建任务；若确认已提交，请输入 committed:实际结果。请先核对外部状态。" : "外部操作结果不确定。确认重试请输入 retry；确认已提交请输入 committed:实际结果。请先核对外部状态。"}</p>}
+        <label>回复或确认依据<input value={response} onChange={(event) => setResponses((values) => ({ ...values, [approval.id]: event.target.value }))} placeholder={unknown ? (call?.status === "failed" ? "committed:实际结果" : "retry 或 committed:实际结果") : "ask_user 工具需要填写回复"} /></label>
         <div className="actions">
           <button type="button" disabled={busy || (unknown && !response.trim()) || (call?.tool_name === "ask_user" && !response.trim())} onClick={() => { void act(() => chat.decideApproval(approval.id, "approve", response), approval.id); }}>批准</button>
-          <button type="button" className="danger" disabled={busy} onClick={() => { void act(() => chat.decideApproval(approval.id, "reject", response), approval.id); }}>拒绝</button>
+          {!unknown && <button type="button" className="danger" disabled={busy} onClick={() => { void act(() => chat.decideApproval(approval.id, "reject", response), approval.id); }}>拒绝</button>}
         </div>
       </div>;
     })}

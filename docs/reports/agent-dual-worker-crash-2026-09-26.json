@@ -1,0 +1,67 @@
+{
+  "environment": {
+    "database": "dedicated local PostgreSQL test database",
+    "worker_processes": 2,
+    "api": "FastAPI ASGI test client",
+    "provider": "mock",
+    "test": "tests/e2e/test_worker_process_recovery.py::test_postgres_standby_worker_recovers_active_crash"
+  },
+  "method": "Worker A is forcibly killed at a persisted checkpoint, after a committed effect, or after invoking an effect before its commit. Worker B is already running before the kill and acquires the expired lease. API task state and persisted Trace are checked after recovery.",
+  "cases": [
+    {
+      "mode": "readonly",
+      "result": "passed",
+      "terminal_task_status": "completed",
+      "effect_status": "committed",
+      "side_effect_invocations": 1
+    },
+    {
+      "mode": "committed",
+      "result": "passed",
+      "terminal_task_status": "completed",
+      "effect_status": "committed",
+      "side_effect_invocations": 1
+    },
+    {
+      "mode": "unknown",
+      "result": "passed",
+      "task_status": "waiting_user",
+      "effect_status": "unknown",
+      "pending_approval": true,
+      "side_effect_invocations": 1
+    }
+  ],
+  "command_result": "6 passed in 31.96s (3 existing SQLite crash tests plus 3 new PostgreSQL standby-worker cases)",
+  "live_browser_unknown": {
+    "environment": "separate PostgreSQL database evoagent_joint_20260926, Mock API on 127.0.0.1:18002, host Worker subprocesses",
+    "observed_defect": {
+      "task_id": "79ee52d7-4791-44ce-b350-de68396bc7a8",
+      "description": "A deliberately parked file write exceeded the 30-second tool timeout. Task became completed while ToolEffect stayed unknown and no approval existed. This is invalid and motivated the finalization guard."
+    },
+    "fixed_case": {
+      "session_id": "0a777a07-6011-4cb7-8acf-c061291e117c",
+      "task_id": "4df6b4ba-03f8-4ee0-9149-aae4e9b4703e",
+      "run_id": "27d28040-d329-4bc8-ad9a-9caf4f10b99a",
+      "before_browser": "waiting_user, unknown effect, pending approval, one write invocation and existing report.md",
+      "browser_action": "committed:report.md",
+      "after_browser": "completed, committed effect, approved decision, one write invocation",
+      "script": "frontend/scripts/verify-live-unknown.mjs"
+    },
+    "timeout_after_write": {
+      "session_id": "58533f7e-44ec-4a4e-9d1d-e266b6d88f92",
+      "task_id": "39897c66-2aac-47b3-8348-47a66c5041f1",
+      "run_id": "88468feb-fae5-460e-a58a-d7151022f5f5",
+      "before_approval": "tool_timeout, waiting_user, unknown effect, pending approval, one write invocation",
+      "observed_resume_defect": "Before the approval fix, committed:report.md requeued the task but the checkpoint skipped the failed tool and finalization requested approval again.",
+      "fixed_resolution": "ApprovalService now commits the UNKNOWN ledger entry in the approval transaction. The repeated browser committed:report.md decision completed the task with one write invocation and an approved decision.",
+      "retry_policy": "A failed tool checkpoint cannot safely replay in the same task; retry is rejected and the browser asks the user to cancel and create a new task after confirming the external operation did not commit.",
+      "rejection_policy": "A bare rejection does not establish the external outcome and is rejected by the API; the browser hides Reject for UNKNOWN approvals."
+    }
+  },
+  "limitations": [
+    "The active-crash test and joint browser scenario use a deterministic Mock provider, not a live remote model.",
+    "The three automated crash cases use an ASGI test client; the separate joint UNKNOWN scenario was resolved through the real browser.",
+    "Live-browser COMMITTED no-replay was verified for one controlled file_write effect; other external tools remain outside this sample.",
+    "For an already failed tool checkpoint, automatic retry in the same task is unavailable; the user must confirm no external commit, cancel, and create a new task."
+  ]
+}
