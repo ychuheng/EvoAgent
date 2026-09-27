@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "name": "m0-interaction-skill-dev-v1",
+  "set": "dev",
+  "fixture": "evals/fixtures/project-dev-notes",
+  "note": "计划 §5.1 要求补齐的两类 dev 任务：『一条运行中介入』与『一条 Skill 对照』。两类都只在 dev 上反复运行，绝不计入 M6/M7 通过率。运行中介入用例验证的是『指令在模型/工具边界注入、不改写已执行动作』的机制；Skill 对照用例验证的是『同一任务在两臂上可比较地跑一遍』的机制与报告字段，**不构成 Skill 有效性的证据**（那属于 M6，需要未暴露 holdout 与样本量预注册）。",
+  "cases": [
+    {
+      "id": "m0-midrun-instruction",
+      "kind": "interaction",
+      "goal": "阅读这个项目并说明入口文件；执行到一半时用户会补充『只说明入口，不要展开其它模块』。",
+      "steps": [
+        {"type": "tool", "tool": "list_dir", "arguments": {"path": "."}},
+        {"type": "tool", "tool": "file_read", "arguments": {"path": "src/fieldnotes/cli.py", "max_lines": 40}},
+        {
+          "type": "answer",
+          "content": "按补充约束只说明入口：\n- src/fieldnotes/cli.py：命令行入口，`def main(` 是入口函数；其余模块按约束不展开。"
+        }
+      ],
+      "instruction": {
+        "content": "只说明入口，不要展开其它模块",
+        "inject_before_step": 2
+      },
+      "answer_anchors": ["按补充约束", "src/fieldnotes/cli.py"],
+      "expect_instruction_injected": 1,
+      "expect_executed_actions_preserved": ["list_dir", "file_read"]
+    },
+    {
+      "id": "m0-skill-control-pair",
+      "kind": "skill_pair",
+      "goal": "定位这个项目里定义 add_note 的文件，并给出路径依据。",
+      "steps": [
+        {"type": "tool", "tool": "search_text", "arguments": {"query": "def add_note"}},
+        {
+          "type": "answer",
+          "content": "add_note 定义在 src/fieldnotes/store.py：\n- src/fieldnotes/store.py:4: def add_note(path, title, body)"
+        }
+      ],
+      "skill_text": "定位符号定义时，先用 search_text 搜 `def <符号名>`，再打开命中文件确认行号；不要凭目录名猜测。",
+      "answer_anchors": ["src/fieldnotes/store.py"],
+      "min_evidence_paths": 1,
+      "pair_arms": ["control", "treatment"]
+    }
+  ]
+}
