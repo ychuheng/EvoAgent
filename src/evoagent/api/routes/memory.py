@@ -218,6 +218,8 @@ async def retry_job(job_id: UUID, database: DatabaseDependency):
         if job is None or job.status != "failed":
             raise MemoryError("maintenance_retry_conflict")
         job.status = "pending"
+        # 人工重试开启新的三次尝试窗口；否则 attempts=3 的任务会被立即判为耗尽。
+        job.attempts = 0
         job.error_code = None
         job.next_attempt_at = None
         await session.commit()

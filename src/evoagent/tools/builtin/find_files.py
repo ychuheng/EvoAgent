@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from fnmatch import fnmatchcase
+from functools import cache
 from pathlib import Path
 
 from pydantic import Field
@@ -97,5 +99,24 @@ class FindFilesTool(BaseTool[FindFilesArguments]):
 
 
 def _matches(pattern: str, name: str, display: str) -> bool:
-    candidates = (name, display, Path(display).name)
-    return any(Path(candidate).match(pattern) for candidate in candidates)
+    if "/" not in pattern:
+        return fnmatchcase(name, pattern)
+
+    parts = pattern.split("/")
+    path_parts = display.split("/")
+
+    @cache
+    def match(pattern_index: int, path_index: int) -> bool:
+        if pattern_index == len(parts):
+            return path_index == len(path_parts)
+        if parts[pattern_index] == "**":
+            return match(pattern_index + 1, path_index) or (
+                path_index < len(path_parts) and match(pattern_index, path_index + 1)
+            )
+        return (
+            path_index < len(path_parts)
+            and fnmatchcase(path_parts[path_index], parts[pattern_index])
+            and match(pattern_index + 1, path_index + 1)
+        )
+
+    return match(0, 0)

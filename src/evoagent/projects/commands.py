@@ -8,7 +8,8 @@
 - **可执行文件白名单**：只允许配置里显式列出的程序名（默认空 = 不能运行任何命令）。
 - **环境变量白名单**：只传出最小集合（PATH/SystemRoot/TEMP/…），不继承应用秘密与代理设置。
 - **输出上限与超时**：stdout/stderr 各自截断，超时后强杀并如实报告。
-- **默认离线**：`allow_network` 需要独立授权（R2 审批），一次批准不会变成长期网络权限。
+- **网络边界尚未完成**：默认仅清代理变量，不能阻断直接连接；
+  `allow_network=true` 仍需独立授权（R2 审批）。
 """
 
 from __future__ import annotations
@@ -161,7 +162,7 @@ def build_environment(
     extra: Mapping[str, str] | None = None,
     base: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """构造最小环境；默认不传任何代理变量，因此不会因继承配置而联网。
+    """构造最小环境；默认不传代理变量，但这不是系统级断网。
 
     `extra` 是部署者在配置里显式声明的变量（例如 `PYTHONPATH=src`）；模型无法指定环境变量，
     因此这里不存在"用环境变量改行为"的通道。
@@ -173,7 +174,8 @@ def build_environment(
     environment.setdefault("PYTHONUTF8", "1")
     if extra:
         environment.update({str(key): str(value) for key, value in extra.items()})
-    environment["EVOAGENT_COMMAND_NETWORK"] = "allowed" if allow_network else "denied"
+    # 这是执行状态提示，不是网络命名空间隔离；清代理无法阻断直接 socket 连接。
+    environment["EVOAGENT_COMMAND_NETWORK"] = "allowed" if allow_network else "not_isolated"
     if not allow_network:
         # 清掉代理变量，避免"以为离线其实走了代理"。
         for name in (

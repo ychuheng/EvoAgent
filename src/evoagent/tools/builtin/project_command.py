@@ -2,7 +2,7 @@
 
 `run_command` 只接受结构化 argv：
 
-- 默认离线，不继承代理；需要联网时用 `allow_network=true`，其风险被提升到 R2，
+- 默认不继承代理，但尚未强制断网；`allow_network=true` 的风险被提升到 R2，
   因此**必须**经过一次独立的人工审批（X-03：一次测试批准不带来安装或推送权）。
 - 输出按上限截断，超时强杀；stdout/stderr/退出码/耗时/截断标记都结构化返回，
   让模型能据失败继续修正（X-04）。
@@ -32,8 +32,9 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
     name = "run_command"
     description = (
         "Run an allowlisted program inside the authorized project as a structured argv "
-        "(no shell). Working directory must be inside the project. Network is denied by "
-        "default; allow_network=true needs a separate approval."
+        "(no shell). Working directory must be inside the project. Proxy variables are "
+        "cleared by default, but direct network access is not isolated; "
+        "allow_network=true needs a separate approval."
     )
     arguments_model = RunCommandArguments
     risk = ToolRisk.R1
@@ -56,7 +57,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
         self._environment = dict(environment or {})
 
     def effective_risk(self, arguments: RunCommandArguments) -> ToolRisk:
-        # 网络访问是独立授权项：默认离线，联网必须单独批准。
+        # 显式联网仍需独立审批；默认档位目前只清代理，不保证直接连接被阻断。
         return ToolRisk.R2 if arguments.allow_network else ToolRisk.R1
 
     def execution_binding(self) -> dict[str, object]:
@@ -85,7 +86,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             "program": outcome.program,
             "argv": list(arguments.argv),
             "cwd": outcome.cwd,
-            "network": "allowed" if arguments.allow_network else "denied",
+            "network": "allowed" if arguments.allow_network else "not_isolated",
             "return_code": outcome.return_code,
             "timed_out": outcome.timed_out,
             "duration_seconds": outcome.duration_seconds,

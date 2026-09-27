@@ -105,5 +105,5 @@ async def test_run_command_returns_failure_evidence_instead_of_raising(tmp_path:
 
     assert payload["return_code"] == 2
     assert payload["stderr"].strip() == "bad"
-    assert payload["network"] == "denied"
+    assert payload["network"] == "not_isolated"
     assert payload["timed_out"] is False

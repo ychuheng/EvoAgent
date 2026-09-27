@@ -82,7 +82,7 @@ def test_build_environment_excludes_secrets_and_proxies(monkeypatch: pytest.Monk
     assert "EVOAGENT_API_KEY" not in offline
     assert "HTTPS_PROXY" not in offline
     assert offline["PATH"] == "/usr/bin"
-    assert offline["EVOAGENT_COMMAND_NETWORK"] == "denied"
+    assert offline["EVOAGENT_COMMAND_NETWORK"] == "not_isolated"
     assert online["EVOAGENT_COMMAND_NETWORK"] == "allowed"
 
 

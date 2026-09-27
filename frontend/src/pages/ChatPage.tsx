@@ -90,7 +90,8 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
 
   useEffect(() => {
     let active = true;
-    void Promise.all([chat.sessions(), chat.workspaces(), chat.projects()]).then(([items, available, registered]) => {
+    // 项目目录是可选能力；旧服务或暂时不可用的项目接口不能阻断会话列表。
+    void Promise.all([chat.sessions(), chat.workspaces(), chat.projects().catch(() => [] as Project[])]).then(([items, available, registered]) => {
       if (!active) return;
       setSessions([...items].reverse());
       setWorkspaces(available);

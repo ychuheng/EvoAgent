@@ -401,7 +401,14 @@ async def test_erase_failure_keeps_job_failed_and_retry_finishes_cleanup(env, mo
         )
         assert job.status == "failed"
         assert (await session.get(MemoryVersionRecord, version.id)).content is not None
+        # 覆盖自动重试次数耗尽后的人工作业重试。
+        job.attempts = 3
+        await session.commit()
     await retry_job(job.id, db)
+    async with db.session_factory() as session:
+        retried = await session.get(MaintenanceJobRecord, job.id)
+        assert retried.status == "pending"
+        assert retried.attempts == 0
     monkeypatch.setattr(store, "erase", original)
     await worker.run_once()
     async with db.session_factory() as session:

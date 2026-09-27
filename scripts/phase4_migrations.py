@@ -7,6 +7,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 
 from evoagent.db.session import Database
@@ -57,7 +58,7 @@ async def verify(url, *, legacy):
             assert [r[0] for r in rows] == [1, 2]
             assert {r[1] for r in rows} == {"legacy-2", "legacy-3"}
             assert all(r[2] == "legacy" and r[3] and r[4].startswith("sha256:") for r in rows)
-        assert revision == "20260922_0012" and extension
+        assert revision == ScriptDirectory.from_config(config).get_current_head() and extension
         return {
             "head": revision,
             "vector_version": extension,

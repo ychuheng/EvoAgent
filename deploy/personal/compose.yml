@@ -5,15 +5,31 @@ services:
     env_file: .env.personal
     environment:
       EVOAGENT_PROVIDER: openai_compatible
+    volumes:
+      - type: bind
+        source: ${EVOAGENT_PROJECTS_HOST_ROOT:?set an explicit host directory for authorized projects}
+        target: /app/projects
   worker:
     env_file: .env.personal
     environment:
       EVOAGENT_PROVIDER: openai_compatible
+    volumes:
+      - type: bind
+        source: ${EVOAGENT_PROJECTS_HOST_ROOT:?set an explicit host directory for authorized projects}
+        target: /app/projects
   maintenance-worker:
     env_file: .env.personal
     environment:
       EVOAGENT_PROVIDER: openai_compatible
+    volumes:
+      - type: bind
+        source: ${EVOAGENT_PROJECTS_HOST_ROOT:?set an explicit host directory for authorized projects}
+        target: /app/projects
   eval-worker:
     env_file: .env.personal
     environment:
       EVOAGENT_PROVIDER: openai_compatible
+    volumes:
+      - type: bind
+        source: ${EVOAGENT_PROJECTS_HOST_ROOT:?set an explicit host directory for authorized projects}
+        target: /app/projects

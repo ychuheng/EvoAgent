@@ -78,9 +78,11 @@ async def test_find_files_matches_name_and_relative_path(tmp_path: Path) -> None
 
     by_name = await FindFilesTool(root).invoke(FindFilesArguments(pattern="*.py"))
     by_path = await FindFilesTool(root).invoke(FindFilesArguments(pattern="src/pkg/*.py"))
+    by_recursive_path = await FindFilesTool(root).invoke(FindFilesArguments(pattern="src/**/*.py"))
 
     assert "src/pkg/store.py" in by_name
     assert "src/pkg/store.py" in by_path
+    assert "src/pkg/store.py" in by_recursive_path
     # 命中列表里不得出现被忽略目录下的文件（忽略规则说明里会提到目录名，故只看命中段）。
     matches = by_name.split("已扫描文件：")[0]
     assert "node_modules" not in matches
