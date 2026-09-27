@@ -25,6 +25,13 @@ def test_valid_personal_configuration_has_no_remote_side_effect(tmp_path: Path) 
     assert validate(path) == ("example-model", "mock")
 
 
+def test_keyless_ddgs_personal_configuration(tmp_path: Path) -> None:
+    path = tmp_path / ".env.personal"
+    write_config(path, extra="EVOAGENT_SEARCH_PROVIDER=ddgs\n")
+
+    assert validate(path) == ("example-model", "ddgs")
+
+
 @pytest.mark.parametrize(
     "extra, expected",
     [

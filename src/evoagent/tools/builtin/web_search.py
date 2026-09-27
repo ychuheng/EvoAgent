@@ -1,11 +1,14 @@
-"""统一 Web Search 工具、确定性替身和 Brave 适配器。"""
+"""统一 Web Search 工具、确定性替身及真实搜索适配器。"""
 
+import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Protocol
 from urllib.parse import urlsplit
 
 import httpx
+from ddgs import DDGS
+from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from evoagent.core.models import ContractModel, ToolRisk
@@ -32,6 +35,69 @@ class MockSearchProvider:
 
     async def search(self, query: str, *, count: int) -> tuple[SearchResult, ...]:
         return self._results[:count]
+
+
+class DDGSSearchProvider:
+    """无密钥聚合搜索；由 ddgs 选择可用后端。"""
+
+    name = "ddgs"
+
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = 20,
+        search: Callable[[str, int], list[dict]] | None = None,
+    ) -> None:
+        self._timeout = timeout_seconds
+        self._search = search or self._query
+
+    def _query(self, query: str, count: int) -> list[dict]:
+        return DDGS(timeout=self._timeout).text(query, max_results=count, backend="auto")
+
+    async def search(self, query: str, *, count: int) -> tuple[SearchResult, ...]:
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(self._search, query, count), timeout=self._timeout + 1
+            )
+        except (TimeoutException, TimeoutError) as error:
+            raise WebSearchError("search_timeout", "web search timed out") from error
+        except RatelimitException as error:
+            raise WebSearchError("search_rate_limited", "web search was rate limited") from error
+        except DDGSException as error:
+            if "No results found" in str(error):
+                return ()
+            raise WebSearchError(
+                "search_service_unavailable", "web search service failed"
+            ) from error
+        if not isinstance(raw, list):
+            raise WebSearchError("search_invalid_response", "web search results must be a list")
+        results: list[SearchResult] = []
+        for item in raw[:count]:
+            if not isinstance(item, dict) or not isinstance(item.get("href"), str):
+                raise WebSearchError("search_invalid_response", "web search result has no URL")
+            try:
+                url = httpx.URL(item["href"])
+                parsed_url = urlsplit(item["href"])
+            except (httpx.InvalidURL, ValueError) as error:
+                raise WebSearchError(
+                    "search_invalid_response", "web search result URL is invalid"
+                ) from error
+            if (
+                url.scheme not in {"http", "https"}
+                or not url.host
+                or parsed_url.username is not None
+                or parsed_url.password is not None
+            ):
+                raise WebSearchError("search_invalid_response", "web search result URL is invalid")
+            results.append(
+                SearchResult(
+                    title=str(item.get("title", "")),
+                    url=item["href"],
+                    snippet=str(item.get("body", "")),
+                    source="ddgs",
+                )
+            )
+        return tuple(results)
 
 
 class BraveSearchProvider:

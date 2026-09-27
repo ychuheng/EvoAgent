@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     sandbox_controller_token: SecretStr | None = None
     sandbox_staging_root: Path = Path("/var/lib/evoagent-sandbox")
 
-    search_provider: Literal["mock", "brave"] = "mock"
+    search_provider: Literal["mock", "brave", "ddgs"] = "mock"
     search_api_key: SecretStr | None = None
 
     # 阶段三 Skill 默认只使用低风险、非 Shell 能力。

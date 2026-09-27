@@ -40,6 +40,7 @@ from evoagent.tools.builtin.shell import ShellTool
 from evoagent.tools.builtin.web_fetch import WebFetchTool
 from evoagent.tools.builtin.web_search import (
     BraveSearchProvider,
+    DDGSSearchProvider,
     MockSearchProvider,
     SearchResult,
     WebSearchTool,
@@ -213,6 +214,8 @@ class ConfiguredTaskHandler:
             if self._settings.search_api_key is None:
                 raise RuntimeError("search provider configuration was not validated")
             return BraveSearchProvider(self._settings.search_api_key)
+        if self._settings.search_provider == "ddgs":
+            return DDGSSearchProvider(timeout_seconds=self._settings.tool_timeout_seconds)
         return MockSearchProvider(
             [
                 SearchResult(

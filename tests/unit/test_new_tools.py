@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
 
 from evoagent.core.models import ToolRisk
 from evoagent.tools.base import ToolPermissionError
@@ -12,6 +13,7 @@ from evoagent.tools.builtin.file_write import FileWriteArguments, FileWriteTool
 from evoagent.tools.builtin.shell import ShellArguments, ShellTool
 from evoagent.tools.builtin.web_search import (
     BraveSearchProvider,
+    DDGSSearchProvider,
     MockSearchProvider,
     SearchResult,
     WebSearchArguments,
@@ -73,6 +75,59 @@ async def test_zero_search_results_still_record_query_and_provider() -> None:
         "provider": "mock",
         "results": [],
     }
+
+
+@pytest.mark.asyncio
+async def test_ddgs_search_is_keyless_and_keeps_real_source() -> None:
+    calls: list[tuple[str, int]] = []
+
+    def search(query: str, count: int) -> list[dict]:
+        calls.append((query, count))
+        return [{"title": "Guide", "href": "https://example.org/guide", "body": "Summary"}]
+
+    tool = WebSearchTool(DDGSSearchProvider(search=search))
+    content, evidence = await tool.invoke_with_evidence(WebSearchArguments(query="guide", count=2))
+
+    assert calls == [("guide", 2)]
+    assert json.loads(content) == [
+        {
+            "title": "Guide",
+            "url": "https://example.org/guide",
+            "snippet": "Summary",
+            "source": "ddgs",
+        }
+    ]
+    assert evidence["provider"] == "ddgs"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (RatelimitException("limited"), "search_rate_limited"),
+        (TimeoutException("late"), "search_timeout"),
+        (DDGSException("backend unavailable"), "search_service_unavailable"),
+    ],
+)
+async def test_ddgs_search_classifies_backend_failures(error: DDGSException, code: str) -> None:
+    def fail(_query: str, _count: int) -> list[dict]:
+        raise error
+
+    with pytest.raises(WebSearchError) as failure:
+        await DDGSSearchProvider(search=fail).search("query", count=3)
+    assert failure.value.code == code
+    assert "backend unavailable" not in str(failure.value)
+
+
+@pytest.mark.asyncio
+async def test_ddgs_search_rejects_credential_url_and_allows_zero_results() -> None:
+    assert await DDGSSearchProvider(search=lambda _q, _n: []).search("none", count=3) == ()
+    provider = DDGSSearchProvider(
+        search=lambda _q, _n: [{"href": "https://user:token@example.org/"}]
+    )
+    with pytest.raises(WebSearchError) as failure:
+        await provider.search("query", count=3)
+    assert failure.value.code == "search_invalid_response"
 
 
 @pytest.mark.asyncio
