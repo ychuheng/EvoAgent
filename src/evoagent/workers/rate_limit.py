@@ -123,7 +123,10 @@ class BudgetedProvider:
         self.model = model
 
     async def stream(self, request):
-        from evoagent.providers.base import ProviderEventType
+        # `ProviderEventType` 在 `core.models` 里，不在 `providers.base`：写错会让
+        # **每一次真实模型调用**在发出请求前抛 ImportError（离线 Mock 不走这条包装路径，
+        # 所以只有真实 Provider 才暴露；M7 发布演练实测到 `internal_provider_error`）。
+        from evoagent.core.models import ProviderEventType
         from evoagent.runtime.budget import (
             BudgetExceededError,
             evaluate_budget,

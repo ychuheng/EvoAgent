@@ -12,7 +12,7 @@
 | `dev` | `evals/datasets/m0a-project-dev-v1.json` | `evals/fixtures/project-dev-notes` | 4 | **可以**反复调试 | 未进入任何通过率 |
 | `m6-holdout`（训练侧） | `evals/datasets/m6-skill-holdout-v1.json` `split=train` | `evals/fixtures/ledger-holdout` | 1 | 可反复用于构造/调试 Skill | 不计入通过率 |
 | `m6-holdout`（正式） | `evals/datasets/m6-skill-holdout-v1.json` `split=holdout` | `evals/fixtures/ledger-holdout` | 3 | **每个候选只允许一次正式运行** | 0 |
-| `m7-holdout` | `evals/datasets/m7-release-holdout-v1.json` | `evals/fixtures/beacon-holdout` | 4（2 正常 + 2 边界） | 每个候选只允许一次正式运行 | 0 |
+| `m7-holdout` | `evals/datasets/m7-release-holdout-v1.json` | `evals/fixtures/beacon-holdout`（1 条公开调研样本无 fixture） | 32（24 正常 + 8 故障/越权） | 每个候选只允许一次正式运行 | 0 |
 | `legacy` | 旧数据集 3 个 | 无 | 3 条标记 | 不适用 | 已曝光，永不充当 holdout |
 
 `legacy` 指 `agent-core-user-v1.json`、`phase4-skill-math-v1.json`、`open-source-research-v1.json`：
@@ -32,10 +32,18 @@
 
 ## 3. M7 发布集规模
 
-- 目标（执行计划 §5.6）：**至少 24 条正常 + 8 条故障/越权 = 32 条**，与 dev 小集**不得复用同一批样本**。
-- 当前进度：4 / 32（增量第一批）。后续批次按同一预注册版本补足，每一批在**该批首次正式运行前**冻结，
-  不得根据已见结果补容易题。
-- 增量方式：新增 fixture 家族（与现有三个 fixture 不同领域），每批登记进 `manifest.json` 后运行台账复查。
+- 目标（执行计划 §12）：**至少 24 条正常 + 8 条故障/越权 = 32 条**，与 dev 小集**不得复用同一批样本**。
+- 当前进度：**32 / 32 已登记**（2026-09-27，全部在任何正式运行之前入库）。正常任务覆盖计划点名的
+  项目理解（7）、跨文件编辑（5）、失败修正（4）、交互介入（3）、文件处理（3）、Skill（1）、
+  公开调研（1）；故障/越权覆盖越权（2）、注入（2，含一条真注入与一条假注入）、危险命令（1）、
+  缺输入（1）、凭据（1）、损坏输入（1）。逐条锚点见[样本锚点表](样本锚点-M6-M7-holdout.md)第 3 节。
+- 数量与类别覆盖由台账检查强制核对（`check_sample_ledger.py`），清单声明在 `manifest.json`
+  的 `coverage.m7-holdout`；探针必须在生成数据集前逐个核对确实存在于 fixture 中。
+- **但"已登记"不等于"已执行"**：32 条一次都还没跑过。真实模型任务、人工审查与干净环境演练
+  仍待完成，见[M7 发布准备与分层检查](M7发布准备与分层检查-2026-09-27.md)。
+- 增量方式：新增 fixture 家族（与现有三个 fixture 不同领域），登记进 `manifest.json` 后运行台账复查。
+- 变更留痕：`beacon-holdout` 为凑足 24 + 8 扩充过内容（扩充前哈希 `58b08bee…`），扩充发生在
+  首次正式运行之前，扩充后重新自查并重算 `reviewed_hash`。
 
 ## 4. M6 样本量：方法与待填数值
 

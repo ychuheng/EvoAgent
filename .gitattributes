@@ -1,0 +1,7 @@
+# holdout fixture 的内容哈希是**按字节**算的（`scripts/build_m0b_holdout.py` 的 fixture_hash），
+# 因此凡是"行尾转换会改变字节"的 fixture 文件都必须显式关闭 text 处理，否则换一台机器
+# （或换一次 autocrlf 设置）检出后哈希就变了，台账检查会直接报不一致。
+#
+# 正常情况下 fixture 里的文本文件在 Windows 工作树里是 CRLF，与已提交内容一致，无需特别声明；
+# 这里只需要钉住那些**不是 UTF-8 文本**、但又不含 NUL 字节（git 会误判为 text）的文件：
+evals/fixtures/beacon-holdout/data/legacy-gb18030.txt -text

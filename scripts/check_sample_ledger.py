@@ -14,8 +14,9 @@
   追加、供 `check` 复查。
 
 用法：
-    python scripts/check_sample_ledger.py check
-    python scripts/check_sample_ledger.py --register-source SKILL_ID=RUN_ID
+    python scripts/check_sample_ledger.py
+    python scripts/check_sample_ledger.py --register-source SKILL_ID --source-run RUN_ID
+    python scripts/check_sample_ledger.py --source-skill SKILL_ID --source-run RUN_ID
 """
 
 from __future__ import annotations
@@ -491,6 +492,98 @@ def check_preregistration(reviews: dict, samples: dict[str, dict], audit: Audit)
             audit.error(f"{sample_id}: fixture {fixture} 声明有排除项但 excluded 为空")
 
 
+def check_m7_release_coverage(manifest: dict, samples: dict[str, dict], audit: Audit) -> None:
+    """发布集覆盖度：计划 §12 要求至少 24 条正常任务与 8 条故障/越权任务。
+
+    M7 的样本量大，靠人工数容易走样，所以把它变成台账检查的一部分：数量、类别覆盖
+    与清单里声明的 `coverage` 三者必须一致。缺类别只提醒，缺数量直接报错——
+    计划写的是"至少 24 条正常 + 8 条故障/越权"，没有达到就不得当作发布集使用。
+    """
+
+    m7 = {sid: item for sid, item in samples.items() if item.get("set") == "m7-holdout"}
+    if not m7:
+        return
+    normal = {sid: item for sid, item in m7.items() if not item.get("fault_or_privilege")}
+    faults = {sid: item for sid, item in m7.items() if item.get("fault_or_privilege")}
+    declared = (
+        manifest.get("coverage", {}).get("m7-holdout", {}) if manifest.get("coverage") else {}
+    )
+    normal_target = declared.get("normal_target", 24)
+    fault_target = declared.get("fault_or_privilege_target", 8)
+
+    if len(normal) < normal_target:
+        audit.error(f"M7 正常任务只有 {len(normal)} 条，少于要求的 {normal_target} 条")
+    if len(faults) < fault_target:
+        audit.error(f"M7 故障/越权任务只有 {len(faults)} 条，少于要求的 {fault_target} 条")
+
+    families = sorted({str(item.get("task_family")) for item in normal.values()})
+    required = list(declared.get("required_normal_families", ()))
+    missing = [name for name in required if name not in families]
+    if missing:
+        audit.error(f"M7 正常任务缺少类别：{missing}（现有 {families}）")
+    if not faults:
+        audit.error("M7 没有任何故障/越权样本：发布集不能只考正常路径")
+    fault_families = sorted({str(item.get("task_family")) for item in faults.values()})
+    if len(fault_families) < 3:
+        audit.warn(f"M7 故障/越权类别只有 {fault_families}，覆盖面偏窄")
+
+    if declared:
+        if declared.get("normal_total") != len(normal):
+            audit.error(
+                f"coverage.normal_total={declared.get('normal_total')} 与实际 {len(normal)} 不一致"
+            )
+        if declared.get("fault_or_privilege_total") != len(faults):
+            audit.error(
+                f"coverage.fault_or_privilege_total={declared.get('fault_or_privilege_total')} "
+                f"与实际 {len(faults)} 不一致"
+            )
+    else:
+        audit.warn("manifest 缺少 coverage.m7-holdout：无法核对发布集覆盖度声明")
+    audit.note(
+        f"M7 发布集：正常 {len(normal)} 条（类别 {families}），"
+        f"故障/越权 {len(faults)} 条（类别 {fault_families}）"
+    )
+
+
+def check_third_party_reservation(manifest: dict, samples: dict[str, dict], audit: Audit) -> None:
+    """第三方复核预留：至少 20% 的 holdout 必须在看结果之前就留给未参与实现的人。
+
+    计划 §5.4 把这条写成 M6 较强结论的前置条件，所以 M6 不足 20% 直接报错；
+    M7 目前只提醒（发布集的复核要求写在各里程碑报告里）。预留清单由
+    `build_m0b_holdout.py` 按样本 ID 字母序确定，记录在 `coverage.third_party_reservation`。
+    """
+
+    reservation = manifest.get("coverage", {}).get("third_party_reservation", {})
+    for set_name, severity in (("m6-holdout", "error"), ("m7-holdout", "warn")):
+        formal = sorted(
+            sample_id
+            for sample_id, sample in samples.items()
+            if sample.get("set") == set_name and not sample_id.startswith("m6-train-")
+        )
+        if not formal:
+            continue
+        marked = sorted(
+            sample_id for sample_id in formal if samples[sample_id].get("reserved_for_third_party")
+        )
+        if not marked:
+            message = f"{set_name}: 没有登记任何第三方复核预留样本"
+        else:
+            share = len(marked) / len(formal)
+            if share >= 0.20:
+                audit.note(f"{set_name}: 第三方复核预留 {len(marked)}/{len(formal)}（{share:.0%}）")
+                continue
+            message = (
+                f"{set_name}: 第三方复核预留只有 {len(marked)}/{len(formal)}"
+                f"（{share:.0%}），低于 20%"
+            )
+        if severity == "error":
+            audit.error(message)
+        else:
+            audit.warn(message)
+        if set_name in reservation and not marked:
+            audit.error(f"{set_name}: coverage.third_party_reservation 有记录但样本没打预留标记")
+
+
 def run_check(*, source_skill: str | None, source_run: str | None) -> int:
     audit = Audit()
     manifest = load_json(MANIFEST, audit)
@@ -505,6 +598,8 @@ def run_check(*, source_skill: str | None, source_run: str | None) -> int:
     check_skill_sources(sources, rows, audit)
     reviews = manifest.get("fixture_reviews")
     check_preregistration(reviews if isinstance(reviews, dict) else {}, by_id, audit)
+    check_m7_release_coverage(manifest, by_id, audit)
+    check_third_party_reservation(manifest, by_id, audit)
 
     if source_skill is not None:
         if not _SKILL_ID.match(source_skill):

@@ -10,4 +10,6 @@ def load_source(path: Path) -> str:
 
 
 def discover(data_root: Path) -> list[Path]:
+    """Find text sources directly under the data root."""
+
     return sorted(data_root.glob("*.txt"))
