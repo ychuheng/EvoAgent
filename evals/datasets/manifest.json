@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "preregistration": "m0b-2026-09-27.1",
+  "sets": {
+    "dev": "开发样本，可反复运行，绝不进入 M6/M7 通过率",
+    "m6-holdout": "Skill 配对实验留出集；每候选只能正式运行一次",
+    "m7-holdout": "发布级留出集；与 dev、M6 分账",
+    "legacy": "历史已曝光样本，不得充当 holdout"
+  },
+  "fixture_reviews": {
+    "ledger-holdout": {
+      "reviewer": "local-maintainer",
+      "verdict": "independent_distinct",
+      "excluded": [],
+      "checked_against": "evals/fixtures/project-dev-notes",
+      "note": "不同领域（账本 vs 笔记）、不同模块划分与不同测试；无共用标识符或答案。",
+      "fixture_hash": "a25d9a8ce1b0b5fcf08cb4d91d106409b5fd3f86f47357ce4735d2f9ea0bd9b7",
+      "reviewed_hash": "4bd418e96834a7fd3f2d2b6e30b23cfa2f39321c8a704653efc63f53f7789e18"
+    },
+    "beacon-holdout": {
+      "reviewer": "local-maintainer",
+      "verdict": "independent_distinct",
+      "excluded": [],
+      "checked_against": "evals/fixtures/project-dev-notes, evals/fixtures/ledger-holdout",
+      "note": "采集管线领域；与 dev（笔记）和 M6（账本）在模块、函数名与答案上均不重叠。",
+      "fixture_hash": "58b08bee50245ab04990384f1010e598b26eaa21e37a9cf5ae1550fe64be52e9",
+      "reviewed_hash": "7ec8b0ba8ee3f1d2052aa0c8722f5bd58856571dfc7a0694c88a43c9e540913d"
+    }
+  },
+  "samples": [
+    {
+      "sample_id": "m6-train-summary-source",
+      "dataset": "m6-skill-holdout-v1.json",
+      "task_family": "code_comprehension",
+      "set": "m6-holdout",
+      "fixture": "evals/fixtures/ledger-holdout",
+      "fixture_hash": "a25d9a8ce1b0b5fcf08cb4d91d106409b5fd3f86f47357ce4735d2f9ea0bd9b7",
+      "preregistration": "m0b-2026-09-27.1",
+      "first_formal_run": null,
+      "retired_after_viewing": false,
+      "reviewed_hash": "4bd418e96834a7fd3f2d2b6e30b23cfa2f39321c8a704653efc63f53f7789e18"
+    },
+    {
+      "sample_id": "m6-config-retry-limit",
+      "dataset": "m6-skill-holdout-v1.json",
+      "task_family": "code_comprehension",
+      "set": "m6-holdout",
+      "fixture": "evals/fixtures/ledger-holdout",
+      "fixture_hash": "a25d9a8ce1b0b5fcf08cb4d91d106409b5fd3f86f47357ce4735d2f9ea0bd9b7",
+      "preregistration": "m0b-2026-09-27.1",
+      "first_formal_run": null,
+      "retired_after_viewing": false,
+      "reviewed_hash": "4bd418e96834a7fd3f2d2b6e30b23cfa2f39321c8a704653efc63f53f7789e18"
+    },
+    {
+      "sample_id": "m6-config-env-override",
+      "dataset": "m6-skill-holdout-v1.json",
+      "task_family": "code_comprehension",
+      "set": "m6-holdout",
+      "fixture": "evals/fixtures/ledger-holdout",
+      "fixture_hash": "a25d9a8ce1b0b5fcf08cb4d91d106409b5fd3f86f47357ce4735d2f9ea0bd9b7",
+      "preregistration": "m0b-2026-09-27.1",
+      "first_formal_run": null,
+      "retired_after_viewing": false,
+      "reviewed_hash": "4bd418e96834a7fd3f2d2b6e30b23cfa2f39321c8a704653efc63f53f7789e18"
+    },
+    {
+      "sample_id": "m6-currency-default",
+      "dataset": "m6-skill-holdout-v1.json",
+      "task_family": "code_comprehension",
+      "set": "m6-holdout",
+      "fixture": "evals/fixtures/ledger-holdout",
+      "fixture_hash": "a25d9a8ce1b0b5fcf08cb4d91d106409b5fd3f86f47357ce4735d2f9ea0bd9b7",
+      "preregistration": "m0b-2026-09-27.1",
+      "first_formal_run": null,
+      "retired_after_viewing": false,
+      "reviewed_hash": "4bd418e96834a7fd3f2d2b6e30b23cfa2f39321c8a704653efc63f53f7789e18"
+    },
+    {
+      "sample_id": "m7-map-entry",
+      "dataset": "m7-release-holdout-v1.json",
+      "task_family": "project_understanding",
+      "set": "m7-holdout",
+      "fixture": "evals/fixtures/beacon-holdout",
+      "fixture_hash": "58b08bee50245ab04990384f1010e598b26eaa21e37a9cf5ae1550fe64be52e9",
+      "preregistration": "m0b-2026-09-27.1",
+      "first_formal_run": null,
+      "retired_after_viewing": false,
+      "reviewed_hash": "7ec8b0ba8ee3f1d2052aa0c8722f5bd58856571dfc7a0694c88a43c9e540913d"
+    },
+    {
+      "sample_id": "m7-edit-chunk-reading",
+      "dataset": "m7-release-holdout-v1.json",
+      "task_family": "cross_file_edit",
+      "set": "m7-holdout",
+      "fixture": "evals/fixtures/beacon-holdout",
+      "fixture_hash": "58b08bee50245ab04990384f1010e598b26eaa21e37a9cf5ae1550fe64be52e9",
+      "preregistration": "m0b-2026-09-27.1",
+      "first_formal_run": null,
+      "retired_after_viewing": false,
+      "reviewed_hash": "7ec8b0ba8ee3f1d2052aa0c8722f5bd58856571dfc7a0694c88a43c9e540913d"
+    },
+    {
+      "sample_id": "m7-outside-root-blocked",
+      "dataset": "m7-release-holdout-v1.json",
+      "task_family": "boundary",
+      "set": "m7-holdout",
+      "fixture": "evals/fixtures/beacon-holdout",
+      "fixture_hash": "58b08bee50245ab04990384f1010e598b26eaa21e37a9cf5ae1550fe64be52e9",
+      "preregistration": "m0b-2026-09-27.1",
+      "first_formal_run": null,
+      "retired_after_viewing": false,
+      "reviewed_hash": "7ec8b0ba8ee3f1d2052aa0c8722f5bd58856571dfc7a0694c88a43c9e540913d"
+    },
+    {
+      "sample_id": "m7-injection-no-escalation",
+      "dataset": "m7-release-holdout-v1.json",
+      "task_family": "boundary",
+      "set": "m7-holdout",
+      "fixture": "evals/fixtures/beacon-holdout",
+      "fixture_hash": "58b08bee50245ab04990384f1010e598b26eaa21e37a9cf5ae1550fe64be52e9",
+      "preregistration": "m0b-2026-09-27.1",
+      "first_formal_run": null,
+      "retired_after_viewing": false,
+      "reviewed_hash": "7ec8b0ba8ee3f1d2052aa0c8722f5bd58856571dfc7a0694c88a43c9e540913d"
+    },
+    {
+      "sample_id": "map-01",
+      "dataset": "m0a-project-dev-v1.json",
+      "task_family": "project_reading_dev",
+      "set": "dev",
+      "fixture": "evals/fixtures/project-dev-notes",
+      "fixture_hash": "07e5a0443ab71d88f050b0ddaf0821200303b6a378787b065a532e94d97edfd3",
+      "preregistration": null,
+      "first_formal_run": null,
+      "retired_after_viewing": false
+    },
+    {
+      "sample_id": "write-path-01",
+      "dataset": "m0a-project-dev-v1.json",
+      "task_family": "project_reading_dev",
+      "set": "dev",
+      "fixture": "evals/fixtures/project-dev-notes",
+      "fixture_hash": "07e5a0443ab71d88f050b0ddaf0821200303b6a378787b065a532e94d97edfd3",
+      "preregistration": null,
+      "first_formal_run": null,
+      "retired_after_viewing": false
+    },
+    {
+      "sample_id": "read-path-01",
+      "dataset": "m0a-project-dev-v1.json",
+      "task_family": "project_reading_dev",
+      "set": "dev",
+      "fixture": "evals/fixtures/project-dev-notes",
+      "fixture_hash": "07e5a0443ab71d88f050b0ddaf0821200303b6a378787b065a532e94d97edfd3",
+      "preregistration": null,
+      "first_formal_run": null,
+      "retired_after_viewing": false
+    },
+    {
+      "sample_id": "search-symbol-01",
+      "dataset": "m0a-project-dev-v1.json",
+      "task_family": "project_reading_dev",
+      "set": "dev",
+      "fixture": "evals/fixtures/project-dev-notes",
+      "fixture_hash": "07e5a0443ab71d88f050b0ddaf0821200303b6a378787b065a532e94d97edfd3",
+      "preregistration": null,
+      "first_formal_run": null,
+      "retired_after_viewing": false
+    },
+    {
+      "sample_id": "legacy:agent-core-user-v1",
+      "dataset": "agent-core-user-v1.json",
+      "task_family": "legacy",
+      "set": "legacy",
+      "fixture": null,
+      "fixture_hash": null,
+      "preregistration": null,
+      "first_formal_run": null,
+      "retired_after_viewing": true,
+      "note": "历史/已曝光样本，不因改名重新成为 holdout"
+    },
+    {
+      "sample_id": "legacy:phase4-skill-math-v1",
+      "dataset": "phase4-skill-math-v1.json",
+      "task_family": "legacy",
+      "set": "legacy",
+      "fixture": null,
+      "fixture_hash": null,
+      "preregistration": null,
+      "first_formal_run": null,
+      "retired_after_viewing": true,
+      "note": "历史/已曝光样本，不因改名重新成为 holdout"
+    },
+    {
+      "sample_id": "legacy:open-source-research-v1",
+      "dataset": "open-source-research-v1.json",
+      "task_family": "legacy",
+      "set": "legacy",
+      "fixture": null,
+      "fixture_hash": null,
+      "preregistration": null,
+      "first_formal_run": null,
+      "retired_after_viewing": true,
+      "note": "历史/已曝光样本，不因改名重新成为 holdout"
+    }
+  ]
+}

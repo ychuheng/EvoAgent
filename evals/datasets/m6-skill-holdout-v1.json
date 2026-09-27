@@ -1,0 +1,174 @@
+{
+  "name": "m6_skill_holdout",
+  "version": 1,
+  "cases": [
+    {
+      "case_key": "m6-train-summary-source",
+      "task_family": "code_comprehension",
+      "split": "train",
+      "public_input": {
+        "goal": "账本汇总文本由哪个函数渲染、它按什么排序？",
+        "fixture": "ledger-holdout",
+        "fixture_probe": [
+          {
+            "path": "src/ledger/summary.py",
+            "contains": "def render_summary("
+          },
+          {
+            "path": "src/ledger/summary.py",
+            "contains": "sorted("
+          }
+        ]
+      },
+      "private_validators": [
+        {
+          "name": "run_completed",
+          "parameters": {}
+        },
+        {
+          "name": "contains_sections",
+          "parameters": {
+            "sections": [
+              "def render_summary(",
+              "sorted("
+            ]
+          }
+        },
+        {
+          "name": "no_unknown_effects",
+          "parameters": {}
+        }
+      ],
+      "risk_profile": {
+        "max_risk": "R1",
+        "fixture_probe": {}
+      }
+    },
+    {
+      "case_key": "m6-config-retry-limit",
+      "task_family": "code_comprehension",
+      "split": "holdout",
+      "public_input": {
+        "goal": "重试次数上限定义在哪个文件、叫什么名字？只回答文件名与常量名。",
+        "fixture": "ledger-holdout",
+        "fixture_probe": [
+          {
+            "path": "src/ledger/config.py",
+            "contains": "RETRY_LIMIT = 2"
+          },
+          {
+            "path": "src/ledger/config.py",
+            "contains": "RETRY_LIMIT"
+          }
+        ]
+      },
+      "private_validators": [
+        {
+          "name": "run_completed",
+          "parameters": {}
+        },
+        {
+          "name": "contains_sections",
+          "parameters": {
+            "sections": [
+              "RETRY_LIMIT = 2",
+              "RETRY_LIMIT"
+            ]
+          }
+        },
+        {
+          "name": "no_unknown_effects",
+          "parameters": {}
+        }
+      ],
+      "risk_profile": {
+        "max_risk": "R1",
+        "fixture_probe": {}
+      }
+    },
+    {
+      "case_key": "m6-config-env-override",
+      "task_family": "code_comprehension",
+      "split": "holdout",
+      "public_input": {
+        "goal": "哪个环境变量可以覆盖默认的账本文件路径？给出环境变量名与解析它的函数所在文件。",
+        "fixture": "ledger-holdout",
+        "fixture_probe": [
+          {
+            "path": "src/ledger/config.py",
+            "contains": "os.environ.get(\"LEDGER_FILE\")"
+          },
+          {
+            "path": "src/ledger/config.py",
+            "contains": "def resolve_ledger_file("
+          }
+        ]
+      },
+      "private_validators": [
+        {
+          "name": "run_completed",
+          "parameters": {}
+        },
+        {
+          "name": "contains_sections",
+          "parameters": {
+            "sections": [
+              "os.environ.get(\"LEDGER_FILE\")",
+              "def resolve_ledger_file("
+            ]
+          }
+        },
+        {
+          "name": "no_unknown_effects",
+          "parameters": {}
+        }
+      ],
+      "risk_profile": {
+        "max_risk": "R1",
+        "fixture_probe": {}
+      }
+    },
+    {
+      "case_key": "m6-currency-default",
+      "task_family": "code_comprehension",
+      "split": "holdout",
+      "public_input": {
+        "goal": "条目缺少 currency 字段时使用什么默认值？该默认值定义在哪里、由哪个函数使用？",
+        "fixture": "ledger-holdout",
+        "fixture_probe": [
+          {
+            "path": "src/ledger/config.py",
+            "contains": "DEFAULT_CURRENCY = \"CNY\""
+          },
+          {
+            "path": "src/ledger/attribute.py",
+            "contains": "return DEFAULT_CURRENCY"
+          }
+        ]
+      },
+      "private_validators": [
+        {
+          "name": "run_completed",
+          "parameters": {}
+        },
+        {
+          "name": "contains_sections",
+          "parameters": {
+            "sections": [
+              "DEFAULT_CURRENCY = \"CNY\"",
+              "return DEFAULT_CURRENCY"
+            ]
+          }
+        },
+        {
+          "name": "no_unknown_effects",
+          "parameters": {}
+        }
+      ],
+      "risk_profile": {
+        "max_risk": "R1",
+        "fixture_probe": {}
+      }
+    }
+  ]
+}
