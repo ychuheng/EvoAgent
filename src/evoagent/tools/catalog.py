@@ -8,7 +8,10 @@ from evoagent.core.models import ToolRisk
 from evoagent.tools.base import BaseTool
 from evoagent.tools.builtin.artifact_write import ArtifactWriteArguments
 from evoagent.tools.builtin.calculator import CalculatorArguments
-from evoagent.tools.builtin.file_read import FileReadArguments
+from evoagent.tools.builtin.find_files import FindFilesArguments
+from evoagent.tools.builtin.list_dir import ListDirArguments
+from evoagent.tools.builtin.project_file_read import ProjectFileReadArguments
+from evoagent.tools.builtin.search_text import SearchTextArguments
 from evoagent.tools.builtin.web_fetch import WebFetchArguments
 from evoagent.tools.builtin.web_search import WebSearchArguments
 from evoagent.tools.registry import ToolRegistry
@@ -54,8 +57,26 @@ def default_skill_tool_catalog() -> ToolRegistry:
             ),
             ToolCatalogEntry(
                 name="file_read",
-                description="读取 Workspace 内的文本文件。",
-                arguments_model=FileReadArguments,
+                description="读取已授权项目内的文本文件（可按行范围分段读取）。",
+                arguments_model=ProjectFileReadArguments,
+                risk=ToolRisk.R0,
+            ),
+            ToolCatalogEntry(
+                name="list_dir",
+                description="列出已授权项目内目录的直接子项。",
+                arguments_model=ListDirArguments,
+                risk=ToolRisk.R0,
+            ),
+            ToolCatalogEntry(
+                name="find_files",
+                description="按模式在已授权项目内查找文件。",
+                arguments_model=FindFilesArguments,
+                risk=ToolRisk.R0,
+            ),
+            ToolCatalogEntry(
+                name="search_text",
+                description="在已授权项目内按内容搜索文本。",
+                arguments_model=SearchTextArguments,
                 risk=ToolRisk.R0,
             ),
             ToolCatalogEntry(

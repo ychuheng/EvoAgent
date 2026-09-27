@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from evoagent.db.models import ApprovalStatus
+from evoagent.projects.schema import ProjectAuthorization, ProjectStatus
 from evoagent.runtime.run_config import RunMode
 from evoagent.tasks.acceptance import AcceptanceSpec
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
@@ -44,6 +45,7 @@ class RuntimeInfoResponse(ApiModel):
 class SessionCreateRequest(ApiModel):
     title: str = Field(min_length=1, max_length=256)
     workspace_id: UUID | None = None
+    project_id: UUID | None = None
 
     @field_validator("title")
     @classmethod
@@ -54,11 +56,52 @@ class SessionCreateRequest(ApiModel):
         return normalized
 
 
+class SessionUpdateRequest(ApiModel):
+    """只允许切换会话选中的项目；切换不影响在跑的 Task。"""
+
+    project_id: UUID | None = None
+
+
 class SessionResponse(ApiModel):
     id: UUID
     title: str
     workspace_id: UUID
+    project_id: UUID | None = None
     created_at: datetime
+
+
+class ProjectRegisterRequest(ApiModel):
+    path: str = Field(min_length=1, max_length=2_048)
+    name: str | None = Field(default=None, max_length=256)
+    authorization: ProjectAuthorization = ProjectAuthorization.READ
+
+    @field_validator("path")
+    @classmethod
+    def normalize_path(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("项目根路径不能为空")
+        return normalized
+
+
+class ProjectAuthorizationRequest(ApiModel):
+    authorization: ProjectAuthorization
+
+
+class ProjectRevokeRequest(ApiModel):
+    reason: str = Field(default="", max_length=512)
+
+
+class ProjectResponse(ApiModel):
+    id: UUID
+    name: str
+    root: str
+    authorization: ProjectAuthorization
+    status: ProjectStatus
+    authorization_version: int
+    created_at: datetime
+    # 实测的根可用性，与库里的 status 分开返回，便于页面提示"挂载缺失/权限不足"。
+    root_available: bool | None = None
 
 
 class WorkspaceCreateRequest(ApiModel):

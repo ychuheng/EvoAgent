@@ -46,6 +46,7 @@ class PersistentToolMiddleware:
         session_factory: async_sessionmaker[AsyncSession],
         policy: PermissionPolicy,
         lease_guard: LeaseGuard | None = None,
+        authorization_check=None,
     ) -> None:
         if lease_guard is not None and lease_guard.lease.run_id != run_id:
             raise ValueError("run does not match lease")
@@ -54,10 +55,21 @@ class PersistentToolMiddleware:
         self._run_id = run_id
         self._session_factory = session_factory
         self._policy = policy
+        self._authorization_check = authorization_check
 
     async def before(
         self, call: ToolCall, tool: ToolInstance, arguments: BaseModel
     ) -> ToolExecutionDirective:
+        # 项目授权检查必须在任何工具动作之前：每次调用都重新读取当前授权，
+        # 而不是复用 Task 创建时的结论。
+        if self._authorization_check is not None:
+            from evoagent.projects.schema import ProjectAuthorizationRevoked
+
+            try:
+                await self._authorization_check()
+            except ProjectAuthorizationRevoked as error:
+                await self._record_authorization_revocation(error)
+                raise
         decision = self._policy.evaluate(tool, arguments)
         async with UnitOfWork(self._session_factory) as unit:
             if self._lease_guard is not None:
@@ -238,6 +250,31 @@ class PersistentToolMiddleware:
             record.status = ToolCallStatus.RUNNING
             await unit.commit()
             return ToolExecutionDirective(token=EffectToken(record.id, effect_id))
+
+    async def _record_authorization_revocation(self, error: Exception) -> None:
+        """把授权拒绝写进 Run 事件，作为审计证据。
+
+        写事件与执行是两件事：即使写事件失败，也必须继续抛出原异常终止运行。
+        """
+
+        project_id = getattr(error, "project_id", None)
+        detail = getattr(error, "detail", None)
+        try:
+            async with UnitOfWork(self._session_factory) as unit:
+                await unit.events.append(
+                    run_id=self._run_id,
+                    event_type="authorization.revoked",
+                    payload={
+                        "project_id": project_id,
+                        "detail": detail,
+                        "tool": "project",
+                        "message": str(error),
+                    },
+                    created_at=datetime.now(UTC),
+                )
+                await unit.commit()
+        except Exception:  # noqa: BLE001 - 审计写入失败不能掩盖拒绝本身
+            return
 
     async def after_success(self, token: Any, content: str) -> None:
         if not isinstance(token, EffectToken):

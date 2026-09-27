@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from evoagent.db.models import (
     DEFAULT_WORKSPACE_ID,
     ApprovalStatus,
+    ProjectRecord,
     RunRecord,
     SessionRecord,
     TaskRecord,
@@ -18,6 +19,11 @@ from evoagent.db.models import (
 )
 from evoagent.db.repositories.base import ConcurrentUpdateError, RecordNotFoundError
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.projects.schema import (
+    ProjectAuthorizationError,
+    ProjectNotFoundError,
+    ProjectStatus,
+)
 from evoagent.runtime.run_config import RunMode
 from evoagent.sessions.service import append_message, project_terminal
 from evoagent.tasks.acceptance import AcceptanceSpec
@@ -75,7 +81,11 @@ class TaskService:
             return tuple(records)
 
     async def create_session(
-        self, title: str, workspace_id: UUID = DEFAULT_WORKSPACE_ID
+        self,
+        title: str,
+        workspace_id: UUID = DEFAULT_WORKSPACE_ID,
+        *,
+        project_id: UUID | None = None,
     ) -> SessionRecord:
         normalized = title.strip()
         if not normalized:
@@ -83,7 +93,13 @@ class TaskService:
         async with UnitOfWork(self._session_factory) as unit:
             if await unit.session.get(WorkspaceRecord, workspace_id) is None:
                 raise SessionNotFoundError(f"workspace does not exist: {workspace_id}")
-            record = SessionRecord(title=normalized, workspace_id=workspace_id)
+            if project_id is not None and (
+                await unit.session.get(ProjectRecord, project_id) is None
+            ):
+                raise ProjectNotFoundError(f"项目不存在：{project_id}")
+            record = SessionRecord(
+                title=normalized, workspace_id=workspace_id, project_id=project_id
+            )
             unit.session.add(record)
             await unit.session.flush()
             await unit.commit()
@@ -98,8 +114,16 @@ class TaskService:
         provider: str,
         model: str,
         run_mode: RunMode = RunMode.RETRIEVAL,
+        project_id: UUID | None = None,
     ) -> TaskAggregate:
-        """在同一事务中创建 Task、首个 Run 和初始事件。"""
+        """在同一事务中创建 Task、首个 Run 和初始事件。
+
+        项目绑定在**创建时冻结**：默认取会话当前选中的项目，也可以在创建时显式指定。
+        冻结的是 `(project_id, authorization_version)`，因此：
+        - 之后在页面上切换会话项目不影响在跑 Task；
+        - 撤销授权后新 Task 不能进入旧根（这里直接拒绝）；
+        - 在跑 Task 的下一次工具调用会因版本不一致被拒绝。
+        """
 
         normalized_goal = goal.strip()
         normalized_provider = provider.strip()
@@ -112,10 +136,22 @@ class TaskService:
             raise ValueError("pinned skill runs may only be created by the evaluation service")
 
         async with UnitOfWork(self._session_factory) as unit:
-            if await unit.session.get(SessionRecord, session_id) is None:
+            session = await unit.session.get(SessionRecord, session_id)
+            if session is None:
                 raise SessionNotFoundError(f"session does not exist: {session_id}")
+            bound_project_id = project_id if project_id is not None else session.project_id
+            authorization_version: int | None = None
+            if bound_project_id is not None:
+                project = await unit.session.get(ProjectRecord, bound_project_id)
+                if project is None:
+                    raise ProjectNotFoundError(f"项目不存在：{bound_project_id}")
+                if project.status is ProjectStatus.REVOKED:
+                    raise ProjectAuthorizationError("项目授权已撤销，不能在此项目下创建任务")
+                authorization_version = project.authorization_version
             task = TaskRecord(
                 session_id=session_id,
+                project_id=bound_project_id,
+                project_authorization_version=authorization_version,
                 goal=normalized_goal,
                 acceptance=acceptance.model_dump(mode="json") if acceptance else None,
                 status=TaskStatus.QUEUED,

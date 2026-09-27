@@ -86,6 +86,7 @@ class EventType(StrEnum):
     RECOVERY_COMPLETED = "recovery.completed"
     APPROVAL_REQUIRED = "approval.required"
     ACCEPTANCE_CHECKED = "acceptance.checked"
+    AUTHORIZATION_REVOKED = "authorization.revoked"
 
 
 class ToolDefinition(ContractModel):

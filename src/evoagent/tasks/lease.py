@@ -60,6 +60,8 @@ _RUN_TO_TASK_TERMINAL = {
     PersistentRunStatus.CANCELLED: TaskStatus.CANCELLED,
     PersistentRunStatus.TIMEOUT: TaskStatus.FAILED,
     PersistentRunStatus.LIMIT_REACHED: TaskStatus.FAILED,
+    # 授权撤销是"用户把权限拿走了"，不是任务失败也不是用户取消；已执行的动作保留。
+    PersistentRunStatus.AUTHORIZATION_REVOKED: TaskStatus.CANCELLED,
 }
 
 

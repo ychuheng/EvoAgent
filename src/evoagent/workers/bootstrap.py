@@ -17,9 +17,10 @@ from evoagent.core.models import (
     ProviderEvent,
     ToolCall,
 )
-from evoagent.db.models import RunRecord
+from evoagent.db.models import RunRecord, TaskRecord
 from evoagent.db.session import Database
 from evoagent.memory.maintenance import MaintenanceWorker
+from evoagent.projects.schema import ProjectAuthorizationRevoked
 from evoagent.providers.base import ModelProvider
 from evoagent.providers.mock import MockProvider
 from evoagent.providers.openai_compatible import OpenAICompatibleProvider
@@ -34,7 +35,6 @@ from evoagent.tools.builtin.artifact_read import ArtifactReadTool
 from evoagent.tools.builtin.artifact_write import ArtifactWriteTool
 from evoagent.tools.builtin.ask_user import AskUserTool
 from evoagent.tools.builtin.calculator import CalculatorTool
-from evoagent.tools.builtin.file_read import FileReadTool
 from evoagent.tools.builtin.file_write import FileWriteTool
 from evoagent.tools.builtin.shell import ShellTool
 from evoagent.tools.builtin.web_fetch import WebFetchTool
@@ -133,8 +133,11 @@ class ConfiguredTaskHandler:
         return await handler._handle(lease)
 
     async def _handle(self, lease: JobLease) -> TaskExecutionResult:
+        from evoagent.projects.boundaries import authorization_guard, resolve_run_project
+
         async with self._database.session_factory() as session:
             run = await session.get(RunRecord, lease.run_id)
+            task = await session.get(TaskRecord, lease.task_id)
         expected_model = self._settings.model or "mock-model"
         if (
             run is None
@@ -146,6 +149,15 @@ class ConfiguredTaskHandler:
                 error_code="provider_configuration_mismatch",
                 error_message="worker model configuration differs from the queued run",
             )
+        project = (
+            await resolve_run_project(
+                self._database.session_factory,
+                project_id=task.project_id,
+                expected_authorization_version=task.project_authorization_version,
+            )
+            if task is not None
+            else None
+        )
         provider = self._provider(lease.run_id)
 
         async def check():
@@ -163,7 +175,7 @@ class ConfiguredTaskHandler:
         registry = ToolRegistry(
             [
                 CalculatorTool(),
-                FileReadTool(self._settings.workspace),
+                *self._project_tools(project),
                 FileWriteTool(RunSandbox(self._settings.artifact_root, lease.run_id)),
                 ArtifactWriteTool(lease.run_id, artifact_service),
                 ArtifactReadTool(
@@ -186,9 +198,24 @@ class ConfiguredTaskHandler:
             provider=gated,
             registry=registry,
             service_gate=self._gate,
+            authorization_check=(
+                authorization_guard(
+                    self._database.session_factory,
+                    project_id=task.project_id,
+                    expected_authorization_version=task.project_authorization_version,
+                )
+                if task is not None
+                else None
+            ),
         )
         try:
             return await runner.handle(lease)
+        except ProjectAuthorizationRevoked as error:
+            return TaskExecutionResult(
+                status=PersistentRunStatus.AUTHORIZATION_REVOKED,
+                error_code="authorization_revoked",
+                error_message=str(error),
+            )
         finally:
             await web_fetch.aclose()
             close_search = getattr(search_provider, "aclose", None)
@@ -196,6 +223,28 @@ class ConfiguredTaskHandler:
                 await close_search()
             if isinstance(provider, OpenAICompatibleProvider):
                 await provider.aclose()
+
+    def _project_tools(self, project):
+        """装配项目只读工具；没有绑定项目时不提供任何项目工具。
+
+        实施计划 §6：项目上下文与文件内容只通过这三个工具 + `file_read` 进入，
+        Agent 不能自行登记任意宿主路径。
+        """
+
+        if project is None:
+            return []
+        from evoagent.tools.builtin.find_files import FindFilesTool
+        from evoagent.tools.builtin.list_dir import ListDirTool
+        from evoagent.tools.builtin.project_file_read import ProjectFileReadTool
+        from evoagent.tools.builtin.search_text import SearchTextTool
+
+        root = project.root
+        return [
+            ListDirTool(root),
+            FindFilesTool(root),
+            SearchTextTool(root),
+            ProjectFileReadTool(root),
+        ]
 
     def _provider(self, run_id: UUID) -> ModelProvider:
         if self._settings.provider is ProviderName.MOCK:

@@ -33,6 +33,7 @@ from evoagent.evals.lifecycle import (
     EvalSplit,
     PromotionAction,
 )
+from evoagent.projects import ProjectAuthorization, ProjectStatus
 from evoagent.skills.lifecycle import SkillStatus, SkillVersionStatus
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
@@ -112,8 +113,76 @@ class SessionRecord(Base):
     workspace_id: Mapped[UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="RESTRICT"), default=DEFAULT_WORKSPACE_ID
     )
+    project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), index=True
+    )
     next_message_sequence: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ProjectRecord(Base):
+    """用户显式授权的项目根。
+
+    `root` 是登记时规范化的物理路径；`authorization_version` 每次授权变化自增，
+    运行中的 Task 靠它判断"我拿到的授权是否还是当前授权"（撤销后下一次调用即被拒绝）。
+    """
+
+    __tablename__ = "projects"
+    __table_args__ = (
+        CheckConstraint("authorization_version >= 1", name="authorization_version_positive"),
+        CheckConstraint("length(root) <= 2048", name="root_length"),
+        Index("ix_projects_root", "root", unique=True),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(256))
+    root: Mapped[str] = mapped_column(String(2048))
+    authorization: Mapped[ProjectAuthorization] = mapped_column(
+        enum_column(ProjectAuthorization, "project_authorization"),
+        default=ProjectAuthorization.READ,
+    )
+    status: Mapped[ProjectStatus] = mapped_column(
+        enum_column(ProjectStatus, "project_status"), default=ProjectStatus.AVAILABLE
+    )
+    authorization_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), default=DEFAULT_WORKSPACE_ID
+    )
+    lock_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class ProjectEventRecord(Base):
+    """项目授权审计：登记、改级、撤销都留一行，不可改写。"""
+
+    __tablename__ = "project_events"
+    __table_args__ = (
+        UniqueConstraint("project_id", "sequence"),
+        CheckConstraint("sequence >= 1", name="sequence_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer)
+    event_type: Mapped[str] = mapped_column(String(64))
+    authorization: Mapped[ProjectAuthorization] = mapped_column(
+        enum_column(ProjectAuthorization, "project_event_authorization")
+    )
+    authorization_version: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+@event.listens_for(ProjectEventRecord, "before_update")
+def protect_project_event(_mapper, _connection, _record):
+    """审计行写入后不可改写。"""
+
+    raise ValueError("project events are append-only")
 
 
 class MessageRecord(Base):
@@ -151,6 +220,11 @@ class TaskRecord(Base):
     session_id: Mapped[UUID] = mapped_column(
         ForeignKey("sessions.id", ondelete="RESTRICT"), index=True
     )
+    # Task 创建时冻结项目绑定（含授权版本）；之后切换页面项目不影响在跑 Task。
+    project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), index=True
+    )
+    project_authorization_version: Mapped[int | None] = mapped_column(Integer)
     goal: Mapped[str] = mapped_column(Text)
     acceptance: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     status: Mapped[TaskStatus] = mapped_column(

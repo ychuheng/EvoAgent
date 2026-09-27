@@ -23,6 +23,8 @@ EXPECTED_TABLES = {
     "retrieval_batches",
     "retrieval_selections",
     "workspaces",
+    "projects",
+    "project_events",
     "context_revisions",
     "memory_entries",
     "memory_versions",

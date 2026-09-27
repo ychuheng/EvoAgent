@@ -29,6 +29,8 @@ class PersistentRunStatus(StrEnum):
     CANCELLED = "cancelled"
     TIMEOUT = "timeout"
     LIMIT_REACHED = "limit_reached"
+    # 运行中项目授权被撤销/改动：明确终态，已执行的动作保留，不重试、不续跑。
+    AUTHORIZATION_REVOKED = "authorization_revoked"
 
 
 class InvalidStateTransitionError(ValueError):
@@ -88,6 +90,7 @@ _RUN_TRANSITIONS: dict[PersistentRunStatus, frozenset[PersistentRunStatus]] = {
             PersistentRunStatus.CANCELLED,
             PersistentRunStatus.TIMEOUT,
             PersistentRunStatus.LIMIT_REACHED,
+            PersistentRunStatus.AUTHORIZATION_REVOKED,
         }
     ),
     PersistentRunStatus.WAITING_USER: frozenset(
@@ -112,6 +115,7 @@ _RUN_TRANSITIONS: dict[PersistentRunStatus, frozenset[PersistentRunStatus]] = {
     PersistentRunStatus.CANCELLED: frozenset(),
     PersistentRunStatus.TIMEOUT: frozenset(),
     PersistentRunStatus.LIMIT_REACHED: frozenset(),
+    PersistentRunStatus.AUTHORIZATION_REVOKED: frozenset(),
 }
 
 

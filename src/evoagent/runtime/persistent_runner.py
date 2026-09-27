@@ -18,6 +18,7 @@ from evoagent.mcp.schema import MCPError
 from evoagent.mcp.service import MCPService
 from evoagent.memory.repository import check_run_references
 from evoagent.memory.schema import MemoryError
+from evoagent.projects.schema import ProjectAuthorizationRevoked
 from evoagent.providers.base import ModelProvider
 from evoagent.runtime.checkpoints import PersistentCheckpointStore, SnapshotCompatibilityError
 from evoagent.runtime.context_store import ContextStore
@@ -55,6 +56,7 @@ class PersistentAgentRunner:
         retry_policy: RetryPolicy | None = None,
         permission_policy: PermissionPolicy | None = None,
         service_gate=None,
+        authorization_check=None,
     ) -> None:
         self._settings = settings
         self._service_gate = service_gate
@@ -63,6 +65,7 @@ class PersistentAgentRunner:
         self._provider = provider
         self._registry = registry
         self._base_registry = registry
+        self._authorization_check = authorization_check
         self._retry_policy = retry_policy or RetryPolicy(
             max_attempts=settings.max_retry_attempts,
             base_seconds=settings.retry_base_seconds,
@@ -184,6 +187,7 @@ class PersistentAgentRunner:
             skill_context_hash=skill_context_hash,
         )
         await self._persist_run_config(run.id, config_snapshot, guard)
+        project_context = await self._project_context(task)
         sink = PersistentEventSink(lease.run_id, self._session_factory, lease_guard=guard)
         checkpoints = PersistentCheckpointStore(
             lease.run_id,
@@ -197,6 +201,7 @@ class PersistentAgentRunner:
                 task.goal,
                 skill_context=resolved.skill_text if resolved else skill_context,
                 external_context=resolved.memory_texts if resolved else (),
+                project_context=project_context,
             )
             from evoagent.evals.runtime import history_for_run
 
@@ -248,6 +253,7 @@ class PersistentAgentRunner:
                 session_factory=self._session_factory,
                 policy=self._permission_policy,
                 lease_guard=guard,
+                authorization_check=self._authorization_check,
             ),
         )
         loop = AgentLoop(
@@ -287,6 +293,10 @@ class PersistentAgentRunner:
                 error_message=str(error),
             )
         except (asyncio.CancelledError, LeaseLostError):
+            raise
+        except ProjectAuthorizationRevoked:
+            # 授权在运行中变化：不重试、不续跑，交给调用方落成明确终态；
+            # 拒绝事件已由工具中间件写入 Run 事件，已执行的动作保留。
             raise
         except TimeoutError:
             return TaskExecutionResult(
@@ -378,6 +388,26 @@ class PersistentAgentRunner:
             error_code=error_code,
             error_message=result.error_message or decision.reason,
         )
+
+    async def _project_context(self, task: TaskRecord) -> str | None:
+        """按 Task 冻结的绑定构造有界项目上下文；没有绑定项目时返回 None。
+
+        授权在运行中变化时这里可能抛出 `ProjectAuthorizationRevoked`，由调用方落成终态。
+        """
+
+        if task.project_id is None:
+            return None
+        from evoagent.projects.boundaries import resolve_run_project
+        from evoagent.projects.context import build_project_context
+
+        project = await resolve_run_project(
+            self._session_factory,
+            project_id=task.project_id,
+            expected_authorization_version=task.project_authorization_version,
+        )
+        if project is None:
+            return None
+        return build_project_context(project)
 
     async def _load_owned_records(self, lease: JobLease) -> tuple[TaskRecord, RunRecord]:
         async with self._session_factory() as session:
