@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "name": "m0a-project-dev-v1",
+  "set": "dev",
+  "fixture": "evals/fixtures/project-dev-notes",
+  "note": "Development prompts only. Repeated use is expected; never count these cases in M6 or M7 results. cases[].reads 是脚本化 Mock 将要读取的文件与锚点，用于验证采集链路；它不代表 Agent 能自行定位文件。本 fixture（evals/fixtures/project-dev-notes）是稳定基线，供 M1 只读与 M2 编辑使用；M3 的失败注入必须另建变体，不在基线上原地改坏。",
+  "cases": [
+    {
+      "id": "map-01",
+      "goal": "请阅读这个项目，说明入口、持久化、输出格式和测试分别在哪些文件，并给出路径证据。",
+      "reads": [
+        {"path": "README.md", "contains": "src/fieldnotes/cli.py"},
+        {"path": "src/fieldnotes/cli.py", "contains": "def main("},
+        {"path": "src/fieldnotes/store.py", "contains": "def add_note("},
+        {"path": "src/fieldnotes/render.py", "contains": "def render_notes("},
+        {"path": "tests/test_fieldnotes.py", "contains": "test_add_and_list_use_the_same_file"}
+      ]
+    },
+    {
+      "id": "write-path-01",
+      "goal": "追踪 add 命令从参数解析到 JSON 写入的调用路径，指出函数及文件。",
+      "reads": [
+        {"path": "src/fieldnotes/cli.py", "contains": "add_note(args.file, args.title, args.body)"},
+        {"path": "src/fieldnotes/store.py", "contains": "path.write_text("}
+      ]
+    },
+    {
+      "id": "read-path-01",
+      "goal": "追踪 list 命令如何读取并排版笔记，指出函数及文件。",
+      "reads": [
+        {"path": "src/fieldnotes/cli.py", "contains": "render_notes(load_notes(args.file))"},
+        {"path": "src/fieldnotes/store.py", "contains": "def load_notes("},
+        {"path": "src/fieldnotes/render.py", "contains": "return \"\\n\".join("}
+      ]
+    },
+    {
+      "id": "search-symbol-01",
+      "goal": "找出符号 load_notes 的定义位置和全部调用位置，逐个给出文件与用途；不要只给一个出现位置。",
+      "reads": [
+        {"path": "src/fieldnotes/store.py", "contains": "def load_notes("},
+        {"path": "src/fieldnotes/cli.py", "contains": "load_notes(args.file)"},
+        {"path": "src/fieldnotes/store.py", "contains": "notes = load_notes(path)"}
+      ]
+    }
+  ]
+}
