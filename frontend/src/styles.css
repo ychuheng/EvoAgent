@@ -69,6 +69,17 @@ textarea { font: inherit; width: 100%; resize: vertical; min-height: 5rem; borde
 .chat-tool-list ol { margin: .4rem 0; padding-left: 1.4rem; }
 .chat-tool-list li { margin-bottom: .55rem; overflow-wrap: anywhere; }
 .chat-approval { border: 1px solid #d4ccba; border-radius: 8px; padding: .85rem; margin: .7rem 0; }
+.chat-project { border-top: 1px solid #d4ccba; margin-top: .9rem; padding-top: .75rem; }
+.chat-project-detail { margin-top: .5rem; }
+.chat-project-register { margin-top: .6rem; }
+.chat-project-register label { margin: .5rem 0; }
+.chat-project-detail code { display: inline-block; background: #efe7d7; border-radius: 4px; padding: 0 .3rem; overflow-wrap: anywhere; }
+.chat-checkbox { display: flex; align-items: center; gap: .4rem; }
+.chat-progress { border: 1px solid #d4ccba; border-radius: 8px; padding: .6rem .75rem; margin: .5rem 0; background: #f7f3ea; }
+.chat-progress ol { margin: .5rem 0 0; padding-left: 1.4rem; max-height: 14rem; overflow: auto; }
+.chat-progress li { margin-bottom: .3rem; font-size: .85rem; overflow-wrap: anywhere; }
+.chat-progress-label { font-weight: 600; }
+.chat-progress-detail { display: block; color: #69736e; font-size: .78rem; overflow-wrap: anywhere; }
 @media (max-width: 800px) { .chat-layout { grid-template-columns: 1fr; }.chat-sidebar { max-height: 12rem; }.chat-main { min-height: 55vh; }.chat-bubble { max-width: 92%; } }
 label { display: grid; gap: .35rem; }
 select { font: inherit; padding: .55rem; max-width: 100%; }

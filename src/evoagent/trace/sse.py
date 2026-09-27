@@ -17,6 +17,7 @@ _TERMINAL = {
     PersistentRunStatus.CANCELLED,
     PersistentRunStatus.TIMEOUT,
     PersistentRunStatus.LIMIT_REACHED,
+    PersistentRunStatus.AUTHORIZATION_REVOKED,
 }
 
 

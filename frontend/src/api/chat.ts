@@ -11,7 +11,13 @@ export type RuntimeInfo = {
   remote_model_checked: boolean;
   worker_status: "ready" | "missing" | "unknown";
 };
-export type ChatSession = { id: string; title: string; workspace_id: string; created_at: string };
+export type ChatSession = {
+  id: string;
+  title: string;
+  workspace_id: string;
+  project_id: string | null;
+  created_at: string;
+};
 export type ChatMessage = {
   id: string;
   task_id: string | null;
@@ -27,12 +33,24 @@ export type ChatTask = {
   status: string;
   created_at: string;
   cancel_requested: boolean;
+  project_id: string | null;
   acceptance: {
     answer_contains: string[];
     required_tools: string[];
     required_files: Array<{ path: string; sha256?: string | null }>;
   } | null;
   latest_run: { id: string; provider: string; model: string };
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  root: string;
+  authorization: "read" | "read_write";
+  status: "available" | "unavailable" | "revoked";
+  authorization_version: number;
+  created_at: string;
+  root_available: boolean | null;
 };
 export type TaskTrace = {
   run_id: string;
@@ -71,9 +89,26 @@ export const chat = {
     method: "POST", body: JSON.stringify({ name }),
   }),
   sessions: () => request<ChatSession[]>("/sessions"),
-  createSession: (title: string, workspaceId: string) => request<ChatSession>("/sessions", {
-    method: "POST", body: JSON.stringify({ title, workspace_id: workspaceId }),
+  createSession: (title: string, workspaceId: string, projectId?: string | null) => request<ChatSession>("/sessions", {
+    method: "POST", body: JSON.stringify({ title, workspace_id: workspaceId, project_id: projectId ?? null }),
   }),
+  selectSessionProject: (sessionId: string, projectId: string | null) =>
+    request<ChatSession>(`/sessions/${encodeURIComponent(sessionId)}/project`, {
+      method: "PUT", body: JSON.stringify({ project_id: projectId }),
+    }),
+  projects: () => request<Project[]>("/projects"),
+  registerProject: (path: string, name: string, authorization: "read" | "read_write") =>
+    request<Project>("/projects", { method: "POST", body: JSON.stringify({ path, name: name || null, authorization }) }),
+  checkProject: (projectId: string) =>
+    request<Project>(`/projects/${encodeURIComponent(projectId)}/check`, { method: "POST" }),
+  setProjectAuthorization: (projectId: string, authorization: "read" | "read_write") =>
+    request<Project>(`/projects/${encodeURIComponent(projectId)}/authorization`, {
+      method: "PUT", body: JSON.stringify({ authorization }),
+    }),
+  revokeProject: (projectId: string, reason: string) =>
+    request<Project>(`/projects/${encodeURIComponent(projectId)}/revoke`, {
+      method: "POST", body: JSON.stringify({ reason }),
+    }),
   messages: (sessionId: string) =>
     request<ChatMessage[]>(`/sessions/${encodeURIComponent(sessionId)}/messages`),
   createTask: (sessionId: string, goal: string, acceptance?: ChatTask["acceptance"]) => request<ChatTask>("/tasks", {

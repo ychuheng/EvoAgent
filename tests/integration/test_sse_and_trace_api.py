@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -63,6 +64,53 @@ async def test_sse_replays_committed_events_and_supports_last_event_id(tmp_path:
     assert "id: 3" in full.text
     assert "id: 1" not in resumed.text
     assert "id: 3" in resumed.text
+
+
+@pytest.mark.asyncio
+async def test_sse_closes_stream_after_authorization_revoked_terminal(tmp_path: Path) -> None:
+    """I-01：`authorization_revoked` 是终态，流必须随之关闭而不是一直挂着。"""
+
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'revoked.db'}")
+    async with database.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'revoked.db'}",
+        workspace=tmp_path / "workspace",
+        sse_poll_seconds=0.01,
+        sse_heartbeat_seconds=0.02,
+    )
+    service = TaskService(database.session_factory)
+    session = await service.create_session("授权撤销 SSE")
+    aggregate = await service.create_task(
+        session_id=session.id, goal="读项目", provider="mock", model="mock-model"
+    )
+    manager = JobLeaseManager(database.session_factory, lease_seconds=30)
+    lease = await manager.claim_next("worker-revoked")
+    assert lease is not None
+    await manager.finalize(
+        lease,
+        TaskExecutionResult(
+            status=PersistentRunStatus.AUTHORIZATION_REVOKED,
+            error_code="authorization_revoked",
+            error_message="项目授权已被撤销，本次调用被拒绝",
+        ),
+    )
+    app = create_app(settings, database=database)
+    try:
+        async with (
+            app.router.lifespan_context(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+        ):
+            response = await asyncio.wait_for(
+                client.get(f"/api/v1/tasks/{aggregate.task.id}/events"), timeout=5
+            )
+    finally:
+        await database.dispose()
+
+    assert response.status_code == 200
+    # 终态事件必须出现，且流必须关闭（否则 wait_for 会超时）。
+    assert "run.authorization_revoked" in response.text
+    assert response.text.rstrip().endswith("id: 3")
 
 
 @pytest.mark.asyncio

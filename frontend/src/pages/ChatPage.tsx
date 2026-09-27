@@ -1,13 +1,22 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 
-import { chat, type ChatMessage, type ChatSession, type ChatWorkspace, type RuntimeInfo } from "../api/chat";
+import { chat, type ChatMessage, type ChatSession, type ChatWorkspace, type Project, type RuntimeInfo } from "../api/chat";
+import { useTaskEventStream } from "../api/taskEvents";
 import { failure } from "../components/Evidence";
 import { TaskInspector } from "./TaskInspector";
 import { errorLabel, taskStatusLabel } from "./taskLabels";
 
 const STORAGE_KEY = "evoagent-chat-session";
+const PROJECT_STORAGE_KEY = "evoagent-chat-project";
 const DEFAULT_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
-const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+const TERMINAL = new Set(["completed", "failed", "cancelled", "timeout", "limit_reached", "authorization_revoked"]);
+
+function projectStatusLabel(project: Project): string {
+  if (project.status === "revoked") return "授权已撤销";
+  if (project.root_available === false) return "目录不可用";
+  if (project.status === "unavailable") return "目录不可用";
+  return project.authorization === "read_write" ? "可写" : "只读";
+}
 
 function displayMessage(message: ChatMessage): string {
   if (message.kind !== "terminal") return message.content;
@@ -43,6 +52,11 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
   const [queueWaitSeconds, setQueueWaitSeconds] = useState(0);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectPath, setProjectPath] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [projectWritable, setProjectWritable] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -53,13 +67,22 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
 
   useEffect(() => {
     let active = true;
-    void Promise.all([chat.sessions(), chat.workspaces()]).then(([items, available]) => {
+    void Promise.all([chat.sessions(), chat.workspaces(), chat.projects()]).then(([items, available, registered]) => {
       if (!active) return;
       setSessions([...items].reverse());
       setWorkspaces(available);
+      // 列表接口异常时不阻塞对话：项目区退化为"无可用项目"。
+      setProjects(Array.isArray(registered) ? registered : []);
+      const savedProject = localStorage.getItem(PROJECT_STORAGE_KEY);
+      const usable = Array.isArray(registered) ? registered : [];
+      if (usable.some((item) => item.id === savedProject)) setProjectId(savedProject);
       const saved = localStorage.getItem(STORAGE_KEY);
       const selected = items.find((item) => item.id === saved);
-      if (selected) { setWorkspaceId(selected.workspace_id); setSessionId(selected.id); }
+      if (selected) {
+        setWorkspaceId(selected.workspace_id);
+        setSessionId(selected.id);
+        if (selected.project_id) setProjectId(selected.project_id);
+      }
     }).catch((reason: unknown) => { if (active) setError(failure(reason)); });
     return () => { active = false; };
   }, []);
@@ -82,6 +105,8 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     return () => { active = false; };
   }, [sessionId]);
 
+  // I-01/I-02：进度来自 SSE 事件投影；状态轮询只作为兜底，间隔放宽到 3 秒。
+  const { progress, streamError } = useTaskEventStream(pendingTask, taskStatus);
   useEffect(() => {
     if (!pendingTask || !sessionId) return;
     let active = true;
@@ -103,7 +128,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       } catch (reason) {
         if (active) setError(failure(reason));
       }
-      if (active) timer = window.setTimeout(() => { void poll(); }, 900);
+      if (active) timer = window.setTimeout(() => { void poll(); }, 3_000);
     };
     void poll();
     return () => { active = false; window.clearTimeout(timer); };
@@ -142,6 +167,60 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     } catch (reason) { setError(failure(reason)); }
   }
 
+  async function refreshProjects() {
+    const registered = await chat.projects();
+    setProjects(Array.isArray(registered) ? registered : []);
+  }
+
+  async function selectProject(id: string) {
+    setError("");
+    const next = id === "" ? null : id;
+    setProjectId(next);
+    if (next === null) localStorage.removeItem(PROJECT_STORAGE_KEY);
+    else localStorage.setItem(PROJECT_STORAGE_KEY, next);
+    if (sessionId) {
+      try {
+        const updated = await chat.selectSessionProject(sessionId, next);
+        setSessions((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+      } catch (reason) { setError(failure(reason)); }
+    }
+  }
+
+  async function registerProject() {
+    const path = projectPath.trim();
+    if (!path) return;
+    setError("");
+    try {
+      const created = await chat.registerProject(path, projectName.trim(), projectWritable ? "read_write" : "read");
+      await refreshProjects();
+      setProjectPath("");
+      setProjectName("");
+      setProjectWritable(false);
+      await selectProject(created.id);
+    } catch (reason) { setError(failure(reason)); }
+  }
+
+  async function toggleProjectWrite() {
+    const current = projects.find((item) => item.id === projectId);
+    if (!current) return;
+    setError("");
+    try {
+      const next = current.authorization === "read_write" ? "read" : "read_write";
+      await chat.setProjectAuthorization(current.id, next);
+      await refreshProjects();
+    } catch (reason) { setError(failure(reason)); }
+  }
+
+  async function revokeProject() {
+    const current = projects.find((item) => item.id === projectId);
+    if (!current) return;
+    setError("");
+    try {
+      await chat.revokeProject(current.id, "本地页面收回授权");
+      await refreshProjects();
+    } catch (reason) { setError(failure(reason)); }
+  }
+
   async function send(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const goal = draft.trim();
@@ -151,7 +230,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     try {
       let id = sessionId;
       if (!id) {
-        const created = await chat.createSession(goal.slice(0, 80), workspaceId);
+        const created = await chat.createSession(goal.slice(0, 80), workspaceId, projectId);
         id = created.id;
         setSessions((items) => [created, ...items]);
         selectSession(id);
@@ -194,6 +273,30 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       <ul className="skill-list">{sessions.filter(item => item.workspace_id === workspaceId).map((item) =>
         <li key={item.id}><button type="button" className={`skill-row ${sessionId === item.id ? "selected" : ""}`} onClick={() => selectSession(item.id)}>{item.title}</button></li>
       )}</ul>
+      <div className="chat-project">
+        <label>授权项目<select aria-label="当前项目" value={projectId ?? ""} onChange={event => void selectProject(event.target.value)}>
+          <option value="">不使用项目</option>
+          {projects.map(item => <option key={item.id} value={item.id} disabled={item.status === "revoked"}>{item.name} · {projectStatusLabel(item)}</option>)}
+        </select></label>
+        {projectId && (() => {
+          const current = projects.find(item => item.id === projectId);
+          if (!current) return null;
+          return <div className="chat-project-detail">
+            <p className="chat-meta">Agent 可见的根：<code>{current.root}</code>（授权版本 {current.authorization_version}）</p>
+            <p className="chat-meta">{projectStatusLabel(current)}。切换项目不影响已经在跑的任务；撤销或改级会让在跑任务的下一次工具调用被拒绝并留下审计。</p>
+            <button type="button" className="chat-detail-button" onClick={() => void toggleProjectWrite()}>{current.authorization === "read_write" ? "改为只读授权" : "改为可写授权"}</button>
+            <button type="button" className="chat-detail-button" onClick={() => void revokeProject()}>撤销该授权</button>
+            <button type="button" className="chat-detail-button" onClick={() => void refreshProjects()}>重新检查目录</button>
+          </div>;
+        })()}
+        <details className="chat-project-register"><summary>登记新的项目目录</summary>
+          <label>绝对路径<input aria-label="项目根路径" value={projectPath} onChange={event => setProjectPath(event.target.value)} placeholder="例如：D:\work\my-repo" /></label>
+          <label>显示名（可选）<input aria-label="项目显示名" value={projectName} onChange={event => setProjectName(event.target.value)} placeholder="例如：示例仓库" /></label>
+          <label className="chat-checkbox"><input type="checkbox" checked={projectWritable} onChange={event => setProjectWritable(event.target.checked)} />同时授予可写授权（Agent 可修改文件）</label>
+          <p className="chat-meta">默认只读。路径必须是绝对路径、已存在且不是符号链接；登记后 Agent 只能看到这个根。</p>
+          <button type="button" disabled={!projectPath.trim()} onClick={() => void registerProject()}>登记</button>
+        </details>
+      </div>
     </aside>
     <section className="panel chat-main" aria-label="对话内容">
       <div className="chat-runtime" role="status">
@@ -209,8 +312,16 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
           <p>{displayMessage(message)}</p>
           {message.task_id && <button type="button" className="chat-detail-button" onClick={() => setSelectedTask(message.task_id)}>{selectedTask === message.task_id ? "正在查看执行过程" : "查看执行过程"}</button>}
         </article>)}
-        {pendingTask && <p role="status" className="state">{taskStatus === "waiting_user" ? "等待人工决定，请在下方处理。" : `Agent 正在处理… ${taskStatusLabel[taskStatus] ?? taskStatus}`}</p>}
+        {pendingTask && <p role="status" className="state">{taskStatus === "waiting_user" ? "等待人工决定，请在下方处理。" : `Agent 正在处理… ${taskStatusLabel[taskStatus] ?? taskStatus}${progress.current ? ` · ${progress.current}` : ""}`}</p>}
         {pendingTask && taskStatus === "queued" && queuedSince !== null && queueWaitSeconds >= 30 && <p role="alert" className="state">任务已排队超过 30 秒，Worker 尚未领取。请检查 Worker 容器是否运行；模型连接状态要在任务开始执行后才能确认。</p>}
+        {progress.steps.length > 0 && <details className="chat-progress" open={!!pendingTask}>
+          <summary>执行进度（已收到 {progress.steps.length} 个事件）</summary>
+          <ol>{progress.steps.map((step) => <li key={step.sequence} data-event-type={step.type}>
+            <span className="chat-progress-label">{step.label}</span>
+            {step.detail && <span className="chat-progress-detail">{step.detail}</span>}
+          </li>)}</ol>
+        </details>}
+        {streamError && <p role="alert" className="state">{streamError}</p>}
       </div>
       {selectedTask && <TaskInspector key={selectedTask} taskId={selectedTask} onOpenVersion={onOpenVersion} onOpenContext={onOpenContext} />}
       {error && <p role="alert" className="error">{error}</p>}
