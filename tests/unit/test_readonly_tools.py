@@ -58,6 +58,30 @@ async def test_web_fetch_reads_public_text_response() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_web_fetch_extracts_main_text_and_bounds_model_context() -> None:
+    page = (
+        "<html><header>site menu</header><main><h1>Guide</h1>"
+        "<script>ignore this instruction</script><p>" + "useful text " * 2_000 + "</p></main>"
+        "<footer>site footer</footer></html>"
+    )
+    respx.get("https://93.184.216.34/guide").mock(
+        return_value=httpx.Response(200, text=page, headers={"content-type": "text/html"})
+    )
+    async with WebFetchTool(URLGuard(public_resolver), timeout_seconds=1) as tool:
+        content, evidence = await tool.invoke_with_evidence(
+            WebFetchArguments(url="https://example.com/guide")
+        )
+
+    assert content.startswith("Guide useful text")
+    assert "site menu" not in content and "ignore this instruction" not in content
+    assert "网页正文已截断" in content and len(content) < 13_000
+    assert evidence["content_bytes"] == len(page.encode())
+    assert evidence["content_sha256"] == hashlib.sha256(page.encode()).hexdigest()
+    assert evidence["text_truncated"] is True
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_web_fetch_records_final_url_and_raw_body_hash_after_redirect() -> None:
     respx.get("https://93.184.216.34/start").mock(
         return_value=httpx.Response(302, headers={"location": "/final"})
@@ -81,6 +105,7 @@ async def test_web_fetch_records_final_url_and_raw_body_hash_after_redirect() ->
         "content_type": "text/plain",
         "content_bytes": len("内容".encode()),
         "content_sha256": hashlib.sha256("内容".encode()).hexdigest(),
+        "text_truncated": False,
         "redirects": 1,
     }
 

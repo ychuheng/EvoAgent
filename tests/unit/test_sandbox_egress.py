@@ -94,7 +94,7 @@ async def test_actual_connection_is_pinned_and_preserves_host_and_tls(address):
     assert len(requests) == 1
     assert requests[0].url.host == address
     assert requests[0].headers["host"] == "example.com:8443"
-    assert requests[0].extensions["sni_hostname"] == b"example.com"
+    assert requests[0].extensions["sni_hostname"] == "example.com"
 
 
 async def test_redirect_hop_is_rechecked_without_forwarding_private_request():

@@ -125,7 +125,7 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
           <p className="chat-meta" key={`${read.tool_call_id}-${index}`}>已读取正文：{sourceLink(read.final_url)} · SHA-256 {read.content_sha256} · {read.observed_at}</p>
         )}
         {trace.sources.answer_links.map((link, index) =>
-          <p className="chat-meta" key={`${link.url}-${index}`}>答复链接：{sourceLink(link.url)} · {link.level === "fetched_text" ? "已读取正文" : link.level === "search_snippet" ? "仅见搜索摘要" : "未见检索或读取记录"}</p>
+          <p className="chat-meta" key={`${link.url}-${index}`}>答复链接：{sourceLink(link.url)} · {link.level === "fetched_text" ? (trace.sources?.reads.some((read) => read.tool_call_id === link.tool_call_id && read.text_truncated) ? "已读取正文摘录（截断）" : "已读取正文") : link.level === "search_snippet" ? "仅见搜索摘要" : "未见检索或读取记录"}</p>
         )}
       </div>}
     {pendingApprovals.map((approval) => {

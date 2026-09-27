@@ -1,0 +1,27 @@
+# Isolated localhost acceptance stack for real model + keyless web search.
+# Use with docker-compose.yml and deploy/personal/compose.yml under a distinct project name.
+services:
+  redis:
+    ports: !override
+      - "127.0.0.1:16380:6379"
+  postgres:
+    ports: !override
+      - "127.0.0.1:15434:5432"
+  api:
+    ports: !override
+      - "127.0.0.1:18002:8000"
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible
+      EVOAGENT_SEARCH_PROVIDER: ddgs
+  worker:
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible
+      EVOAGENT_SEARCH_PROVIDER: ddgs
+  maintenance-worker:
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible
+      EVOAGENT_SEARCH_PROVIDER: ddgs
+  eval-worker:
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible
+      EVOAGENT_SEARCH_PROVIDER: ddgs

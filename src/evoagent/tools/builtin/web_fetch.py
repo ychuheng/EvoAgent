@@ -1,6 +1,8 @@
 """带最低 SSRF、重定向、超时和响应大小保护的网页工具。"""
 
 import hashlib
+import re
+from html.parser import HTMLParser
 from typing import Self
 from urllib.parse import urljoin
 
@@ -19,6 +21,49 @@ _TEXT_CONTENT_TYPES = (
     "application/xml",
     "application/xhtml+xml",
 )
+_MODEL_TEXT_LIMIT = 12_000
+_IGNORED_HTML_TAGS = {"script", "style", "nav", "header", "footer", "noscript", "svg"}
+
+
+class _ReadableHTML(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.all_text: list[str] = []
+        self.main_text: list[str] = []
+        self.ignored: list[str] = []
+        self.main_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in _IGNORED_HTML_TAGS:
+            self.ignored.append(tag)
+        if tag in {"main", "article"}:
+            self.main_depth += 1
+        if tag in {"p", "li", "h1", "h2", "h3", "h4", "tr", "br"}:
+            self.handle_data("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.ignored and self.ignored[-1] == tag:
+            self.ignored.pop()
+        if tag in {"main", "article"} and self.main_depth:
+            self.main_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self.ignored or not data.strip():
+            return
+        self.all_text.append(data)
+        if self.main_depth:
+            self.main_text.append(data)
+
+
+def _model_visible_text(body: str, media_type: str) -> tuple[str, bool]:
+    if media_type in {"text/html", "application/xhtml+xml"}:
+        parser = _ReadableHTML()
+        parser.feed(body)
+        body = " ".join(parser.main_text or parser.all_text)
+        body = re.sub(r"\s+", " ", body).strip()
+    if len(body) > _MODEL_TEXT_LIMIT:
+        return body[:_MODEL_TEXT_LIMIT] + "\n[网页正文已截断；请勿据此推断未显示的内容]", True
+    return body, False
 
 
 class WebFetchArguments(ContractModel):
@@ -134,7 +179,10 @@ class WebFetchTool(BaseTool[WebFetchArguments]):
                     encoding = response.encoding or "utf-8"
                     try:
                         body = bytes(content)
-                        return body.decode(encoding, errors="replace"), {
+                        visible_text, text_truncated = _model_visible_text(
+                            body.decode(encoding, errors="replace"), media_type
+                        )
+                        return visible_text, {
                             "level": "fetched_text",
                             "requested_url": arguments.url,
                             "final_url": safe_url,
@@ -142,6 +190,7 @@ class WebFetchTool(BaseTool[WebFetchArguments]):
                             "content_type": media_type,
                             "content_bytes": len(body),
                             "content_sha256": hashlib.sha256(body).hexdigest(),
+                            "text_truncated": text_truncated,
                             "redirects": redirect_count,
                         }
                     except LookupError as error:

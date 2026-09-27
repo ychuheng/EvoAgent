@@ -29,6 +29,7 @@ class ReadEvidence(BaseModel):
     final_url: str
     content_sha256: str
     content_bytes: int
+    text_truncated: bool = False
     status_code: int
     observed_at: datetime
 
@@ -129,6 +130,7 @@ def build_source_report(events: tuple[Any, ...], final_answer: str | None) -> So
                     final_url=final,
                     content_sha256=digest,
                     content_bytes=size,
+                    text_truncated=payload.get("text_truncated") is True,
                     status_code=status_code,
                     observed_at=event.created_at,
                 )

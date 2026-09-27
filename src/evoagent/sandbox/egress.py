@@ -18,7 +18,8 @@ class EgressTransport(httpx.AsyncBaseTransport):
         headers["Host"] = request.url.netloc.decode("ascii")
         headers["Accept-Encoding"] = "identity"
         extensions = dict(request.extensions)
-        extensions["sni_hostname"] = host.encode("ascii")
+        # httpcore/AnyIO expects a hostname string when starting TLS.
+        extensions["sni_hostname"] = host
         bound = httpx.Request(
             request.method,
             request.url.copy_with(host=sorted(addresses)[0]),
