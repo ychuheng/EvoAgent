@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -39,9 +40,13 @@ from evoagent.projects.context import build_project_context
 from evoagent.projects.schema import ProjectAuthorization
 from evoagent.projects.service import ActiveProject
 from evoagent.providers.mock import MockProvider
+from evoagent.tools.base import ToolExecutionError, ToolPermissionError
 from evoagent.tools.builtin.find_files import FindFilesTool
 from evoagent.tools.builtin.list_dir import ListDirTool
-from evoagent.tools.builtin.project_file_read import ProjectFileReadTool
+from evoagent.tools.builtin.project_file_read import (
+    ProjectFileReadArguments,
+    ProjectFileReadTool,
+)
 from evoagent.tools.builtin.search_text import SearchTextTool
 from evoagent.tools.executor import ToolExecutor
 from evoagent.tools.registry import ToolRegistry
@@ -133,6 +138,26 @@ def scripted_provider(case: dict) -> MockProvider:
     return MockProvider(steps)
 
 
+def evidence_candidates(answer: str) -> list[str]:
+    """从答复里挑出"看起来像路径"的条目，供逐条打开核对。
+
+    只取每条 `- ` 条目的第一个词，并在中英文标点处截断（`src/app.py，负责入口` → `src/app.py`）。
+    结果还必须带文件后缀或含路径分隔符，否则"拒绝原因：…"这类纯说明文字会被误当成路径
+    （该规则由 `tests/unit/test_m1_evidence_paths.py` 锁住）。
+    """
+
+    candidates: set[str] = set()
+    for line in answer.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("- "):
+            continue
+        first = stripped[2:].strip().split()[0] if stripped[2:].strip() else ""
+        token = re.split(r"[:：,，;；、。]", first, maxsplit=1)[0].strip()
+        if token and ("/" in token or Path(token).suffix):
+            candidates.add(token)
+    return sorted(candidates)
+
+
 async def collect_case(case: dict, root: Path) -> dict:
     project = ActiveProject(
         id=uuid4(),
@@ -168,13 +193,22 @@ async def collect_case(case: dict, root: Path) -> dict:
     answer = result.final_answer or ""
     anchors = case.get("answer_anchors", [])
     anchor_results = [{"anchor": item, "found": item in answer} for item in anchors]
-    evidence_paths = sorted(
-        {
-            item.split(":", 1)[0].strip(" -")
-            for item in answer.splitlines()
-            if item.strip().startswith("- ")
-        }
-    )
+    # 只把"看起来像路径"的条目当作依据，规则见 `evidence_candidates`。
+    evidence_paths = evidence_candidates(answer)
+    # 与"文件依据"分开统计的条目数：注入/边界用例只要求给出可读结论，不要求引用文件。
+    bullet_count = sum(1 for line in answer.splitlines() if line.strip().startswith("- "))
+    # 验收要求"至少三个可打开的文件依据"：这里**逐条打开核对**，而不是只数个数。
+    # 打不开的路径必须计入失败——"列出了不存在的文件"正是验收里要记为失败的行为。
+    reader = ProjectFileReadTool(root)
+    unopenable: list[str] = []
+    opened: list[str] = []
+    for path in evidence_paths:
+        try:
+            await reader.invoke(ProjectFileReadArguments(path=path, max_lines=1))
+        except (ToolExecutionError, ToolPermissionError):
+            unopenable.append(path)
+        else:
+            opened.append(path)
     token_usage = result.usage.total_tokens if result.usage is not None else 0
     expected_tools = [step["tool"] for step in case["steps"] if step["type"] == "tool"]
     called_tools = [event.payload.get("name") for event in tool_events if event.payload is not None]
@@ -211,7 +245,9 @@ async def collect_case(case: dict, root: Path) -> dict:
         and len(provider.requests) == len(case["steps"])
         and called_tools == expected_tools
         and all(item["found"] for item in anchor_results)
-        and len(evidence_paths) >= case.get("min_evidence_paths", 0)
+        and len(opened) >= case.get("min_evidence_paths", 0)
+        and not unopenable
+        and bullet_count >= case.get("min_evidence_items", 0)
         and failure_ok
         and (injection_check is None or injection_check["echoed_in_answer"] is False)
     )
@@ -230,6 +266,10 @@ async def collect_case(case: dict, root: Path) -> dict:
         "context_chars": len(messages[0].content) + len(messages[1].content),
         "answer_anchors": anchor_results,
         "evidence_paths": evidence_paths,
+        # 逐条打开核对的结果：`opened` 是真实存在的依据，`unopenable` 是编造的路径。
+        "evidence_opened": opened,
+        "evidence_unopenable": unopenable,
+        "evidence_items": bullet_count,
     }
 
 

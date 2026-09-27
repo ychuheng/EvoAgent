@@ -177,6 +177,11 @@ async def test_running_job_cleanup_and_failure_evidence(sandbox_env, reason):
         if driver.created:
             break
         await asyncio.sleep(0.01)
+    # 如果把"容器已创建"当成默认事实，机器繁忙时循环会超时退出，随后 `cancel` 会取消一个
+    # 还没启动的协程，最终表现为一条看不懂的状态断言失败。这里显式失败并说明原因。
+    assert driver.created, (
+        "等待容器创建超时（1 秒）；这是测试时序问题，不是产品缺陷——在更慢的机器上需要放宽这个窗口"
+    )
     if reason == "cancel":
         running.cancel()
     elif reason == "lease":

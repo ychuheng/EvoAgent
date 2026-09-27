@@ -11,9 +11,19 @@ const PROJECT_STORAGE_KEY = "evoagent-chat-project";
 const DEFAULT_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 const TERMINAL = new Set(["completed", "failed", "cancelled", "timeout", "limit_reached", "authorization_revoked"]);
 
+const ROOT_STATUS_LABEL: Record<string, string> = {
+  available: "目录可用",
+  missing: "目录不存在（挂载丢失或已被删除）",
+  not_a_directory: "路径已不是目录（被文件替换或挂载类型变化）",
+  permission_denied: "目录存在但权限不足，无法列举",
+  unreadable: "目录无法读取",
+};
+
 function projectStatusLabel(project: Project): string {
   if (project.status === "revoked") return "授权已撤销";
-  if (project.root_available === false) return "目录不可用";
+  if (project.root_status && project.root_status !== "available") {
+    return ROOT_STATUS_LABEL[project.root_status] ?? `目录不可用（${project.root_status}）`;
+  }
   if (project.status === "unavailable") return "目录不可用";
   return project.authorization === "read_write" ? "可写" : "只读";
 }

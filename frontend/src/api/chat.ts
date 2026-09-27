@@ -52,6 +52,8 @@ export type Project = {
   authorization_version: number;
   created_at: string;
   root_available: boolean | null;
+  /** 实测根状态：区分挂载缺失、被替换、权限不足等，便于给出可执行的提示。 */
+  root_status: "available" | "missing" | "not_a_directory" | "permission_denied" | "unreadable" | null;
 };
 export type TaskTrace = {
   run_id: string;

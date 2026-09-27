@@ -102,6 +102,8 @@ class ProjectResponse(ApiModel):
     created_at: datetime
     # 实测的根可用性，与库里的 status 分开返回，便于页面提示"挂载缺失/权限不足"。
     root_available: bool | None = None
+    # 具体状态：available / missing / not_a_directory / permission_denied / unreadable。
+    root_status: str | None = None
 
 
 class WorkspaceCreateRequest(ApiModel):

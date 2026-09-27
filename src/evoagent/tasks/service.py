@@ -26,6 +26,7 @@ from evoagent.projects.schema import (
     ProjectNotFoundError,
     ProjectStatus,
 )
+from evoagent.projects.service import root_status
 from evoagent.runtime.run_config import RunMode
 from evoagent.sessions.service import append_message, project_terminal
 from evoagent.tasks.acceptance import AcceptanceSpec
@@ -154,6 +155,14 @@ class TaskService:
                     raise ProjectNotFoundError(f"项目不存在：{bound_project_id}")
                 if project.status is ProjectStatus.REVOKED:
                     raise ProjectAuthorizationError("项目授权已撤销，不能在此项目下创建任务")
+                # 目录不可用（挂载丢失、被删、被替换、权限不足）时不得创建新 Task：
+                # 计划要求"撤销后新 Task 不得进入旧根"，不可用与撤销对用户是同一后果。
+                current = root_status(project.root)
+                if current != "available":
+                    raise ProjectAuthorizationError(
+                        f"项目根当前不可用（{current}），不能在此项目下创建任务；"
+                        "请恢复目录后重新检查该项目"
+                    )
                 authorization_version = project.authorization_version
                 project_root = Path(project.root)
 

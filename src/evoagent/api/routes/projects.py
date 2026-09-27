@@ -24,7 +24,9 @@ from evoagent.projects.schema import (
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-def _to_response(record, *, available: bool | None = None) -> ProjectResponse:
+def _to_response(
+    record, *, available: bool | None = None, status_text: str | None = None
+) -> ProjectResponse:
     return ProjectResponse(
         id=record.id,
         name=record.name,
@@ -34,6 +36,7 @@ def _to_response(record, *, available: bool | None = None) -> ProjectResponse:
         authorization_version=record.authorization_version,
         created_at=record.created_at,
         root_available=available,
+        root_status=status_text,
     )
 
 
@@ -58,10 +61,10 @@ async def register_project(
             name=request.name,
             authorization=request.authorization,
         )
-        fresh, available = await service.status_report(record.id)
+        fresh, available, status_text = await service.status_report(record.id)
     except (ProjectRegistrationError, ProjectNotFoundError, ProjectAuthorizationError) as error:
         raise _translate(error) from error
-    return _to_response(fresh or record, available=available)
+    return _to_response(fresh or record, available=available, status_text=status_text)
 
 
 @router.get("", response_model=list[ProjectResponse])
@@ -69,18 +72,18 @@ async def list_projects(service: ProjectServiceDependency) -> list[ProjectRespon
     records = await service.list_projects()
     responses: list[ProjectResponse] = []
     for record in records:
-        _fresh, available = await service.status_report(record.id)
-        responses.append(_to_response(record, available=available))
+        _fresh, available, status_text = await service.status_report(record.id)
+        responses.append(_to_response(record, available=available, status_text=status_text))
     return responses
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: UUID, service: ProjectServiceDependency) -> ProjectResponse:
     try:
-        record, available = await service.status_report(project_id)
+        record, available, status_text = await service.status_report(project_id)
     except (ProjectNotFoundError, ProjectAuthorizationError) as error:
         raise _translate(error) from error
-    return _to_response(record, available=available)
+    return _to_response(record, available=available, status_text=status_text)
 
 
 @router.post("/{project_id}/check", response_model=ProjectResponse)
@@ -89,10 +92,10 @@ async def check_project(project_id: UUID, service: ProjectServiceDependency) -> 
 
     try:
         record = await service.check(project_id)
-        fresh, available = await service.status_report(project_id)
+        fresh, available, status_text = await service.status_report(project_id)
     except (ProjectNotFoundError, ProjectAuthorizationError) as error:
         raise _translate(error) from error
-    return _to_response(fresh or record, available=available)
+    return _to_response(fresh or record, available=available, status_text=status_text)
 
 
 @router.put("/{project_id}/authorization", response_model=ProjectResponse)

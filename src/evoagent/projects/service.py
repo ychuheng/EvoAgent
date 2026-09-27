@@ -54,17 +54,30 @@ class ActiveProject:
         return self.authorization is ProjectAuthorization.READ_WRITE
 
 
-def _root_available(root: str) -> bool:
-    """根当前是否仍可用（挂载存在、仍是目录、可列举）。"""
+def root_status(root: str) -> str:
+    """实测根目录当前状态（计划 §6 P-02：区分目录不可用、权限不足、挂载缺失）。
 
+    返回 `available` / `missing` / `not_a_directory` / `permission_denied` / `unreadable`：
+    只报"可用/不可用"不够——挂载丢失、目标被删、权限不足对用户的处置完全不同。
+    """
+
+    path = Path(root)
+    if not path.exists():
+        # 挂载点不存在，或目录已被删除；对用户都是"这个根现在进不去"。
+        return "missing"
+    if not path.is_dir():
+        return "not_a_directory"
     try:
-        path = Path(root)
-        if not path.is_dir():
-            return False
         next(os.scandir(path), None)
+    except PermissionError:
+        return "permission_denied"
     except OSError:
-        return False
-    return True
+        return "unreadable"
+    return "available"
+
+
+def _root_available(root: str) -> bool:
+    return root_status(root) == "available"
 
 
 class ProjectService:
@@ -136,11 +149,12 @@ class ProjectService:
             raise ProjectNotFoundError(f"项目不存在：{project_id}")
         return record
 
-    async def status_report(self, project_id: UUID) -> tuple[ProjectRecord, bool]:
-        """返回项目记录与"根当前是否可用"的实测结果。"""
+    async def status_report(self, project_id: UUID) -> tuple[ProjectRecord, bool, str]:
+        """返回项目记录、根是否可用、以及**具体状态**（缺挂载/被删/权限不足）。"""
 
         record = await self.get(project_id)
-        return record, _root_available(record.root)
+        status = root_status(record.root)
+        return record, status == "available", status
 
     async def check(self, project_id: UUID) -> ProjectRecord:
         """重新实测根可用性并同步 `status`（可用性变化不改授权版本）。"""
@@ -319,4 +333,5 @@ __all__ = [
     "ProjectService",
     "load_task_project",
     "resolve_active_project",
+    "root_status",
 ]
