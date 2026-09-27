@@ -50,6 +50,30 @@ async def test_mock_search_provider_makes_search_deterministic() -> None:
 
     assert payload == [result.model_dump(mode="json")]
 
+    content, evidence = await tool.invoke_with_evidence(WebSearchArguments(query="agent"))
+    assert json.loads(content) == payload
+    assert evidence == {
+        "level": "search_snippet",
+        "query": "agent",
+        "provider": "mock",
+        "results": payload,
+    }
+
+
+@pytest.mark.asyncio
+async def test_zero_search_results_still_record_query_and_provider() -> None:
+    tool = WebSearchTool(MockSearchProvider([]))
+
+    content, evidence = await tool.invoke_with_evidence(WebSearchArguments(query="missing"))
+
+    assert content == "[]"
+    assert evidence == {
+        "level": "search_snippet",
+        "query": "missing",
+        "provider": "mock",
+        "results": [],
+    }
+
 
 @pytest.mark.asyncio
 async def test_brave_search_keeps_source_and_allows_zero_results() -> None:
@@ -127,6 +151,7 @@ async def test_brave_search_classifies_http_failures_without_response_body(
         "{}",
         '{"web":{"results":{}}}',
         '{"web":{"results":[{"url":"file:///private"}]}}',
+        '{"web":{"results":[{"url":"https://user:secret@example.com"}]}}',
         '{"web":{"results":[{"title":"missing URL"}]}}',
     ],
 )

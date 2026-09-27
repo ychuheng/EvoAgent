@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import httpx
@@ -53,6 +54,35 @@ async def test_web_fetch_reads_public_text_response() -> None:
         result = await tool.invoke(WebFetchArguments(url="https://example.com"))
 
     assert result == "hello web"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_web_fetch_records_final_url_and_raw_body_hash_after_redirect() -> None:
+    respx.get("https://93.184.216.34/start").mock(
+        return_value=httpx.Response(302, headers={"location": "/final"})
+    )
+    respx.get("https://93.184.216.34/final").mock(
+        return_value=httpx.Response(
+            200, content="内容".encode(), headers={"content-type": "text/plain; charset=utf-8"}
+        )
+    )
+    async with WebFetchTool(URLGuard(public_resolver), timeout_seconds=1) as tool:
+        content, evidence = await tool.invoke_with_evidence(
+            WebFetchArguments(url="https://example.com/start")
+        )
+
+    assert content == "内容"
+    assert evidence == {
+        "level": "fetched_text",
+        "requested_url": "https://example.com/start",
+        "final_url": "https://example.com/final",
+        "status_code": 200,
+        "content_type": "text/plain",
+        "content_bytes": len("内容".encode()),
+        "content_sha256": hashlib.sha256("内容".encode()).hexdigest(),
+        "redirects": 1,
+    }
 
 
 @pytest.mark.asyncio

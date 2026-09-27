@@ -13,6 +13,7 @@ from evoagent.core.models import (
 )
 from evoagent.tools.base import BaseTool, ToolPermissionError
 from evoagent.tools.builtin.calculator import CalculatorTool
+from evoagent.tools.builtin.web_search import MockSearchProvider, SearchResult, WebSearchTool
 from evoagent.tools.executor import ToolExecutor
 from evoagent.tools.registry import ToolRegistry
 
@@ -138,6 +139,35 @@ async def test_executor_validates_invokes_and_emits_success_events() -> None:
         EventType.TOOL_STARTED,
         EventType.TOOL_COMPLETED,
     ]
+
+
+@pytest.mark.asyncio
+async def test_executor_persists_source_metadata_separately_from_tool_result() -> None:
+    search = WebSearchTool(
+        MockSearchProvider(
+            [
+                SearchResult(
+                    title="Example", url="https://example.com", snippet="Summary", source="mock"
+                )
+            ]
+        )
+    )
+    executor, sink = make_executor(search, max_result_chars=5)
+
+    result = await executor.execute(
+        ToolCall(call_id="search-1", name="web_search", arguments={"query": "example"})
+    )
+
+    assert result.content == '[{"ti'  # The model-visible result was truncated.
+    assert [event.type for event in sink.events] == [
+        EventType.TOOL_STARTED,
+        EventType.SOURCE_OBSERVED,
+        EventType.TOOL_COMPLETED,
+    ]
+    observed = sink.events[1].payload
+    assert observed["tool_call_id"] == "search-1"
+    assert observed["level"] == "search_snippet"
+    assert observed["results"][0]["url"] == "https://example.com"
 
 
 @pytest.mark.asyncio

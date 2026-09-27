@@ -101,7 +101,16 @@ class ToolExecutor:
                 return directive.result
 
         try:
-            content = await asyncio.wait_for(tool.invoke(arguments), timeout=self._timeout_seconds)
+            invoke_with_evidence = getattr(tool, "invoke_with_evidence", None)
+            evidence: dict[str, object] | None = None
+            if invoke_with_evidence is not None:
+                content, evidence = await asyncio.wait_for(
+                    invoke_with_evidence(arguments), timeout=self._timeout_seconds
+                )
+            else:
+                content = await asyncio.wait_for(
+                    tool.invoke(arguments), timeout=self._timeout_seconds
+                )
         except asyncio.CancelledError:
             raise
         except TimeoutError:
@@ -157,6 +166,11 @@ class ToolExecutor:
         truncated = truncated or original_size > self._max_result_chars
         if self._middleware is not None:
             await self._middleware.after_success(token, normalized)
+        if evidence is not None:
+            await self._event_sink.emit(
+                EventType.SOURCE_OBSERVED,
+                {"tool_call_id": call.call_id, **evidence},
+            )
         result = ToolResult(
             tool_call_id=call.call_id,
             name=call.name,

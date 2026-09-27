@@ -11,6 +11,16 @@ const TOOL_STATUS: Record<string, string> = {
   denied: "已拒绝", unknown: "结果不确定",
 };
 
+function sourceLink(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (["http:", "https:"].includes(parsed.protocol) && !parsed.username && !parsed.password) {
+      return <a href={url} target="_blank" rel="noopener noreferrer">{url}</a>;
+    }
+  } catch { /* A malformed source remains plain text. */ }
+  return <span>{url}</span>;
+}
+
 export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId: string; onOpenVersion: (id: string) => void; onOpenContext: (id: string) => void }) {
   const [task, setTask] = useState<ChatTask | null>(null);
   const [trace, setTrace] = useState<TaskTrace | null>(null);
@@ -103,6 +113,21 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
         <p className="chat-meta">{trace?.events?.some((event) => event.event_type === "skill.none_selected" || event.event_type.startsWith("retrieval.")) ? "此任务未选中 Skill。" : "尚无 Skill 选择证据。"}</p>}
       {retrieval && <p className="chat-meta">记忆命中 {selectedMemories.length} 条 · {retrieval.degraded ? "检索已降级" : "检索未降级"} · 批次 {retrieval.batch_id}</p>}
     </div>
+    {trace?.sources && (trace.sources.searches.length > 0 || trace.sources.reads.length > 0 || trace.sources.answer_links.length > 0) &&
+      <div className="chat-evidence"><h4>网页来源证据</h4>
+        <p className="chat-meta">这里核对 URL 是否出现在工具记录中；仍需人工判断网页内容是否支持答复。</p>
+        {trace.sources.searches.map((search, index) =>
+          <div key={`${search.tool_call_id}-${index}`}><p className="chat-meta">搜索：{search.query} · {search.provider} · {search.result_count} 条结果 · {search.observed_at}</p>
+            {search.urls.length > 0 && <details><summary>查看搜索结果 URL</summary><ul>{search.urls.map((url, urlIndex) => <li key={`${url}-${urlIndex}`}>{sourceLink(url)}</li>)}</ul></details>}
+          </div>
+        )}
+        {trace.sources.reads.map((read, index) =>
+          <p className="chat-meta" key={`${read.tool_call_id}-${index}`}>已读取正文：{sourceLink(read.final_url)} · SHA-256 {read.content_sha256} · {read.observed_at}</p>
+        )}
+        {trace.sources.answer_links.map((link, index) =>
+          <p className="chat-meta" key={`${link.url}-${index}`}>答复链接：{sourceLink(link.url)} · {link.level === "fetched_text" ? "已读取正文" : link.level === "search_snippet" ? "仅见搜索摘要" : "未见检索或读取记录"}</p>
+        )}
+      </div>}
     {pendingApprovals.map((approval) => {
       const call = trace?.tool_calls.find((item) => item.id === approval.tool_call_id);
       const unknown = trace?.tool_effects.some((effect) => effect.tool_call_id === approval.tool_call_id && effect.status === "unknown");

@@ -77,6 +77,7 @@ class EventType(StrEnum):
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"
     TOOL_FAILED = "tool.failed"
+    SOURCE_OBSERVED = "source.observed"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
     RUN_CANCELLED = "run.cancelled"

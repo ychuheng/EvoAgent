@@ -2791,6 +2791,10 @@ Agent 只依赖 `web_search` 工具，工具只依赖 `SearchProvider`。这样�
 
 个人模式中的 `BraveSearchProvider.search()` 先把 HTTP/网络/响应结构错误转换为稳定的 `WebSearchError.code`：401 对应 `search_auth_failed`，403 对应 `search_forbidden`，429 对应 `search_rate_limited`，5xx 对应 `search_service_unavailable`，连接与超时分别是 `search_network_error`、`search_timeout`。200 响应若不是合法 JSON、缺少 `web` 对象、结果不是列表或结果 URL 不可用，则返回 `search_invalid_response`。200 且 `results=[]` 是合法的零结果，工具返回 `[]`，不能编造来源。错误信息只包含状态码或通用描述，不复述服务端响应正文。`ToolExecutor` 将 `ToolExecutionError.code` 写入工具失败记录，页面再把它转换为用户可读提示。现有代码没有为 429 自动退避，也没有证明最终回答的引用得到网页正文支持；这些仍属 B-02/B-04。
 
+继续实施 B-02 时，`web_search` 与 `web_fetch` 增加 `invoke_with_evidence()`，让工具正文与来源元数据分别流动。原 `invoke()` 仍返回相同的模型可见字符串；`ToolExecutor` 对支持此方法的工具，在成功后追加 `source.observed` 事件。搜索事件只含查询、提供方和返回的标题/URL/摘要；网页读取事件含请求 URL、最终 URL、HTTP 状态、文本类型、原始字节数、SHA-256 和重定向次数，**不重复保存网页正文**。事件自身的 `created_at` 是观察时间。网页失败仍由 `tool.started` 的请求参数和 `tool.failed` 的错误记录表示，不产生伪成功的来源事件。
+
+`trace/sources.py::build_source_report` 从已持久化事件生成 `RunTrace.sources`：保留零结果查询，列出已读正文和哈希，并将最终答复中出现的 HTTP(S) URL 映射为 `fetched_text`、`search_snippet` 或 `unobserved`。请求 URL 和重定向后的最终 URL 都可映射到同一次读取；同一 URL 同时出现搜索与读取时以已读正文为较高证据级别。页面展示这些级别并允许打开 URL。它只证明工具**曾观察到对应 URL**，不证明网页内容支持答案的具体句子；这一层仍需人工或独立判分。截断的网页正文也可能不足以让模型看到完整依据，后续评测必须单独检查。
+
 ### 35.4 推荐阅读顺序
 
 ```text

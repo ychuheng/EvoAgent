@@ -3,6 +3,7 @@
 import json
 from collections.abc import Sequence
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -24,6 +25,8 @@ class SearchProvider(Protocol):
 
 
 class MockSearchProvider:
+    name = "mock"
+
     def __init__(self, results: Sequence[SearchResult]) -> None:
         self._results = tuple(results)
 
@@ -33,6 +36,8 @@ class MockSearchProvider:
 
 class BraveSearchProvider:
     """Brave Web Search API 的最小异步适配器。"""
+
+    name = "brave"
 
     def __init__(
         self,
@@ -90,11 +95,17 @@ class BraveSearchProvider:
                 raise WebSearchError("search_invalid_response", "web search result has no URL")
             try:
                 url = httpx.URL(item["url"])
-            except httpx.InvalidURL as error:
+                parsed_url = urlsplit(item["url"])
+            except (httpx.InvalidURL, ValueError) as error:
                 raise WebSearchError(
                     "search_invalid_response", "web search result URL is invalid"
                 ) from error
-            if url.scheme not in {"http", "https"} or not url.host:
+            if (
+                url.scheme not in {"http", "https"}
+                or not url.host
+                or parsed_url.username is not None
+                or parsed_url.password is not None
+            ):
                 raise WebSearchError("search_invalid_response", "web search result URL is invalid")
             results.append(
                 SearchResult(
@@ -134,7 +145,17 @@ class WebSearchTool(BaseTool[WebSearchArguments]):
         self._provider = provider
 
     async def invoke(self, arguments: WebSearchArguments) -> str:
+        content, _evidence = await self.invoke_with_evidence(arguments)
+        return content
+
+    async def invoke_with_evidence(
+        self, arguments: WebSearchArguments
+    ) -> tuple[str, dict[str, object]]:
         results = await self._provider.search(arguments.query, count=arguments.count)
-        return json.dumps(
-            [result.model_dump(mode="json") for result in results], ensure_ascii=False
-        )
+        entries = [result.model_dump(mode="json") for result in results]
+        return json.dumps(entries, ensure_ascii=False), {
+            "level": "search_snippet",
+            "query": arguments.query,
+            "provider": getattr(self._provider, "name", "unknown"),
+            "results": entries,
+        }

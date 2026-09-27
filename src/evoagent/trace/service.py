@@ -19,6 +19,7 @@ from evoagent.db.models import (
 )
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.tasks.state_machine import PersistentRunStatus
+from evoagent.trace.sources import SourceReport, build_source_report
 
 
 class TraceEvent(BaseModel):
@@ -47,6 +48,7 @@ class RunTrace(BaseModel):
     snapshots: tuple[dict[str, Any], ...]
     artifacts: tuple[dict[str, Any], ...]
     sandbox_executions: tuple[dict[str, Any], ...] = ()
+    sources: SourceReport = SourceReport()
 
 
 class TraceService:
@@ -115,22 +117,24 @@ class TraceService:
                     .order_by(ArtifactRecord.created_at)
                 )
             )
+        trace_events = tuple(
+            TraceEvent(
+                sequence=record.sequence,
+                event_type=record.event_type,
+                payload=record.payload,
+                schema_version=record.schema_version,
+                created_at=record.created_at,
+            )
+            for record in records
+        )
         return RunTrace(
             run_id=run.id,
             task_id=run.task_id,
             status=run.status,
             final_answer=run.final_answer,
             error_code=run.error_code,
-            events=tuple(
-                TraceEvent(
-                    sequence=record.sequence,
-                    event_type=record.event_type,
-                    payload=record.payload,
-                    schema_version=record.schema_version,
-                    created_at=record.created_at,
-                )
-                for record in records
-            ),
+            events=trace_events,
+            sources=build_source_report(trace_events, run.final_answer),
             turns=tuple(
                 {
                     "id": str(item.id),

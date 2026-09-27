@@ -57,6 +57,11 @@ export type TaskTrace = {
     risk: string;
     reason: string;
   }>;
+  sources?: {
+    searches: Array<{ tool_call_id: string; query: string; provider: string; result_count: number; urls: string[]; observed_at: string }>;
+    reads: Array<{ tool_call_id: string; requested_url: string; final_url: string; content_sha256: string; content_bytes: number; status_code: number; observed_at: string }>;
+    answer_links: Array<{ url: string; level: "fetched_text" | "search_snippet" | "unobserved"; tool_call_id: string | null }>;
+  };
 };
 
 export const chat = {

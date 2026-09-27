@@ -1,5 +1,6 @@
 """带最低 SSRF、重定向、超时和响应大小保护的网页工具。"""
 
+import hashlib
 from typing import Self
 from urllib.parse import urljoin
 
@@ -77,6 +78,12 @@ class WebFetchTool(BaseTool[WebFetchArguments]):
             await self._client.aclose()
 
     async def invoke(self, arguments: WebFetchArguments) -> str:
+        content, _evidence = await self.invoke_with_evidence(arguments)
+        return content
+
+    async def invoke_with_evidence(
+        self, arguments: WebFetchArguments
+    ) -> tuple[str, dict[str, object]]:
         current_url = arguments.url
         for redirect_count in range(self._max_redirects + 1):
             safe_url = await self._url_guard.validate(current_url)
@@ -126,7 +133,17 @@ class WebFetchTool(BaseTool[WebFetchArguments]):
                             raise ToolExecutionError("web response exceeds the size limit")
                     encoding = response.encoding or "utf-8"
                     try:
-                        return bytes(content).decode(encoding, errors="replace")
+                        body = bytes(content)
+                        return body.decode(encoding, errors="replace"), {
+                            "level": "fetched_text",
+                            "requested_url": arguments.url,
+                            "final_url": safe_url,
+                            "status_code": response.status_code,
+                            "content_type": media_type,
+                            "content_bytes": len(body),
+                            "content_sha256": hashlib.sha256(body).hexdigest(),
+                            "redirects": redirect_count,
+                        }
                     except LookupError as error:
                         raise ToolExecutionError("web response uses an unknown encoding") from error
             except httpx.TimeoutException as error:

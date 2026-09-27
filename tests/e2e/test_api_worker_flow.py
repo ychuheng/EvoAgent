@@ -65,6 +65,11 @@ async def test_submitted_task_is_completed_by_independent_worker_components(
         "web_search",
         "file_write",
     ]
+    assert trace.json()["sources"]["searches"][0]["query"] == "EvoAgent 可靠任务执行"
+    assert trace.json()["sources"]["searches"][0]["provider"] == "mock"
+    assert trace.json()["sources"]["searches"][0]["result_count"] == 1
+    assert trace.json()["sources"]["reads"] == []
+    assert any(event["event_type"] == "source.observed" for event in trace.json()["events"])
     assert len(trace.json()["tool_effects"]) == 1
     assert trace.json()["tool_effects"][0]["status"] == "committed"
     await database.dispose()
