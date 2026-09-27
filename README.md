@@ -1,208 +1,88 @@
 # EvoAgent
 
-当前优先方向是本机个人通用 Agent：先打通真实对话、真实搜索、受控文件任务与故障恢复，再按实际需求扩展主动任务和渠道。当前范围、实施顺序和验收门槛见[项目设计与实现计划](docs/EvoAgent-项目设计与分阶段实现计划.md)；[原五阶段计划](docs/EvoAgent-原五阶段计划历史存档.md)仅作历史参考。规划项不表示已经实现；正式 v0.4 尚未放行。
+EvoAgent 是一个从零实现的、可测试的 Agent Runtime：在可靠任务执行的基础上，建立可验证、可版本化、可回滚的 Skill 生命周期。
 
-`c1` 分支正在实施个人模式。首次配置、启动命令与当前验收边界见[个人模式启动与诊断](docs/个人模式启动与诊断.md)；该入口不自动开启真实搜索，远端连通须用实际任务验证。
+当前优先方向是**本机个人通用 Agent**：用户打开网页，用自然语言交代目标；Agent 与真实模型对话、查询公开资料、处理受控 Workspace 内的文件、询问缺失信息、经审批执行有副作用的操作，给出可核对的答复与产物，并在失败后说明下一步。规划项不表示已经实现。
 
-EvoAgent 是一个从零实现的、可测试的 Agent Runtime。项目最终目标是在可靠任务执行的基础上，建立可验证、可版本化、可回滚的 Skill 生命周期。
+## 当前成熟度（2026-09-27，`c1` 分支 `4d5a4e5`）
 
-**网页对话现已可用**：启动 API 和 Worker 后访问 `http://127.0.0.1:8000/ui/`；本仓库的本地验收 Compose 使用 `http://127.0.0.1:18000/ui/`。首页可新建 Session、发送任务、查看回复并在刷新后继续同一会话。接入本地 DeepSeek 配置的步骤见[网页对话运行说明](docs/网页对话与真实模型运行说明.md)；未配置真实模型时仍是 Mock 演示，不会产生真实智能回复。
+- 版本 `0.4.0.dev0`，**正式 `v0.4` 未放行**；默认 `docker-compose.yml` 仍是 Mock Provider、Mock 搜索、记忆关闭。
+- **已实现**：Agent 内核、PostgreSQL 租约与检查点恢复、审批与副作用账本、上下文预算与压缩、版本化记忆、混合检索与原生维度向量、MCP 审核与卸载、独立执行容器、持久队列与多 Worker、管理页面、显式任务验收条件、个人模式启动入口。
+- **已在真实环境验证**：真实模型网页对话与工具任务、显式验收通过/失败、Worker 存活探测、来源追溯（Mock 搜索）、Skill/记忆/MCP 专项链路、双 Worker 运行中故障恢复与 UNKNOWN 人工处理。
+- **尚未验证**：真实 Brave 搜索与多来源引用评审、文件与产物的网页流程、进度与恢复体验、个人模式自己的冻结任务集、长上下文与复杂组合任务、发布演练。
 
-页面现在明确显示 Mock/真实模型模式；真实模式只表示配置已加载，远端连接以实际任务结果为准。可为任务设置可检查的回答、工具和文件条件；没有条件的 `completed` 只表示模型给出了回答，**不等于内容正确**。配置、验收语义与升级步骤见[运行模式与任务验收说明](docs/Agent运行模式与任务验收条件-2026-09-26.md)。
+完整事实清单（含证据标识、环境、提交与最近一次回归数字）见[当前状态](docs/当前状态.md)；下一步见[当前实现计划](docs/EvoAgent-项目设计与分阶段实现计划.md)。
 
-对话中的“查看执行过程”显示任务状态、工具调用/结果、人工审批和取消入口，并可跳转到相关 Skill、Memory 与上下文证据。网页真实工具任务、审批恢复和取消已有局部实测；成功、网络失败与尚未联合验收的范围均记在[现状审计](docs/前四阶段补完现状审计-2026-09-25.md)。
+## 最短启动步骤
 
-**交付状态需要区分**：前四阶段的核心模块已有实现；本机已从网页验收真实工具、审批恢复、Skill 发布/复用/禁用、记忆确认/撤销和受信 MCP 调用/卸载。真实 Embedding 在独立留出样本上混合检索 9/10、词法 6/10，仍有一个错误排序。另以真实 API/Worker 验证跨 Workspace 不泄露，并修复“已确认记忆被模型拒作事实”的提示问题。最新镜像的真实页面已创建/选择 Workspace 并提交带显式条件的工具任务。冻结的 16 个真实用户任务通过 14 个；两例是远端网络失败，自动重试三次后仍失败，页面与 Trace 一致。真实页面还验证了超预算拒绝；PostgreSQL 双 Worker 故障与 Mock 页面 UNKNOWN 人工处理完成一条受控联合路径，并修复未知副作用被误标为完成的漏洞。样本构成、评分和失败 ID 见[真实任务质量报告](docs/Agent真实任务质量评测-2026-09-26.md)及[故障报告](docs/reports/agent-dual-worker-crash-2026-09-26.json)。复杂长上下文质量、其他外部工具的故障及开放任务效果仍需扩展验收；正式 v0.4 未放行。具体历史结果见[阶段性验收](docs/前四阶段补完阶段性验收-2026-09-25.md)，补完门槛见[计划](docs/前四阶段补完与用户场景验收计划.md)。页面按终态轮询，不提供逐字流式输出。
-
-当前版本 `0.4.0.dev0`：前三阶段的原定模块清单已实现；阶段四模块 0～13 的工程代码、模块 14 工程收尾已有交付，包括 Redis 唤醒/配额、双 Worker 调度、独立维护队列、Eval fencing，以及隔离的运行时实验和分账报告。PostgreSQL/pgvector、Redis、双真实进程与 Mock 实验已有分项验收；真实模型报告单独记录，不把小样本结论当成阶段四整体效果证明。
-
-原模块 14 交付：[最终验收与交付说明](docs/阶段四-模块14最终验收与交付说明.md)、[源码手册第 98～101 章](docs/EvoAgent-源码讲解与学习手册.md)、[ADR-015](docs/ADR-015-阶段四交付证据与发布门禁.md)。其当时待补的真实 Embedding 已在本次补完中用本地 ONNX 服务、原生 384 维迁移和冻结样本补验；正式 v0.4 的其他联合门槛仍未放行，保留 dev0。
-
-管理页面：[模块 13 页面运行说明](docs/阶段四-模块13验收与运行说明.md)、[源码手册第 94～97 章](docs/EvoAgent-源码讲解与学习手册.md)。新增 Memory 管理、MCP 目录审核/卸载和上下文证据页面，保留原 Skill/Eval 三个页面。模块 13 当次前端 12 项组件测试、6 个浏览器流程通过，后端 PostgreSQL/Redis 回归 404 passed、13 skipped；网页对话加入后的最新回归数字见[开发进度](docs/开发进度与决策记录.md)。
-
-调度与实验入口：[模块 11～12 运行说明](docs/阶段四-模块11至12验收与运行说明.md)、[源码手册第 86～93 章](docs/EvoAgent-源码讲解与学习手册.md)、[ADR-013](docs/ADR-013-数据库持久队列与Redis唤醒限流.md)、[ADR-014](docs/ADR-014-独立运行时实验与隔离评测.md)。数据库最新迁移为 `20260926_0014`，新增可选任务验收条件；先停旧 Worker，再升级并同时部署新版 API/Worker。原生维度向量使用模型独立 profile。
-
-阶段四最新部署与验收见[模块 6～7 运行说明](docs/阶段四-模块6至7验收与运行说明.md)，源码讲解见[学习手册第 69～73 章](docs/EvoAgent-源码讲解与学习手册.md)。升级需执行 migration `20260920_0007`，PostgreSQL 必须安装 vector 扩展；Compose/CI 已使用 pgvector 镜像。SQLite 使用 JSON 向量替身，不证明向量 SQL 通过。默认仍为词法 Skill 检索，`EVOAGENT_RETRIEVAL_BACKEND=hybrid` 开启混合检索，`EVOAGENT_MEMORY_RETRIEVAL_ENABLED=true` 开启已确认记忆注入；新链路要求快照 v2。旧活动配置不自动改写，配置不兼容时拒绝恢复。
-
-模块 8 使用锁定的官方 `mcp==1.30.0` SDK，项目接受协议 `2025-11-25`，支持受信 stdio fixture 和预设 Streamable HTTP 端点；发现结果不会自动进入模型工具列表。部署、API 和测试边界见[MCP 运行说明](docs/阶段四-模块8验收与运行说明.md)，源码见[手册第 74～77 章](docs/EvoAgent-源码讲解与学习手册.md)。升级需安装新增依赖并迁移到 `20260920_0008`。
-
-模块 9 通过统一 ToolExecutor 接入已审核并显式激活的 MCP 目录，支持动态参数验证、审批绑定、写入 UNKNOWN 和安全卸载。模块 9 的迁移为 `20260921_0009`；操作步骤见[模块 9 运行说明](docs/阶段四-模块9验收与运行说明.md)，详细源码见[手册第 78～81 章](docs/EvoAgent-源码讲解与学习手册.md)，设计取舍见[ADR-011](docs/ADR-011-MCP工具契约冻结与统一安全执行.md)。默认不启用执行，历史 Run 和 baseline/pinned 评测不自动增加 MCP 工具。
-
-模块 10 新增独立 sandbox-controller、固定 digest 容器规格、租约与取消清理、受控 Artifact 输入输出、MCP 容器 stdio，以及 web_fetch 的 DNS/IP 绑定。最新迁移为 `20260921_0010`；详见[模块 10 运行说明](docs/阶段四-模块10验收与运行说明.md)、[手册第 82～85 章](docs/EvoAgent-源码讲解与学习手册.md)和[ADR-012](docs/ADR-012-独立执行容器与受控网络出口.md)。Shell 默认关闭，无宿主 fallback；容器固定禁网。Windows 契约回归通过，并已在 Docker Desktop Linux Engine 中完成 11 项真实容器资源、网络、清理与文件边界验收。
-
-记忆提议、确认和归档操作见[模块 3～5 运行说明](docs/阶段四-模块3至5验收与运行说明.md)。Redis 已在模块 11 实现，Memory 管理前端已在模块 13 接入，使用步骤见[页面运行说明](docs/阶段四-模块13验收与运行说明.md)。
-
-## 环境要求
-
-- Python 3.12 或 3.13
-- Node.js 24 与 pnpm 11（只在开发或构建管理前端时需要）
-
-## 本地安装
-
-Windows PowerShell：
+需要 Python 3.12/3.13 与 Docker（含 Compose v2），以及一个支持 tool calling 的 OpenAI-compatible 模型服务。
 
 ```powershell
+# 1. 安装项目（Windows PowerShell；macOS/Linux 把 .venv\Scripts 换成 .venv/bin）
 py -3.13 -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
+
+# 2. 建私有配置并填写 Key / Base URL / 模型名 / 模型实际上下文窗口
+Copy-Item .env.personal.example .env.personal
+
+# 3. 本地检查（不访问远端、不消耗额度）
+.\.venv\Scripts\python.exe scripts/personal_preflight.py
+docker compose -f docker-compose.yml -f deploy/personal/compose.yml config --quiet
+
+# 4. 启动并打开 http://127.0.0.1:8000/ui/
+docker compose -p evoagent-personal -f docker-compose.yml -f deploy/personal/compose.yml up -d --build --wait
 ```
 
-macOS/Linux：
+关闭时用相同的项目名和两个 Compose 文件执行 `down`（**不要**加 `-v`，否则会删除会话、任务与 Workspace）：
 
-```bash
-python3 -m venv .venv
-./.venv/bin/python -m pip install -e ".[dev]"
+```powershell
+docker compose -p evoagent-personal -f docker-compose.yml -f deploy/personal/compose.yml down
 ```
 
-## 运行检查
+首条任务、验收条件、错误码排障与可选能力见[个人模式操作手册](docs/个人模式操作手册.md)。
 
-```bash
-ruff check .
-ruff format --check .
-pytest
-```
-
-## 运行
-
-先用不需要 API Key 的演示模式验证完整链路：
+只想离线看完整链路时，不需要任何 API Key：
 
 ```powershell
 .\.venv\Scripts\evoagent --demo --show-events
 ```
 
-默认 CLI 配置使用 `mock` Provider。也可以直接提交一个任务：
+不配置真实模型的完整环境（Mock 演示）仍然可用，但属于离线/开发用途，不作为当前推荐入口：
 
 ```powershell
-.\.venv\Scripts\evoagent "介绍一下当前项目"
+docker compose up --build          # Mock Provider，网页入口 http://127.0.0.1:8000/ui/
+.\.venv\Scripts\evoagent-worker    # 或单独运行 API/Worker/Eval Worker
 ```
 
-若要连接真实模型服务，复制 `.env.example` 为 `.env`，将 Provider 改为 `openai_compatible`，并填写 API Key、Base URL、模型名及核对过的 `EVOAGENT_CONTEXT_WINDOW_TOKENS`。当前适配的是 OpenAI-compatible `/chat/completions` 流式接口，不自动重试。
+阶段三的确定性 Skill 生命周期演示、阶段四的演示与发布证据门禁脚本见[归档索引](docs/archive/README.md)中对应的模块说明；这些命令针对专用测试库，不要指向日常数据。
 
-内置工具包括：
-
-- `calculator`：受限算术表达式计算；
-- `file_read`：只允许读取 Workspace 内的 UTF-8 普通文件；
-- `web_fetch`：只读取公开 HTTP/HTTPS 文本资源，并限制重定向、超时和响应大小。
-- `file_write`：原子写入当前 Run 的受控目录，覆盖操作需要审批；
-- `web_search`：通过可替换 SearchProvider 搜索，默认 Mock，可选 Brave；
-- `ask_user`：通过数据库审批流暂停并取得用户答复；
-- `shell`：默认关闭；显式配置 argv 可执行文件白名单后才可使用。
-- `artifact_write`：只创建当前 Run 的新 Artifact，不允许覆盖同名文件。
-
-普通 Task 可选择 `baseline` 或默认的 `retrieval` 运行模式。`pinned_skill` 不向普通 Task API 开放，只允许内部 EvalCoordinator 做配对评测。候选提炼入口为 `/api/v1/skills/extractions`；当配置 `EVOAGENT_SKILL_EXTRACTOR_MODEL` 时使用真实 OpenAI-compatible 模型，否则应用不会假装已经完成模型提炼。
-
-## 阶段四模块 0～2
-
-Worker 已接通自动恢复，使用启动唯一身份和租约 epoch 保护运行记录写入。默认每轮按 `bounded` 策略检查上下文：输入包含工具 Schema，输出预留实际传给 Provider，只裁剪显式可选资料；受保护内容超限时停止请求。
-
-升级前停掉所有旧 Worker，执行 `alembic upgrade head`，再启动同版本 API/Worker。不能混跑不检查 epoch 的旧进程。预算、计数器或代码版本变化会拒绝恢复不兼容 Run。
-
-窗口配置、`legacy` 兼容模式、进程故障测试与未完成的环境验收见[阶段四模块 0～2 验收与运行说明](docs/阶段四-模块0至2验收与运行说明.md)。真实兼容服务当前使用标记为 `estimated` 的计数；严格模式会拒绝未验证计数器。摘要、Memory、MCP 和 Redis 的后续实现见各模块说明；用户场景联合验收仍按补完计划执行。
-
-## 阶段四模块 3～5
-
-持久化 Worker 默认采用 v2 快照，支持受限历史摘录、完整工具输出归档与 `artifact_read`。Session 消息有稳定序号和固定历史截止点；长期记忆支持原话提议、人工确认、拒绝、撤销、有效期与词法查询。
-
-归档和正文清理使用持久化维护任务，由现有 Worker 消费。删除接口返回 `maintenance_job_id`，可查询处理状态并重试失败任务。默认无需额外模型；可选 `EVOAGENT_MEMORY_EXTRACTOR_MODEL` 只生成待确认候选。操作示例、升级步骤和遗忘范围见[模块 3～5 运行说明](docs/阶段四-模块3至5验收与运行说明.md)。
-
-## 阶段三完整演示
-
-先导入并冻结仓库内的 24 条 TRAIN/HOLDOUT 数据集：
+## 运行检查
 
 ```powershell
-.\.venv\Scripts\evoagent-eval-dataset open-source-research-v1.json --freeze
+ruff check .
+ruff format --check .
+pytest
 ```
 
-如果想从一个全新数据库观察完整生命周期，可准备一个空数据库并执行：
+前端（仅在开发或构建管理页面时需要 Node.js 24 与 pnpm 11）：在 `frontend/` 下执行 `pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm e2e`。
+
+文档相对链接检查（移动或重命名文档后必跑）：
 
 ```powershell
-.\.venv\Scripts\alembic upgrade head
-.\.venv\Scripts\evoagent-phase3-demo
+.\.venv\Scripts\python.exe scripts/check_doc_links.py .
 ```
 
-演示是确定性的，不消耗模型 API：它会让第一个候选通过并发布，让一个正确性回退候选被拒绝，再发布新版并回滚，最后证明普通 RETRIEVAL Task 只能命中回滚后的 ACTIVE 版本。演示会写数据库和 Artifact，因此建议使用专门的本地演示数据库。
+## 文档导航
 
-阶段三在本地运行时共有三个后台/前台进程：
+| 你的问题 | 看这份 |
+| --- | --- |
+| 怎么运行、怎么发第一条任务 | [个人模式操作手册](docs/个人模式操作手册.md) |
+| 现在能做什么、什么已经真实验证 | [当前状态](docs/当前状态.md) |
+| 接下来做什么、验收门槛 | [个人通用 Agent 当前实现计划](docs/EvoAgent-项目设计与分阶段实现计划.md) |
+| 全部文档怎么找 | [docs/README](docs/README.md) |
+| 源码怎么读 | [源码地图](docs/源码地图.md) → [手册总目录](docs/manual/00-总览与目录.md) |
+| 技术取舍为什么这样定 | [ADR 索引](docs/adr/README.md) |
+| 真实评测与故障实验的结论 | [评测索引](docs/evaluations/README.md)、[证据索引](docs/reports/README.md) |
+| 阶段一至四当时怎么设计与验收 | [归档索引](docs/archive/README.md) |
 
-```powershell
-.\.venv\Scripts\evoagent-api
-.\.venv\Scripts\evoagent-worker
-.\.venv\Scripts\evoagent-eval-worker
-```
-
-普通 Worker 执行 Task；Eval Worker 只协调实验租约、成对顺序和验证收尾。构建 `frontend/` 后，管理界面位于 `http://127.0.0.1:8000/ui/`，OpenAPI 仍位于 `/docs`。评测报告必须通过 `POST /api/v1/eval-experiments/{id}/finalize` 显式冻结和执行门禁，GET 报告接口不会修改状态。
-
-前端开发检查：
-
-```powershell
-cd frontend
-pnpm install --frozen-lockfile
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm e2e
-```
-
-## 阶段二数据库
-
-安装 Docker 后，可以一条命令启动 PostgreSQL、迁移、API 和单 Worker：
-
-```powershell
-docker compose up --build
-```
-
-也可以只启动本地 PostgreSQL，再分别运行进程：
-
-```powershell
-docker compose up -d postgres
-$env:EVOAGENT_DATABASE_URL="postgresql+asyncpg://evoagent:evoagent@127.0.0.1:5432/evoagent"
-.\.venv\Scripts\alembic upgrade head
-```
-
-启动 API：
-
-```powershell
-.\.venv\Scripts\evoagent-api
-```
-
-启动普通 Worker：
-
-```powershell
-.\.venv\Scripts\evoagent-worker
-```
-
-启动评测协调 Worker：
-
-```powershell
-.\.venv\Scripts\evoagent-eval-worker
-```
-
-打开 `http://127.0.0.1:8000/docs` 查看 OpenAPI，打开 `http://127.0.0.1:8000/viewer` 查看 Trace。Task API 只负责提交和控制任务；后台执行由 `JobWorker` 完成，不会在 HTTP 请求中运行 Agent。Worker 的默认 Mock 模式会离线执行“搜索—生成 report.md—最终回答”闭环。事件流位于 `/api/v1/tasks/{task_id}/events`，完整运行记录位于 `/api/v1/runs/{run_id}/trace`。
-
-SQLite 只用于本地快速测试；PostgreSQL 迁移、跨连接事件序号和 Worker 租约竞争由 CI 及 Docker Desktop 中的真实 PostgreSQL 服务验证。
-
-详细设计见：
-
-- `docs/EvoAgent-项目设计与分阶段实现计划.md`
-- `docs/阶段一-可测试Agent内核架构与实现指南.md`
-- `docs/阶段二-可靠可追踪任务执行架构与实现指南.md`
-- `docs/阶段二-安全边界.md`
-- `docs/阶段二-演示与故障注入.md`
-- `docs/阶段三-可验证Skill生命周期架构与实现指南.md`
-- `docs/阶段三-演示与安全边界.md`
-- [阶段四：记忆、检索与协议扩展架构与实现指南](docs/阶段四-记忆检索与协议扩展架构与实现指南.md)
-- `docs/ADR-006-配对评测硬门禁与人工发布.md`
-- `docs/ADR-007-租约隔离与请求上下文预算.md`
-- `docs/阶段四-模块0至2验收与运行说明.md`
-- `docs/开发进度与决策记录.md`
-- `docs/EvoAgent-源码讲解与学习手册.md`
-
-
-## 阶段四收尾验收
-
-```powershell
-# 先按模块 14 说明启动专用 PostgreSQL/Redis 测试环境；不要使用业务库。
-.venv\Scripts\python.exe scripts/phase4_demos.py --output output/phase4-demos.json
-.venv\Scripts\python.exe scripts/phase4_release_check.py
-```
-
-上述是模块 14 当时冻结的交付清单：第二条命令对该历史 manifest 预期退出 2，因为其中 `real_embedding` 仍为 pending；后续真实 Embedding 实验已另行记录，但尚未重新制作完整发布清单。`--allow-pending` 只审计已有证据，不改变 `release_ready=false`。当次后端全量 408 passed/13 skipped，新增证据门禁两项另行通过；Linux Docker 11 项、前端组件 12 项/浏览器 6 项通过。真实算术 Skill 12 对均可比，两臂各 11/12，无安全回归；保留 Unicode 负号导致的字面验证失败，不宣称成功率提升。最新能力与缺口见[整体 Agent 能力核查](docs/整体Agent能力核查-2026-09-26.md)。
+页面、Trace、审批与失败恢复的展示语义见[运行模式与任务验收条件](docs/Agent运行模式与任务验收条件-2026-09-26.md)；真实任务评测与失败样本见[质量评测](docs/evaluations/Agent真实任务质量评测-2026-09-26.md)和[整体能力核查](docs/evaluations/整体Agent能力核查-2026-09-26.md)。

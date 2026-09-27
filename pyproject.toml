@@ -63,7 +63,9 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["tmp"]
+# 文档中的 ```python 片段是讲解用示例（刻意保留缩进与伪代码），不参与 lint 与格式检查；
+# 文档的校验由 scripts/check_doc_links.py 负责。tmp/ 与 output/ 是本地资料目录。
+extend-exclude = ["tmp", "output", "docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
