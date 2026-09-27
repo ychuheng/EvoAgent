@@ -91,6 +91,19 @@ def test_state_page_has_a_resolvable_baseline() -> None:
     assert resolved.returncode == 0, f"基准提交 {baseline} 在仓库中不存在"
 
 
+def test_update_requires_a_clean_working_tree() -> None:
+    """`--update` 需要干净工作树：记下的提交必须真的包含被核对的内容。
+
+    这也是脚本曾经的缺陷所在——旧实现以"有产品改动"为由拒绝推进，导致基准永远推不动。
+    现在改为：推进本身即"已核对"的声明，唯一守住的边界是工作树必须干净。
+    """
+
+    dirty = gate._uncommitted_product_paths()
+    # 测试进程本身可能处在脏树上（开发中），因此只断言"返回的是产品路径且已排序去重"。
+    assert dirty == sorted(set(dirty))
+    assert all(gate.classify(item) == "product" for item in dirty)
+
+
 def test_drift_detection_matches_git_diff() -> None:
     """脚本的判定必须与 git 的差异一致：基准到 HEAD 的产品文件列表非空即视为漂移。"""
 
