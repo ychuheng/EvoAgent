@@ -12,6 +12,7 @@ EXPECTED_TABLES = {
     "runtime_experiments",
     "runtime_eval_runs",
     "sandbox_executions",
+    "spend_records",
     "mcp_servers",
     "mcp_catalogs",
     "mcp_tool_reviews",

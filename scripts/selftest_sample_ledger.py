@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -58,6 +59,23 @@ def audit_with(rows: list[dict], *, retired: tuple[str, ...] = ()) -> ledger.Aud
         for number, item in enumerate(rows, start=1):
             item["_line"] = number
         ledger.check_run_ledger(rows, by_id, audit)
+        return audit
+    finally:
+        ledger.MANIFEST.write_text(original, encoding="utf-8")
+
+
+def audit_review(update) -> ledger.Audit:
+    """改一条 fixture 人审记录后跑结构检查，用于验证抽查完成度校验真的生效。"""
+
+    original = ledger.MANIFEST.read_text(encoding="utf-8")
+    try:
+        document = json.loads(original)
+        update(document["fixture_reviews"]["ledger-holdout"])
+        ledger.MANIFEST.write_text(
+            json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        audit = ledger.Audit()
+        ledger.check_manifest(json.loads(ledger.MANIFEST.read_text(encoding="utf-8")), audit)
         return audit
     finally:
         ledger.MANIFEST.write_text(original, encoding="utf-8")
@@ -140,6 +158,30 @@ CASES: list[tuple[str, list[dict], tuple[str, ...], str]] = [
 ]
 
 
+REVIEW_CASES: list[tuple[str, Callable[[dict], object], str]] = [
+    (
+        "抽查记录缺少 reviewer_role",
+        lambda review: review.pop("reviewer_role", None),
+        "reviewer_role",
+    ),
+    (
+        "抽查记录缺少抽查维度",
+        lambda review: review.pop("reviewed_scope", None),
+        "reviewed_scope",
+    ),
+    (
+        "抽查完成数与维度数不一致",
+        lambda review: review.update({"review_scope_total": 99}),
+        "review_scope_total",
+    ),
+    (
+        "自审不得伪装成第三方",
+        lambda review: review.update({"reviewer_role": "somebody_else"}),
+        "reviewer_role",
+    ),
+]
+
+
 def main() -> int:
     failed = 0
     for title, rows, retired, expected in CASES:
@@ -150,7 +192,16 @@ def main() -> int:
             failed += 1
             print("  期望包含：" + (expected or "（无错误）"))
             print("  实际错误：" + ("；".join(audit.errors) or "（无错误）"))
-    print(f"自检结束：{len(CASES) - failed}/{len(CASES)} 通过")
+    for title, update, expected in REVIEW_CASES:
+        audit = audit_review(update)
+        ok = any(expected in message for message in audit.errors)
+        print(f"[{'通过' if ok else '失败'}] {title}")
+        if not ok:
+            failed += 1
+            print("  期望包含：" + expected)
+            print("  实际错误：" + ("；".join(audit.errors) or "（无错误）"))
+    total = len(CASES) + len(REVIEW_CASES)
+    print(f"自检结束：{total - failed}/{total} 通过")
     return 1 if failed else 0
 
 

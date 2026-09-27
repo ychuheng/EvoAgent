@@ -295,6 +295,43 @@ class RunRecord(Base):
     )
 
 
+class SpendRecord(Base):
+    """M0c 付费账本：逐次记录 token 用量与费用（微元），按 scope 分账。
+
+    只追加、不覆盖：报告可以按 scope 与 Task 求和核对，避免"只报告便宜的成功样本"。
+    """
+
+    __tablename__ = "spend_records"
+    __table_args__ = (
+        CheckConstraint("input_tokens >= 0", name="input_tokens_non_negative"),
+        CheckConstraint("output_tokens >= 0", name="output_tokens_non_negative"),
+        CheckConstraint("cost_micros >= 0", name="cost_micros_non_negative"),
+        Index("ix_spend_scope_created", "scope", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    scope: Mapped[str] = mapped_column(String(32))
+    task_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="RESTRICT"), index=True
+    )
+    run_id: Mapped[UUID | None] = mapped_column(Uuid)
+    provider: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(256))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_micros: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    input_price_micros_per_million: Mapped[int | None] = mapped_column(Integer)
+    output_price_micros_per_million: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+@event.listens_for(SpendRecord, "before_update")
+def protect_spend_record(_mapper, _connection, _record):
+    """付费账本写入后不可改写。"""
+
+    raise ValueError("spend records are append-only")
+
+
 class TurnRecord(Base):
     __tablename__ = "turns"
     __table_args__ = (

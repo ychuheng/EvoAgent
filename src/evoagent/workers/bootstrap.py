@@ -27,6 +27,7 @@ from evoagent.providers.mock import MockProvider
 from evoagent.providers.openai_compatible import OpenAICompatibleProvider
 from evoagent.retrieval.embeddings import provider_from_settings
 from evoagent.retrieval.indexing import IndexService
+from evoagent.runtime.budget import BudgetScope
 from evoagent.runtime.persistent_runner import PersistentAgentRunner
 from evoagent.sandbox.client import ControllerExecutor, DisabledSandboxExecutor
 from evoagent.tasks.lease import JobLease, JobLeaseManager, TaskExecutionResult
@@ -52,7 +53,7 @@ from evoagent.tools.registry import ToolRegistry
 from evoagent.tools.sandbox import RunSandbox
 from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
 from evoagent.workers.main import JobWorker
-from evoagent.workers.rate_limit import GatedProvider, ServiceGate
+from evoagent.workers.rate_limit import BudgetedProvider, GatedProvider, ServiceGate
 from evoagent.workers.wakeup import Wakeup, redis_client
 
 
@@ -166,6 +167,18 @@ class ConfiguredTaskHandler:
                 await LeaseGuard(lease).check(session)
 
         gated = GatedProvider(provider, self._gate, f"model:{self._settings.model}", check)
+        # Mock Provider 不产生真实费用，因此不经过预算闸门；付费路径才需要额度。
+        if self._settings.provider is not ProviderName.MOCK:
+            gated = BudgetedProvider(
+                gated,
+                settings=self._settings,
+                session_factory=self._database.session_factory,
+                scope=self._budget_scope(),
+                task_id=lease.task_id,
+                run_id=lease.run_id,
+                provider_name=self._settings.provider.value,
+                model=expected_model,
+            )
         search_provider = self._search_provider()
         web_fetch = WebFetchTool(URLGuard(), timeout_seconds=self._settings.tool_timeout_seconds)
         artifact_service = ArtifactService(
@@ -231,6 +244,12 @@ class ConfiguredTaskHandler:
                 await close_search()
             if isinstance(provider, OpenAICompatibleProvider):
                 await provider.aclose()
+
+    def _budget_scope(self) -> BudgetScope:
+        """试跑与正式分账：由维护者显式选择，默认为正式（额度更严的那一个）。"""
+
+        raw = self._settings.budget_scope.strip().lower()
+        return BudgetScope.TRIAL if raw == BudgetScope.TRIAL.value else BudgetScope.FORMAL
 
     def _project_tools(self, project):
         """装配项目工具；没有绑定项目时不提供任何项目工具。

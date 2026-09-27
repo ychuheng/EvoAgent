@@ -274,19 +274,27 @@ FIXTURE_SOURCES = {
 # 人审记录（计划 §5.5 要求预注册时人工抽查模板/解法/内容相似度并记录抽查人、结论和排除项）。
 # 结论 "independent_distinct" 表示：与 dev fixture 的模板、解法与内容不重叠，无共用答案；
 # 若发现重叠，改用 "independent_with_exclusions" 并把每项写进 excluded。
+# `reviewer_role` 区分自审与第三方：计划 §5.4 要求 M6 的较强结论另留 ≥20% 给未参与实现的人复核，
+# 因此这里必须如实标注"抽查人也是实现者"，不能让自审看起来像独立复核。
+# `reviewed_scope` / `review_scope_total` 记录**抽查完成度**：覆盖了哪些维度、共需覆盖多少项。
+REVIEW_DIMENSIONS = ("task_template", "solution_approach", "fixture_content")
 REVIEWS = {
     "ledger-holdout": {
         "reviewer": "local-maintainer",
+        "reviewer_role": "implementer_self_review",
         "verdict": "independent_distinct",
         "excluded": (),
         "checked_against": "evals/fixtures/project-dev-notes",
+        "reviewed_scope": list(REVIEW_DIMENSIONS),
         "note": "不同领域（账本 vs 笔记）、不同模块划分与不同测试；无共用标识符或答案。",
     },
     "beacon-holdout": {
         "reviewer": "local-maintainer",
+        "reviewer_role": "implementer_self_review",
         "verdict": "independent_distinct",
         "excluded": (),
         "checked_against": "evals/fixtures/project-dev-notes, evals/fixtures/ledger-holdout",
+        "reviewed_scope": list(REVIEW_DIMENSIONS),
         "note": "采集管线领域；与 dev（笔记）和 M6（账本）在模块、函数名与答案上均不重叠。",
     },
 }
@@ -465,6 +473,8 @@ def main() -> int:
             **record,
             # tuple 会在 JSON 往返后退化为 list，这里统一成 list 以保证再生成幂等。
             "excluded": list(record["excluded"]),
+            "reviewed_scope": list(record["reviewed_scope"]),
+            "review_scope_total": len(REVIEW_DIMENSIONS),
             "fixture_hash": hashes[name],
             "reviewed_hash": reviewed_hash(
                 FIXTURES / name,

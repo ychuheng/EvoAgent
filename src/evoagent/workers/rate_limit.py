@@ -89,3 +89,70 @@ class GatedProvider:
         async with self.gate.acquire(self.service, self.check):
             async for event in self.provider.stream(request):
                 yield event
+
+
+class BudgetedProvider:
+    """在付费模型调用前后执行 M0c 预算闸门。
+
+    - **调用前**：查该 scope 与 Task 的累计花费；额度或价格假设未填、或已达停止阈值即拒绝，
+      因此默认配置（全未填）下付费路径是关闭的。
+    - **调用后**：按 provider 上报的 usage 记账；金额为微元整数，逐次留痕。
+
+    依赖由装配方（Worker bootstrap）注入，这里不假设 provider 暴露额外属性。
+    """
+
+    def __init__(
+        self,
+        provider,
+        *,
+        settings,
+        session_factory,
+        scope,
+        task_id,
+        run_id,
+        provider_name: str,
+        model: str,
+    ):
+        self.provider = provider
+        self.settings = settings
+        self.session_factory = session_factory
+        self.scope = scope
+        self.task_id = task_id
+        self.run_id = run_id
+        self.provider_name = provider_name
+        self.model = model
+
+    async def stream(self, request):
+        from evoagent.providers.base import ProviderEventType
+        from evoagent.runtime.budget import (
+            BudgetExceededError,
+            evaluate_budget,
+            limits_from_settings,
+            record_spend,
+        )
+
+        async with self.session_factory() as session:
+            status = await evaluate_budget(
+                session, self.settings, scope=self.scope, task_id=self.task_id
+            )
+        if not status.allowed:
+            raise BudgetExceededError(status.reason)
+        limits = limits_from_settings(self.settings, self.scope)
+
+        usage = None
+        async for event in self.provider.stream(request):
+            if event.type is ProviderEventType.USAGE and event.usage is not None:
+                usage = event.usage
+            yield event
+        if usage is not None:
+            await record_spend(
+                self.session_factory,
+                scope=self.scope,
+                task_id=self.task_id,
+                run_id=self.run_id,
+                provider=self.provider_name,
+                model=self.model,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                limits=limits,
+            )

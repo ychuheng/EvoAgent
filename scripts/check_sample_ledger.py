@@ -230,9 +230,25 @@ def check_manifest(manifest: dict, audit: Audit) -> dict[str, dict]:
         if not isinstance(review, dict):
             audit.error(f"fixture_reviews.{name} 必须是对象")
             continue
-        for field in ("reviewer", "verdict", "checked_against", "note"):
+        for field in ("reviewer", "verdict", "checked_against", "note", "reviewer_role"):
             if not isinstance(review.get(field), str) or not review[field].strip():
                 audit.error(f"fixture_reviews.{name}: 缺少 {field}")
+        role = review.get("reviewer_role")
+        if role not in {"implementer_self_review", "third_party"}:
+            audit.error(
+                f"fixture_reviews.{name}: reviewer_role 必须是 implementer_self_review "
+                "或 third_party（自审不能看起来像独立复核）"
+            )
+        if role == "implementer_self_review":
+            audit.note(f"fixture_reviews.{name}: 属自审，M6 较强结论仍需第三方复核预留样本")
+        # 抽查完成度：覆盖维度必须齐，且总数与记录的完成数一致。
+        scope = review.get("reviewed_scope")
+        if not isinstance(scope, list) or not scope:
+            audit.error(f"fixture_reviews.{name}: 缺少 reviewed_scope（抽查了哪些维度）")
+        else:
+            total = review.get("review_scope_total")
+            if not isinstance(total, int) or total != len(scope):
+                audit.error(f"fixture_reviews.{name}: review_scope_total 与 reviewed_scope 不一致")
         excluded = review.get("excluded")
         if not isinstance(excluded, list):
             audit.error(f"fixture_reviews.{name}: excluded 必须是数组")

@@ -112,6 +112,22 @@ class Settings(BaseSettings):
     # 产物下载上限：超过即拒绝导出，不把"下载"变成绕过上下文预算读任意文件的通道。
     artifact_download_max_bytes: int = Field(default=16_777_216, ge=1_024, le=268_435_456)
 
+    # M0c 数值预算闸门。金额为"微元"整数，避免浮点误差；**默认全为 None 表示未填数值**，
+    # 未填时任何付费模型调用都会被拒绝 —— 计划要求"未填数值不得启动正式评测"。
+    # 试跑上限必须在首次付费试跑前填写；正式额度在试跑实测单任务费用后填写。
+    budget_trial_limit_micros: int | None = Field(default=None, ge=0)
+    budget_total_limit_micros: int | None = Field(default=None, ge=0)
+    budget_milestone_limits_micros: dict[str, int] = Field(default_factory=dict)
+    # 每 Task 限额：0 表示每个 Task 都不允许付费调用（等价于关闭付费路径）。
+    budget_task_limit_micros: int | None = Field(default=None, ge=0)
+    # 价格假设：每百万 token 的微元单价；未填时无法计算费用，付费调用同样被拒绝。
+    budget_input_price_micros_per_million: int | None = Field(default=None, ge=0)
+    budget_output_price_micros_per_million: int | None = Field(default=None, ge=0)
+    # 停止阈值：已花费达到上限的这个比例时停止开始新调用（默认 100% = 触及上限才停）。
+    budget_stop_ratio: float = Field(default=1.0, gt=0, le=1.0)
+    # 付费分账：`trial` 走试跑额度，其余走正式额度；试跑不会挤占正式额度。
+    budget_scope: Literal["trial", "formal"] = "formal"
+
     search_provider: Literal["mock", "brave", "ddgs"] = "mock"
     search_api_key: SecretStr | None = None
 

@@ -130,14 +130,18 @@
 
 | 项 | `ledger-holdout` | `beacon-holdout` |
 | --- | --- | --- |
-| 抽查人 | `local-maintainer`（也是实现者，属**自审**） | `local-maintainer`（同上） |
+| 抽查人 | `local-maintainer` | `local-maintainer` |
+| 抽查人角色 | `implementer_self_review`（**自审**：抽查人也是实现者） | `implementer_self_review`（同上） |
 | 抽查对象 | 任务模板、解法、内容相似度 | 任务模板、解法、内容相似度 |
+| 抽查完成度 | `reviewed_scope` = `task_template`/`solution_approach`/`fixture_content`，3/3 | 同上，3/3 |
 | 对照对象 | `evals/fixtures/project-dev-notes` | `project-dev-notes`、`ledger-holdout` |
 | 结论 | `independent_distinct` | `independent_distinct` |
 | 排除项 | 无 | 无 |
 | 记录哈希 | `reviewed_hash` = `4bd418e96834a7fd3f2d2b6e30b23cfa2f39321c8a704653efc63f53f7789e18` | `reviewed_hash` = `7ec8b0ba8ee3f1d2052aa0c8722f5bd58856571dfc7a0694c88a43c9e540913d` |
 
-**限制说明**：抽查人同时是实现者，因此这只是**自审**，不能替代第三方独立复核。
+**限制说明**：`reviewer_role` 明确写成 `implementer_self_review`，因此这只是**自审**，
+不能替代第三方独立复核。台账检查脚本会拒绝把自审标成 `third_party`，并拒绝缺少
+`reviewer_role` 或 `reviewed_scope` 的抽查记录。
 M6 若要提出较强的收益结论，必须另找未参与实现的人复核至少 20% 的样本，见下节。
 
 ## 5. 第三方独立复核的预留

@@ -10,19 +10,33 @@
   "fixture_reviews": {
     "ledger-holdout": {
       "reviewer": "local-maintainer",
+      "reviewer_role": "implementer_self_review",
       "verdict": "independent_distinct",
       "excluded": [],
       "checked_against": "evals/fixtures/project-dev-notes",
+      "reviewed_scope": [
+        "task_template",
+        "solution_approach",
+        "fixture_content"
+      ],
       "note": "不同领域（账本 vs 笔记）、不同模块划分与不同测试；无共用标识符或答案。",
+      "review_scope_total": 3,
       "fixture_hash": "a25d9a8ce1b0b5fcf08cb4d91d106409b5fd3f86f47357ce4735d2f9ea0bd9b7",
       "reviewed_hash": "4bd418e96834a7fd3f2d2b6e30b23cfa2f39321c8a704653efc63f53f7789e18"
     },
     "beacon-holdout": {
       "reviewer": "local-maintainer",
+      "reviewer_role": "implementer_self_review",
       "verdict": "independent_distinct",
       "excluded": [],
       "checked_against": "evals/fixtures/project-dev-notes, evals/fixtures/ledger-holdout",
+      "reviewed_scope": [
+        "task_template",
+        "solution_approach",
+        "fixture_content"
+      ],
       "note": "采集管线领域；与 dev（笔记）和 M6（账本）在模块、函数名与答案上均不重叠。",
+      "review_scope_total": 3,
       "fixture_hash": "58b08bee50245ab04990384f1010e598b26eaa21e37a9cf5ae1550fe64be52e9",
       "reviewed_hash": "7ec8b0ba8ee3f1d2052aa0c8722f5bd58856571dfc7a0694c88a43c9e540913d"
     }

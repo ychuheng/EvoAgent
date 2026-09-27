@@ -251,6 +251,39 @@ def create_app(
             ),
         )
 
+    @app.get("/api/v1/budget-status", tags=["runtime"])
+    async def budget_status() -> dict:
+        """M0c 闸门状态：额度、价格假设与停止阈值是否已填、当前花费多少。
+
+        未填数值时正式评测不会启动；页面与预检据此提示"还差什么"，而不是等到付费调用才失败。
+        """
+
+        from evoagent.runtime.budget import BudgetScope, evaluate_budget, limits_from_settings
+
+        scope = (
+            BudgetScope.TRIAL
+            if resolved_settings.budget_scope == BudgetScope.TRIAL.value
+            else BudgetScope.FORMAL
+        )
+        limits = limits_from_settings(resolved_settings, scope)
+        async with resolved_database.session_factory() as session:
+            status = await evaluate_budget(session, resolved_settings, scope=scope)
+        return {
+            "scope": scope.value,
+            "allowed": status.allowed,
+            "reason": status.reason,
+            "limit_micros": status.limit_micros,
+            "spent_micros": status.spent_micros,
+            "stop_threshold_micros": status.stop_threshold_micros,
+            "task_limit_micros": status.task_limit_micros,
+            "priced": limits.priced,
+            "trial_limit_configured": resolved_settings.budget_trial_limit_micros is not None,
+            "total_limit_configured": resolved_settings.budget_total_limit_micros is not None,
+            "note": (
+                "本接口只报告闸门状态，不返回任何密钥。未填额度或价格假设时，付费模型调用会被拒绝。"
+            ),
+        }
+
     @app.get(
         "/health/ready",
         response_model=HealthResponse,
