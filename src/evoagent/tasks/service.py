@@ -217,6 +217,9 @@ class TaskService:
             if task.status in (TaskStatus.RUNNING, TaskStatus.WAITING_TOOL):
                 task.cancel_requested = True
                 task.lock_version += 1
+                # I-04：取消必须立刻把等待中的审批结清，不能留下悬空的待办，
+                # 否则页面会一直显示"等待决定"，而任务其实已经在收尾。
+                await self._cancel_pending_approvals(unit, task.id)
                 await unit.events.append(
                     run_id=run.id,
                     event_type="task.cancel_requested",
@@ -278,15 +281,7 @@ class TaskService:
             except (ConcurrentUpdateError, ValueError) as error:
                 raise TaskOperationConflictError(str(error)) from error
             if task_target is TaskStatus.CANCELLED:
-                approvals = await unit.session.scalars(
-                    select(ToolApprovalRecord).where(
-                        ToolApprovalRecord.task_id == task.id,
-                        ToolApprovalRecord.status == ApprovalStatus.PENDING,
-                    )
-                )
-                for approval in approvals:
-                    approval.status = ApprovalStatus.CANCELLED
-                    approval.decided_at = datetime.now(UTC)
+                await self._cancel_pending_approvals(unit, task.id)
             await project_terminal(unit.session, task, run)
             await unit.events.append(
                 run_id=run.id,
@@ -296,3 +291,18 @@ class TaskService:
             )
             await unit.commit()
             return TaskAggregate(task=task, run=run)
+
+    @staticmethod
+    async def _cancel_pending_approvals(unit: UnitOfWork, task_id: UUID) -> None:
+        """把该 Task 下仍在等待的审批标为已取消，并记录决定时间。"""
+
+        approvals = await unit.session.scalars(
+            select(ToolApprovalRecord).where(
+                ToolApprovalRecord.task_id == task_id,
+                ToolApprovalRecord.status == ApprovalStatus.PENDING,
+            )
+        )
+        now = datetime.now(UTC)
+        for approval in approvals:
+            approval.status = ApprovalStatus.CANCELLED
+            approval.decided_at = now
