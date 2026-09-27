@@ -1,0 +1,19 @@
+# Overlay for a single-user localhost deployment with a real chat model.
+# The private .env.personal file is loaded by every process that may run model tasks.
+services:
+  api:
+    env_file: .env.personal
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible
+  worker:
+    env_file: .env.personal
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible
+  maintenance-worker:
+    env_file: .env.personal
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible
+  eval-worker:
+    env_file: .env.personal
+    environment:
+      EVOAGENT_PROVIDER: openai_compatible

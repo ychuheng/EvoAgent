@@ -53,6 +53,11 @@ def test_openai_compatible_provider_accepts_complete_configuration() -> None:
     assert settings.model == "example-model"
 
 
+def test_unknown_search_provider_cannot_silently_use_mock() -> None:
+    with pytest.raises(ValidationError, match="search_provider"):
+        Settings(_env_file=None, search_provider="brav")
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
