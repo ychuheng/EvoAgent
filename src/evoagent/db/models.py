@@ -205,6 +205,9 @@ class MessageRecord(Base):
     kind: Mapped[str] = mapped_column(String(32), default="legacy")
     content_hash: Mapped[str] = mapped_column(String(71))
     backfill: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # I-03：运行中补充的指令在下一个安全边界注入；注入时间非空表示它已经进入模型上下文，
+    # 因此之后不会重复注入，也不会篡改已经执行或审批中的动作。
+    injected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

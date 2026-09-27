@@ -129,6 +129,7 @@ class TaskCreateRequest(ApiModel):
     provider: str | None = Field(default=None, min_length=1, max_length=64)
     model: str | None = Field(default=None, min_length=1, max_length=256)
     run_mode: RunMode = RunMode.RETRIEVAL
+    project_id: UUID | None = None
 
     @field_validator("run_mode")
     @classmethod
@@ -169,6 +170,7 @@ class RunResponse(ApiModel):
 class TaskResponse(ApiModel):
     id: UUID
     session_id: UUID
+    project_id: UUID | None = None
     goal: str
     acceptance: AcceptanceSpec | None
     status: TaskStatus
@@ -177,6 +179,30 @@ class TaskResponse(ApiModel):
     created_at: datetime
     updated_at: datetime
     latest_run: RunResponse
+
+
+class InstructionCreateRequest(ApiModel):
+    """运行中补充的约束；不支持在终止态追加。"""
+
+    content: str = Field(min_length=1, max_length=20_000)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("补充内容不能为空")
+        return normalized
+
+
+class InstructionResponse(ApiModel):
+    id: UUID
+    task_id: UUID
+    content: str
+    session_sequence: int
+    created_at: datetime
+    # 非空表示它已经进入模型上下文；页面用它显示"已接受/已注入"。
+    injected_at: datetime | None = None
 
 
 class ApprovalDecisionRequest(ApiModel):

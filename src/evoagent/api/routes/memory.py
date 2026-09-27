@@ -63,6 +63,8 @@ async def messages(
                 "run_id": m.run_id,
                 "task_id": m.task_id,
                 "kind": m.kind,
+                # I-03：非空表示这条运行中约束已经进入模型上下文。
+                "injected_at": m.injected_at,
                 "created_at": m.created_at,
             }
             for m in rows

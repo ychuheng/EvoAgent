@@ -19,6 +19,7 @@ function projectStatusLabel(project: Project): string {
 }
 
 function displayMessage(message: ChatMessage): string {
+  if (message.kind === "instruction") return message.content;
   if (message.kind !== "terminal") return message.content;
   try {
     const failure = JSON.parse(message.content) as { status?: string; error_code?: string };
@@ -26,6 +27,16 @@ function displayMessage(message: ChatMessage): string {
     if (failure.status && failure.error_code) return `任务${taskStatusLabel[failure.status] ?? failure.status}：${errorLabel(failure.error_code)}`;
   } catch { /* Normal replies are plain text. */ }
   return message.content;
+}
+
+/** 运行中补充的约束只在"最后一个 goal 之后没有 terminal"时才有意义。 */
+function instructionTarget(messages: ChatMessage[]): string | null {
+  let lastGoal: string | null = null;
+  for (const message of messages) {
+    if (message.kind === "goal") lastGoal = message.task_id;
+    else if (message.kind === "terminal") lastGoal = null;
+  }
+  return lastGoal;
 }
 
 function unfinishedTask(messages: ChatMessage[]): string | null {
@@ -57,6 +68,8 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
   const [projectPath, setProjectPath] = useState("");
   const [projectName, setProjectName] = useState("");
   const [projectWritable, setProjectWritable] = useState(false);
+  const [instruction, setInstruction] = useState("");
+  const [instructionNotice, setInstructionNotice] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -221,6 +234,24 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     } catch (reason) { setError(failure(reason)); }
   }
 
+  async function sendInstruction() {
+    const content = instruction.trim();
+    const target = pendingTask ?? instructionTarget(messages);
+    if (!content || !target) return;
+    setError("");
+    try {
+      const created = await chat.addInstruction(target, content);
+      setInstruction("");
+      setInstructionNotice(
+        `已接受 ${new Date(created.created_at).toLocaleTimeString()}：它会在下一个模型/工具边界生效，不会改写已经执行或审批中的动作。`,
+      );
+      if (sessionId) setMessages(await chat.messages(sessionId));
+    } catch (reason) {
+      setInstructionNotice("");
+      setError(failure(reason));
+    }
+  }
+
   async function send(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const goal = draft.trim();
@@ -307,9 +338,10 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       {sessionId && <button type="button" className="chat-detail-button" onClick={() => onOpenMemory(sessionId)}>查看本会话记忆</button>}
       <div className="chat-history" role="log" aria-live="polite">
         {messages.length === 0 && <p className="state">输入问题开始对话。例如“你好，请介绍你能做什么”，或“用 calculator 计算 17 × 23”。消息会保存在当前 Session 中。</p>}
-        {messages.map((message) => <article className={`chat-bubble ${message.role}`} key={message.id}>
-          <small>{message.role === "user" ? "你" : "EvoAgent"}</small>
+        {messages.map((message) => <article className={`chat-bubble ${message.role} ${message.kind === "instruction" ? "instruction" : ""}`} key={message.id}>
+          <small>{message.kind === "instruction" ? (message.injected_at ? "运行中补充（已注入）" : "运行中补充（待注入）") : message.role === "user" ? "你" : "EvoAgent"}</small>
           <p>{displayMessage(message)}</p>
+          {message.kind === "instruction" && <small className="chat-meta">接受时间 {new Date(message.created_at).toLocaleTimeString()}{message.injected_at ? ` · 注入时间 ${new Date(message.injected_at).toLocaleTimeString()}` : " · 等待下一个模型/工具边界"}</small>}
           {message.task_id && <button type="button" className="chat-detail-button" onClick={() => setSelectedTask(message.task_id)}>{selectedTask === message.task_id ? "正在查看执行过程" : "查看执行过程"}</button>}
         </article>)}
         {pendingTask && <p role="status" className="state">{taskStatus === "waiting_user" ? "等待人工决定，请在下方处理。" : `Agent 正在处理… ${taskStatusLabel[taskStatus] ?? taskStatus}${progress.current ? ` · ${progress.current}` : ""}`}</p>}
@@ -336,6 +368,12 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
         </details>
         <div className="chat-actions"><small>Enter 发送 · Shift+Enter 换行</small><button disabled={!draft.trim() || sending || !!pendingTask}>{sending ? "提交中…" : "发送"}</button></div>
       </form>
+      {(pendingTask ?? instructionTarget(messages)) && <form className="chat-instruction" onSubmit={(event) => { event.preventDefault(); void sendInstruction(); }}>
+        <label htmlFor="chat-instruction-input">运行中补充约束（I-03）</label>
+        <p className="chat-meta">在当前任务执行期间追加约束；它会在下一个模型/工具边界生效，不会改写已经执行或等待审批的动作。要开始新任务，请直接用上面的输入框发送。</p>
+        <textarea id="chat-instruction-input" rows={2} value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="例如：只改 src/fieldnotes 下的模块，不要动测试" />
+        <div className="chat-actions"><small>{instructionNotice || "接受后会显示接受时间与注入时间。"}</small><button disabled={!instruction.trim()}>追加约束</button></div>
+      </form>}
     </section>
   </div>;
 }

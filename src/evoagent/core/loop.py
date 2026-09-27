@@ -34,6 +34,16 @@ class LoopCheckpointWriter(Protocol):
     async def save(self, state: LoopState) -> None: ...
 
 
+class InstructionProvider(Protocol):
+    """在模型/工具边界取走待注入的运行中指令。
+
+    返回内容会被追加为一条 user 消息；调用方负责保证"取走即标记"，
+    因此同一条指令不会在两个迭代里重复注入。
+    """
+
+    async def __call__(self) -> tuple[str, ...]: ...
+
+
 class AgentLoop:
     """重复调用模型和工具，直到得到答案或达到运行限制。"""
 
@@ -54,6 +64,7 @@ class AgentLoop:
         context_hash: str = "",
         context_policy: ContextPolicy | None = None,
         context_store=None,
+        instruction_provider: InstructionProvider | None = None,
     ) -> None:
         normalized_model = model.strip()
         if not normalized_model:
@@ -79,6 +90,7 @@ class AgentLoop:
         self._context_hash = context_hash
         self._context_policy = context_policy or LegacyContextPolicy()
         self._context_store = context_store
+        self._instruction_provider = instruction_provider
         self._context_revision_id = None
         self._history_before_sequence = 0
         self._config_hash = self._make_config_hash()
@@ -140,6 +152,28 @@ class AgentLoop:
                 return early_result
             first_iteration += 1
         for iteration in range(first_iteration, self._max_iterations + 1):
+            # I-03：运行中补充的指令只在迭代边界（模型/工具之间）注入，
+            # 因此不会篡改已经执行或正在审批中的动作。
+            if self._instruction_provider is not None:
+                pending = await self._instruction_provider()
+                for index, text in enumerate(pending, start=1):
+                    messages.append(
+                        Message(
+                            role=MessageRole.USER,
+                            content=(
+                                "运行中补充的约束（由用户在任务执行期间追加，"
+                                "从当前步骤起生效；不能改写已经完成或正在审批的动作）：\n" + text
+                            ),
+                        )
+                    )
+                    await self._event_sink.emit(
+                        EventType.INSTRUCTION_INJECTED,
+                        {
+                            "iteration": iteration,
+                            "index": index,
+                            "instruction_chars": len(text),
+                        },
+                    )
             request = ModelRequest(
                 messages=tuple(messages),
                 tool_definitions=self._registry.definitions(),

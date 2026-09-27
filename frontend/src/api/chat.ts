@@ -23,9 +23,10 @@ export type ChatMessage = {
   task_id: string | null;
   run_id: string | null;
   sequence: number;
-  kind: "goal" | "terminal";
+  kind: "goal" | "terminal" | "instruction";
   role: "user" | "assistant";
   content: string;
+  injected_at: string | null;
   created_at: string;
 };
 export type ChatTask = {
@@ -115,6 +116,18 @@ export const chat = {
     method: "POST", body: JSON.stringify({ session_id: sessionId, goal, acceptance: acceptance ?? null }),
   }),
   task: (taskId: string) => request<ChatTask>(`/tasks/${encodeURIComponent(taskId)}`),
+  addInstruction: (taskId: string, content: string) =>
+    request<{
+      id: string;
+      task_id: string;
+      content: string;
+      session_sequence: number;
+      created_at: string;
+      injected_at: string | null;
+    }>(`/tasks/${encodeURIComponent(taskId)}/instructions`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    }),
   trace: (runId: string) => request<TaskTrace>(`/runs/${encodeURIComponent(runId)}/trace`),
   cancel: (taskId: string) => request<ChatTask>(`/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST" }),
   decideApproval: (approvalId: string, decision: "approve" | "reject", response: string) =>

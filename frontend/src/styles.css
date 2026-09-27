@@ -80,6 +80,9 @@ textarea { font: inherit; width: 100%; resize: vertical; min-height: 5rem; borde
 .chat-progress li { margin-bottom: .3rem; font-size: .85rem; overflow-wrap: anywhere; }
 .chat-progress-label { font-weight: 600; }
 .chat-progress-detail { display: block; color: #69736e; font-size: .78rem; overflow-wrap: anywhere; }
+.chat-bubble.instruction { border-style: dashed; background: #fdf7e6; }
+.chat-instruction { border-top: 1px dashed #d4ccba; margin-top: .75rem; padding-top: .75rem; }
+.chat-instruction label { font-weight: 600; }
 @media (max-width: 800px) { .chat-layout { grid-template-columns: 1fr; }.chat-sidebar { max-height: 12rem; }.chat-main { min-height: 55vh; }.chat-bubble { max-width: 92%; } }
 label { display: grid; gap: .35rem; }
 select { font: inherit; padding: .55rem; max-width: 100%; }

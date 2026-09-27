@@ -282,6 +282,7 @@ class PersistentAgentRunner:
             ),
             checkpoint_writer=checkpoints,
             context_hash=skill_context_hash or "",
+            instruction_provider=self._instruction_provider(lease.task_id),
         )
         try:
             async with asyncio.timeout(self._settings.task_timeout_seconds):
@@ -388,6 +389,22 @@ class PersistentAgentRunner:
             error_code=error_code,
             error_message=result.error_message or decision.reason,
         )
+
+    def _instruction_provider(self, task_id):
+        """返回"取走待注入指令"的回调（I-03）。
+
+        取走与标记在同一个事务里完成，因此同一条指令不会在两个迭代里重复注入。
+        """
+
+        async def claim() -> tuple[str, ...]:
+            from evoagent.sessions.service import claim_pending_instructions
+
+            async with self._session_factory() as session:
+                pending = await claim_pending_instructions(session, task_id=task_id)
+                await session.commit()
+                return pending
+
+        return claim
 
     async def _project_context(self, task: TaskRecord) -> str | None:
         """按 Task 冻结的绑定构造有界项目上下文；没有绑定项目时返回 None。
