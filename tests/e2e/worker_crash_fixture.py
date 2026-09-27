@@ -24,8 +24,8 @@ async def main():
             "EVOAGENT_WORKER_CRASH_DATABASE_URL", f"sqlite+aiosqlite:///{root / 'process.db'}"
         ),
         workspace=root / "workspace",
-        lease_seconds=0.9,
-        heartbeat_seconds=0.2,
+        lease_seconds=4.0,
+        heartbeat_seconds=0.5,
     )
 
     async def park():

@@ -59,7 +59,9 @@ async def test_api_task_survives_killed_worker(tmp_path, mode):
                     await asyncio.sleep(0.05)
             first.kill()
             await first.communicate()
-            await asyncio.sleep(1.1)
+            # Let the killed worker's lease expire before the replacement claims it.
+            # A sub-second lease races with subprocess startup on busy CI runners.
+            await asyncio.sleep(4.2)
             replacement = await start("normal")
             _, error = await asyncio.wait_for(replacement.communicate(), timeout=20)
             assert replacement.returncode == 0, error.decode(errors="replace")
