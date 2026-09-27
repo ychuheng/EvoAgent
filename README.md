@@ -17,8 +17,10 @@ EvoAgent 是一个从零实现的、可测试的 Agent Runtime：在可靠任务
 
 需要 Python 3.12/3.13 与 Docker（含 Compose v2），以及一个支持 tool calling 的 OpenAI-compatible 模型服务。
 
+以下是 Windows PowerShell 的最短启动步骤。
+
 ```powershell
-# 1. 安装项目（Windows PowerShell；macOS/Linux 把 .venv\Scripts 换成 .venv/bin）
+# 1. 安装项目
 py -3.13 -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 
@@ -51,7 +53,6 @@ docker compose -p evoagent-personal -f docker-compose.yml -f deploy/personal/com
 
 ```powershell
 docker compose up --build          # Mock Provider，网页入口 http://127.0.0.1:8000/ui/
-.\.venv\Scripts\evoagent-worker    # 或单独运行 API/Worker/Eval Worker
 ```
 
 阶段三的确定性 Skill 生命周期演示、阶段四的演示与发布证据门禁脚本见[归档索引](docs/archive/README.md)中对应的模块说明；这些命令针对专用测试库，不要指向日常数据。
