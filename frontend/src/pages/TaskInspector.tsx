@@ -113,6 +113,14 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
         <p className="chat-meta">{trace?.events?.some((event) => event.event_type === "skill.none_selected" || event.event_type.startsWith("retrieval.")) ? "此任务未选中 Skill。" : "尚无 Skill 选择证据。"}</p>}
       {retrieval && <p className="chat-meta">记忆命中 {selectedMemories.length} 条 · {retrieval.degraded ? "检索已降级" : "检索未降级"} · 批次 {retrieval.batch_id}</p>}
     </div>
+    {trace?.artifacts && trace.artifacts.length > 0 &&
+      <div className="chat-evidence"><h4>产物（F-04）</h4>
+        <p className="chat-meta">下载响应头带 SHA-256，可与下面的登记哈希逐位核对；预览过长时会指向下载。</p>
+        {trace.artifacts.map((artifact) => <p className="chat-meta" key={artifact.id}>
+          {artifact.uri.split("/").pop()} · {artifact.type} · {artifact.size_bytes} 字节 · SHA-256 {artifact.content_hash}
+          <a className="chat-detail-button" href={`/api/v1/artifacts/${artifact.id}/download`} download>下载</a>
+        </p>)}
+      </div>}
     {trace?.sources && (trace.sources.searches.length > 0 || trace.sources.reads.length > 0 || trace.sources.answer_links.length > 0) &&
       <div className="chat-evidence"><h4>网页来源证据</h4>
         <p className="chat-meta">这里核对 URL 是否出现在工具记录中；仍需人工判断网页内容是否支持答复。</p>

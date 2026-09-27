@@ -69,6 +69,14 @@ export type TaskTrace = {
     error_code: string | null;
   }>;
   tool_effects: Array<{ tool_call_id: string; status: string }>;
+  artifacts?: Array<{
+    id: string;
+    type: string;
+    uri: string;
+    content_hash: string;
+    size_bytes: number;
+    metadata: Record<string, unknown>;
+  }>;
   approvals: Array<{
     id: string;
     tool_call_id: string;

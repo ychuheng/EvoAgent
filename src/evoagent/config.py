@@ -109,6 +109,8 @@ class Settings(BaseSettings):
     project_command_environment: dict[str, str] = Field(default_factory=dict)
     # 默认离线：一次"允许联网"的批准不会变成长期网络权限。
     project_command_network_default: bool = False
+    # 产物下载上限：超过即拒绝导出，不把"下载"变成绕过上下文预算读任意文件的通道。
+    artifact_download_max_bytes: int = Field(default=16_777_216, ge=1_024, le=268_435_456)
 
     search_provider: Literal["mock", "brave", "ddgs"] = "mock"
     search_api_key: SecretStr | None = None

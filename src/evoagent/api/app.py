@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from evoagent.api.routes import (
     approvals,
+    artifacts,
     evals,
     events,
     memory,
@@ -133,6 +134,7 @@ def create_app(
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(sessions.workspaces_router, prefix="/api/v1")
     app.include_router(projects.router, prefix="/api/v1")
+    app.include_router(artifacts.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")
     app.include_router(approvals.router, prefix="/api/v1")
     app.include_router(events.router, prefix="/api/v1")
