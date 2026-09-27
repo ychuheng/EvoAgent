@@ -230,6 +230,8 @@ class TaskRecord(Base):
     project_authorization_version: Mapped[int | None] = mapped_column(Integer)
     goal: Mapped[str] = mapped_column(Text)
     acceptance: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    # F-02：创建时冻结的输入集（路径 + 内容哈希 + 类型）；运行中变化即按输入变化终止。
+    frozen_inputs: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     status: Mapped[TaskStatus] = mapped_column(
         enum_column(TaskStatus, "task_status"), default=TaskStatus.CREATED
     )

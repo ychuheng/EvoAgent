@@ -31,6 +31,8 @@ class PersistentRunStatus(StrEnum):
     LIMIT_REACHED = "limit_reached"
     # 运行中项目授权被撤销/改动：明确终态，已执行的动作保留，不重试、不续跑。
     AUTHORIZATION_REVOKED = "authorization_revoked"
+    # 冻结的输入集在运行中被替换：明确终态，不拿新内容继续当同一任务。
+    INPUT_CHANGED = "input_changed"
 
 
 class InvalidStateTransitionError(ValueError):
@@ -91,6 +93,7 @@ _RUN_TRANSITIONS: dict[PersistentRunStatus, frozenset[PersistentRunStatus]] = {
             PersistentRunStatus.TIMEOUT,
             PersistentRunStatus.LIMIT_REACHED,
             PersistentRunStatus.AUTHORIZATION_REVOKED,
+            PersistentRunStatus.INPUT_CHANGED,
         }
     ),
     PersistentRunStatus.WAITING_USER: frozenset(
@@ -116,6 +119,7 @@ _RUN_TRANSITIONS: dict[PersistentRunStatus, frozenset[PersistentRunStatus]] = {
     PersistentRunStatus.TIMEOUT: frozenset(),
     PersistentRunStatus.LIMIT_REACHED: frozenset(),
     PersistentRunStatus.AUTHORIZATION_REVOKED: frozenset(),
+    PersistentRunStatus.INPUT_CHANGED: frozenset(),
 }
 
 

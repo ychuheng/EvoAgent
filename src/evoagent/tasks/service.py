@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
@@ -19,6 +20,7 @@ from evoagent.db.models import (
 )
 from evoagent.db.repositories.base import ConcurrentUpdateError, RecordNotFoundError
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.projects.inputs import freeze_inputs
 from evoagent.projects.schema import (
     ProjectAuthorizationError,
     ProjectNotFoundError,
@@ -115,6 +117,7 @@ class TaskService:
         model: str,
         run_mode: RunMode = RunMode.RETRIEVAL,
         project_id: UUID | None = None,
+        input_paths: list[str] | None = None,
     ) -> TaskAggregate:
         """在同一事务中创建 Task、首个 Run 和初始事件。
 
@@ -123,6 +126,9 @@ class TaskService:
         - 之后在页面上切换会话项目不影响在跑 Task；
         - 撤销授权后新 Task 不能进入旧根（这里直接拒绝）；
         - 在跑 Task 的下一次工具调用会因版本不一致被拒绝。
+
+        `input_paths` 给出时，输入文件的**内容哈希**也在此刻冻结（F-02）：
+        运行中文件被替换会以 `input_changed` 终止，而不是悄悄换掉输入。
         """
 
         normalized_goal = goal.strip()
@@ -141,6 +147,7 @@ class TaskService:
                 raise SessionNotFoundError(f"session does not exist: {session_id}")
             bound_project_id = project_id if project_id is not None else session.project_id
             authorization_version: int | None = None
+            project_root: Path | None = None
             if bound_project_id is not None:
                 project = await unit.session.get(ProjectRecord, bound_project_id)
                 if project is None:
@@ -148,12 +155,25 @@ class TaskService:
                 if project.status is ProjectStatus.REVOKED:
                     raise ProjectAuthorizationError("项目授权已撤销，不能在此项目下创建任务")
                 authorization_version = project.authorization_version
+                project_root = Path(project.root)
+
+            frozen_inputs = None
+            if input_paths:
+                if project_root is None:
+                    raise ProjectAuthorizationError(
+                        "指定输入文件需要先为该会话选择已授权项目，Agent 不扫描项目之外的目录"
+                    )
+                frozen_inputs = (await freeze_inputs(project_root, input_paths)).model_dump(
+                    mode="json"
+                )
+
             task = TaskRecord(
                 session_id=session_id,
                 project_id=bound_project_id,
                 project_authorization_version=authorization_version,
                 goal=normalized_goal,
                 acceptance=acceptance.model_dump(mode="json") if acceptance else None,
+                frozen_inputs=frozen_inputs,
                 status=TaskStatus.QUEUED,
             )
             unit.tasks.add(task)

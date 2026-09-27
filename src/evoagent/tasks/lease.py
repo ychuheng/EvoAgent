@@ -62,6 +62,8 @@ _RUN_TO_TASK_TERMINAL = {
     PersistentRunStatus.LIMIT_REACHED: TaskStatus.FAILED,
     # 授权撤销是"用户把权限拿走了"，不是任务失败也不是用户取消；已执行的动作保留。
     PersistentRunStatus.AUTHORIZATION_REVOKED: TaskStatus.CANCELLED,
+    # 输入被替换时任务无法按原输入继续；不是"用户取消"，但对用户而言是终止而非失败结论。
+    PersistentRunStatus.INPUT_CHANGED: TaskStatus.FAILED,
 }
 
 

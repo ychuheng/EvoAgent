@@ -33,6 +33,7 @@ def _response(aggregate: TaskAggregate) -> TaskResponse:
         project_id=task.project_id,
         goal=task.goal,
         acceptance=task.acceptance,
+        frozen_inputs=task.frozen_inputs,
         status=task.status,
         cancel_requested=task.cancel_requested,
         attempt_count=task.attempt_count,
@@ -56,6 +57,7 @@ async def create_task(
         model=request.model or settings.model or "mock-model",
         run_mode=request.run_mode,
         project_id=request.project_id,
+        input_paths=request.input_paths,
     )
     return _response(aggregate)
 

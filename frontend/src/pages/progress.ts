@@ -45,8 +45,11 @@ const RUN_TERMINAL = new Set([
   "run.timeout",
   "run.limit_reached",
   "run.authorization_revoked",
+  "run.input_changed",
   // 授权拒绝事件本身也意味着本次运行必然终止（随后会写 run.authorization_revoked）。
   "authorization.revoked",
+  // 输入被替换同样必然终止运行。
+  "input.changed",
 ]);
 
 function shorten(value: unknown, limit = 120): string {
@@ -96,6 +99,15 @@ export function stepLabel(event: StreamEvent): { label: string; detail?: string 
       };
     case "approval.required":
       return { label: "等待人工审批", detail: shorten(payload.tool) };
+    case "input.frozen": {
+      const files = Array.isArray(payload.files) ? payload.files : [];
+      return {
+        label: `冻结输入 ${files.length} 个文件`,
+        detail: files.map((item) => shorten((item as { path?: string }).path, 60)).join("、"),
+      };
+    }
+    case "input.changed":
+      return { label: "输入已变化，任务终止", detail: shorten(payload.message) };
     case "authorization.revoked":
       return { label: "项目授权已被撤销，本次调用被拒绝", detail: shorten(payload.message) };
     case "acceptance.checked":

@@ -130,6 +130,8 @@ class TaskCreateRequest(ApiModel):
     model: str | None = Field(default=None, min_length=1, max_length=256)
     run_mode: RunMode = RunMode.RETRIEVAL
     project_id: UUID | None = None
+    # F-02：显式指定的输入文件（授权项目根内的相对路径）；创建时冻结内容哈希。
+    input_paths: list[str] = Field(default_factory=list, max_length=64)
 
     @field_validator("run_mode")
     @classmethod
@@ -173,6 +175,7 @@ class TaskResponse(ApiModel):
     project_id: UUID | None = None
     goal: str
     acceptance: AcceptanceSpec | None
+    frozen_inputs: dict[str, Any] | None = None
     status: TaskStatus
     cancel_requested: bool
     attempt_count: int

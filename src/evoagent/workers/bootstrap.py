@@ -20,6 +20,7 @@ from evoagent.core.models import (
 from evoagent.db.models import RunRecord, TaskRecord
 from evoagent.db.session import Database
 from evoagent.memory.maintenance import MaintenanceWorker
+from evoagent.projects.inputs import InputChangedError
 from evoagent.projects.schema import ProjectAuthorizationRevoked
 from evoagent.providers.base import ModelProvider
 from evoagent.providers.mock import MockProvider
@@ -214,6 +215,13 @@ class ConfiguredTaskHandler:
             return TaskExecutionResult(
                 status=PersistentRunStatus.AUTHORIZATION_REVOKED,
                 error_code="authorization_revoked",
+                error_message=str(error),
+            )
+        except InputChangedError as error:
+            # F-02：输入在运行中被替换，明确终止而不是继续用新内容。
+            return TaskExecutionResult(
+                status=PersistentRunStatus.INPUT_CHANGED,
+                error_code="input_changed",
                 error_message=str(error),
             )
         finally:

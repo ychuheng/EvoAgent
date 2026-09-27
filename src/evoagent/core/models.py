@@ -88,6 +88,7 @@ class EventType(StrEnum):
     ACCEPTANCE_CHECKED = "acceptance.checked"
     AUTHORIZATION_REVOKED = "authorization.revoked"
     INSTRUCTION_INJECTED = "instruction.injected"
+    INPUT_FROZEN = "input.frozen"
 
 
 class ToolDefinition(ContractModel):

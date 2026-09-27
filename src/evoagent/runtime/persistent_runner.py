@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -189,6 +190,16 @@ class PersistentAgentRunner:
         await self._persist_run_config(run.id, config_snapshot, guard)
         project_context = await self._project_context(task)
         sink = PersistentEventSink(lease.run_id, self._session_factory, lease_guard=guard)
+        if task.frozen_inputs:
+            await sink.emit(
+                EventType.INPUT_FROZEN,
+                {
+                    "files": [
+                        {"path": item["path"], "sha256": item["sha256"], "kind": item["kind"]}
+                        for item in task.frozen_inputs.get("files", [])
+                    ],
+                },
+            )
         checkpoints = PersistentCheckpointStore(
             lease.run_id,
             self._session_factory,
@@ -254,6 +265,7 @@ class PersistentAgentRunner:
                 policy=self._permission_policy,
                 lease_guard=guard,
                 authorization_check=self._authorization_check,
+                input_check=self._input_check(task),
             ),
         )
         loop = AgentLoop(
@@ -389,6 +401,33 @@ class PersistentAgentRunner:
             error_code=error_code,
             error_message=result.error_message or decision.reason,
         )
+
+    def _input_check(self, task: TaskRecord):
+        """返回复核冻结输入集回调；没有项目或没有输入集时返回 None（F-02）。"""
+
+        if not task.frozen_inputs or task.project_id is None:
+            return None
+        from evoagent.projects.inputs import InputSet, verify_inputs
+
+        frozen = InputSet.model_validate(task.frozen_inputs)
+
+        async def check() -> None:
+            root = await self._project_root(task)
+            await asyncio.to_thread(verify_inputs, root, frozen)
+
+        return check
+
+    async def _project_root(self, task: TaskRecord) -> Path:
+        from evoagent.projects.boundaries import resolve_run_project
+
+        project = await resolve_run_project(
+            self._session_factory,
+            project_id=task.project_id,
+            expected_authorization_version=task.project_authorization_version,
+        )
+        if project is None:  # pragma: no cover - 有 project_id 时不会发生
+            raise ValueError("task has no project")
+        return project.root
 
     def _instruction_provider(self, task_id):
         """返回"取走待注入指令"的回调（I-03）。

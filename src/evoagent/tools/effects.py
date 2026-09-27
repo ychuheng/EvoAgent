@@ -47,6 +47,7 @@ class PersistentToolMiddleware:
         policy: PermissionPolicy,
         lease_guard: LeaseGuard | None = None,
         authorization_check=None,
+        input_check=None,
     ) -> None:
         if lease_guard is not None and lease_guard.lease.run_id != run_id:
             raise ValueError("run does not match lease")
@@ -56,6 +57,7 @@ class PersistentToolMiddleware:
         self._session_factory = session_factory
         self._policy = policy
         self._authorization_check = authorization_check
+        self._input_check = input_check
 
     async def before(
         self, call: ToolCall, tool: ToolInstance, arguments: BaseModel
@@ -69,6 +71,15 @@ class PersistentToolMiddleware:
                 await self._authorization_check()
             except ProjectAuthorizationRevoked as error:
                 await self._record_authorization_revocation(error)
+                raise
+        # F-02：冻结的输入集也在每次工具调用前复核；被替换即按输入变化终止运行。
+        if self._input_check is not None:
+            from evoagent.projects.inputs import InputChangedError
+
+            try:
+                await self._input_check()
+            except InputChangedError as error:
+                await self._record_input_change(error)
                 raise
         decision = self._policy.evaluate(tool, arguments)
         async with UnitOfWork(self._session_factory) as unit:
@@ -274,6 +285,21 @@ class PersistentToolMiddleware:
                 )
                 await unit.commit()
         except Exception:  # noqa: BLE001 - 审计写入失败不能掩盖拒绝本身
+            return
+
+    async def _record_input_change(self, error: Exception) -> None:
+        """把"输入已变化"写进 Run 事件，作为终止依据。"""
+
+        try:
+            async with UnitOfWork(self._session_factory) as unit:
+                await unit.events.append(
+                    run_id=self._run_id,
+                    event_type="input.changed",
+                    payload={"message": str(error)},
+                    created_at=datetime.now(UTC),
+                )
+                await unit.commit()
+        except Exception:  # noqa: BLE001 - 审计写入失败不能掩盖终止本身
             return
 
     async def after_success(self, token: Any, content: str) -> None:

@@ -56,4 +56,18 @@ describe("事件投影（I-01）", () => {
     expect(label.label).toContain("edit_file");
     expect(label.detail).toBe("edit_conflict");
   });
+
+  it("冻结输入与输入变化都有可读说明且计入终态", () => {
+    const frozen = applyEvent(
+      EMPTY_PROGRESS,
+      event(1, "input.frozen", { files: [{ path: "data/notes.txt" }, { path: "report.pdf" }] }),
+    );
+    expect(frozen.steps[0].label).toContain("2 个文件");
+    expect(frozen.steps[0].detail).toContain("data/notes.txt");
+    expect(frozen.terminal).toBe(false);
+
+    const changed = applyEvent(frozen, event(2, "input.changed", { message: "内容已变化" }));
+    expect(changed.terminal).toBe(true);
+    expect(changed.steps[1].label).toContain("输入已变化");
+  });
 });
