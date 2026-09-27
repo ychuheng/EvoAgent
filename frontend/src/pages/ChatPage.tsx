@@ -39,6 +39,8 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
   const [sending, setSending] = useState(false);
   const [pendingTask, setPendingTask] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState("");
+  const [queuedSince, setQueuedSince] = useState<number | null>(null);
+  const [queueWaitSeconds, setQueueWaitSeconds] = useState(0);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -69,6 +71,8 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     setPendingTask(null);
     setSelectedTask(null);
     setTaskStatus("");
+    setQueuedSince(null);
+    setQueueWaitSeconds(0);
     void chat.messages(sessionId).then((items) => {
       if (!active) return;
       setMessages(items);
@@ -87,6 +91,8 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
         const task = await chat.task(pendingTask);
         if (!active) return;
         setTaskStatus(task.status);
+        setQueuedSince(task.status === "queued" ? Date.parse(task.created_at) : null);
+        setQueueWaitSeconds(task.status === "queued" ? Math.max(0, (Date.now() - Date.parse(task.created_at)) / 1000) : 0);
         if (TERMINAL.has(task.status)) {
           const items = await chat.messages(sessionId);
           if (!active) return;
@@ -119,6 +125,8 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     setPendingTask(null);
     setSelectedTask(null);
     setTaskStatus("");
+    setQueuedSince(null);
+    setQueueWaitSeconds(0);
   }
 
   async function createWorkspace() {
@@ -162,6 +170,8 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       setPendingTask(task.id);
       setSelectedTask(task.id);
       setTaskStatus(task.status);
+      setQueuedSince(task.status === "queued" ? Date.parse(task.created_at) : null);
+      setQueueWaitSeconds(0);
     } catch (reason) {
       setError(failure(reason));
     } finally {
@@ -193,13 +203,14 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       </div>
       {sessionId && <button type="button" className="chat-detail-button" onClick={() => onOpenMemory(sessionId)}>查看本会话记忆</button>}
       <div className="chat-history" role="log" aria-live="polite">
-        {messages.length === 0 && <p className="state">输入问题开始对话。消息会保存在当前 Session 中。</p>}
+        {messages.length === 0 && <p className="state">输入问题开始对话。例如“你好，请介绍你能做什么”，或“用 calculator 计算 17 × 23”。消息会保存在当前 Session 中。</p>}
         {messages.map((message) => <article className={`chat-bubble ${message.role}`} key={message.id}>
           <small>{message.role === "user" ? "你" : "EvoAgent"}</small>
           <p>{displayMessage(message)}</p>
           {message.task_id && <button type="button" className="chat-detail-button" onClick={() => setSelectedTask(message.task_id)}>{selectedTask === message.task_id ? "正在查看执行过程" : "查看执行过程"}</button>}
         </article>)}
         {pendingTask && <p role="status" className="state">{taskStatus === "waiting_user" ? "等待人工决定，请在下方处理。" : `Agent 正在处理… ${taskStatusLabel[taskStatus] ?? taskStatus}`}</p>}
+        {pendingTask && taskStatus === "queued" && queuedSince !== null && queueWaitSeconds >= 30 && <p role="alert" className="state">任务已排队超过 30 秒，Worker 尚未领取。请检查 Worker 容器是否运行；模型连接状态要在任务开始执行后才能确认。</p>}
       </div>
       {selectedTask && <TaskInspector key={selectedTask} taskId={selectedTask} onOpenVersion={onOpenVersion} onOpenContext={onOpenContext} />}
       {error && <p role="alert" className="error">{error}</p>}

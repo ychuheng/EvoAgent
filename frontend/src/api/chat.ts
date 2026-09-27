@@ -24,6 +24,7 @@ export type ChatMessage = {
 export type ChatTask = {
   id: string;
   status: string;
+  created_at: string;
   cancel_requested: boolean;
   acceptance: {
     answer_contains: string[];
