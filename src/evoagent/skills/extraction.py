@@ -27,6 +27,29 @@ class CandidateGenerationError(ValueError):
     """生成器没有返回可解析的 SkillDefinition。"""
 
 
+class MissingSkillAnnotationsError(CandidateGenerationError):
+    """候选缺少 M6 S-02 要求的停止条件、审批点或反例。"""
+
+
+def require_s6_annotations(definition: SkillDefinition) -> None:
+    """M6 S-02 的硬要求：候选必须包含停止条件与反例。
+
+    计划 §11 S-02 要求"把可复用步骤写成可读 Skill，明确触发、前提、停止条件、审批点和反例"，
+    并强调"不把一次偶然成功泛化为规则"。触发与前提已在 DSL 里有必填字段，这里补上
+    停止条件与反例；审批点只在需要时才有（没有审批点的 Skill 是合法的）。
+    """
+
+    missing: list[str] = []
+    if not definition.stop_conditions:
+        missing.append("stop_conditions")
+    if not definition.counterexamples:
+        missing.append("counterexamples")
+    if missing:
+        raise MissingSkillAnnotationsError(
+            "Skill 候选缺少 M6 S-02 要求的字段：" + "、".join(missing)
+        )
+
+
 class CandidateGenerator(Protocol):
     async def generate(self, sources: tuple[FrozenSkillSource, ...]) -> SkillDefinition: ...
 
@@ -87,6 +110,16 @@ class ModelCandidateGenerator:
                                 ],
                                 "success_criteria": ["计算正确且说明依据"],
                                 "validators": ["run_completed"],
+                                "stop_conditions": [
+                                    "工具连续两次返回同样的错误时停止并报告，不要继续重试"
+                                ],
+                                "approval_points": [],
+                                "counterexamples": [
+                                    {
+                                        "situation": "问题不是可计算表达式，而是需要外部资料",
+                                        "why_not": "该 Skill 只覆盖计算核验，资料检索应另行处理",
+                                    }
+                                ],
                             },
                             "sanitized_training_traces": source_payload,
                         },
@@ -137,7 +170,9 @@ class SkillExtractionService:
         self._validator = validator
         self._max_sources = max_sources
 
-    async def extract(self, eval_run_ids: tuple[UUID, ...]) -> ExtractionResult:
+    async def extract(
+        self, eval_run_ids: tuple[UUID, ...], *, require_annotations: bool = True
+    ) -> ExtractionResult:
         if not eval_run_ids or len(set(eval_run_ids)) != len(eval_run_ids):
             raise ValueError("source eval run ids must be non-empty and unique")
         if len(eval_run_ids) > self._max_sources:
@@ -146,6 +181,9 @@ class SkillExtractionService:
         try:
             definition = await self._generator.generate(sources)
             self._validator.validate(definition)
+            if require_annotations:
+                # M6 S-02：候选必须写清停止条件、审批点与反例。
+                require_s6_annotations(definition)
         except Exception as error:
             logger.warning("Skill 候选提炼失败：%s", type(error).__name__)
             raise

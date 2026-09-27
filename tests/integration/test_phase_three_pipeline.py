@@ -18,7 +18,12 @@ from evoagent.skills.lifecycle import SkillVersionStatus
 from evoagent.skills.provenance import ProvenanceService
 from evoagent.skills.retrieval import SkillRetrievalService
 from evoagent.skills.sanitizer import TraceSanitizer
-from evoagent.skills.schema import SkillDefinition, SkillPreconditions, ToolStep
+from evoagent.skills.schema import (
+    Counterexample,
+    SkillDefinition,
+    SkillPreconditions,
+    ToolStep,
+)
 from evoagent.skills.validation import SkillDefinitionValidator
 from evoagent.tasks.service import TaskService
 from evoagent.tasks.state_machine import PersistentRunStatus
@@ -118,6 +123,11 @@ async def test_source_to_draft_and_active_retrieval_pipeline(tmp_path: Path) -> 
         steps=(ToolStep(id="calculate", tool="calculator", args={"expression": "1+1"}),),
         success_criteria=("给出结果",),
         validators=("run_completed",),
+        # M6 S-02：候选必须写清停止条件与反例。
+        stop_conditions=("calculator 连续两次报错即停止并报告",),
+        counterexamples=(
+            Counterexample(situation="需要联网查资料", why_not="该 Skill 只覆盖本地计算"),
+        ),
     )
     registry = ToolRegistry((CalculatorTool(),))
     extraction = SkillExtractionService(

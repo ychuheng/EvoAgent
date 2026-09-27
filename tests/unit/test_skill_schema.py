@@ -80,3 +80,103 @@ def test_skill_semantic_validation_rejects_unsafe_or_invalid_graph(mutation) -> 
 
     with pytest.raises(SkillValidationError):
         validator().validate(definition)
+
+
+def test_skill_definition_accepts_s6_annotations() -> None:
+    """M6 S-02 的停止条件、审批点与反例都要能用，且审批点必须指向真实步骤。"""
+
+    definition = SkillDefinition.model_validate(
+        {
+            "schema_version": 1,
+            "name": "annotated_skill",
+            "description": "带停止条件、审批点与反例的候选",
+            "triggers": ["读项目"],
+            "preconditions": {"allowed_tools": ["list_dir"], "max_effective_risk": "R0"},
+            "steps": [
+                {"id": "scan", "action": "tool", "tool": "list_dir", "args": {"path": "."}},
+                {"id": "write", "action": "model", "instruction": "写模块地图"},
+            ],
+            "success_criteria": ["给出路径依据"],
+            "validators": ["run_completed"],
+            "stop_conditions": ["连续两次工具报错即停止并报告"],
+            "approval_points": [
+                {"step_id": "write", "condition": "需要写入文件时", "reason": "写操作需人工确认"}
+            ],
+            "counterexamples": [
+                {"situation": "仓库没有源码", "why_not": "该 Skill 假设存在可读源码"}
+            ],
+        }
+    )
+
+    assert definition.stop_conditions == ("连续两次工具报错即停止并报告",)
+    assert definition.approval_points[0].step_id == "write"
+    assert definition.counterexamples[0].situation == "仓库没有源码"
+
+
+def test_approval_points_must_reference_existing_steps() -> None:
+    with pytest.raises(ValidationError, match="approval_points reference unknown steps"):
+        SkillDefinition.model_validate(
+            {
+                "schema_version": 1,
+                "name": "bad_skill",
+                "description": "审批点指向不存在的步骤",
+                "triggers": ["x"],
+                "preconditions": {"allowed_tools": ["list_dir"], "max_effective_risk": "R0"},
+                "steps": [{"id": "scan", "action": "tool", "tool": "list_dir", "args": {}}],
+                "success_criteria": ["x"],
+                "validators": ["run_completed"],
+                "approval_points": [{"step_id": "missing", "condition": "x", "reason": "y"}],
+            }
+        )
+
+
+def test_stop_conditions_must_be_unique() -> None:
+    with pytest.raises(ValidationError, match="stop_conditions must be unique"):
+        SkillDefinition.model_validate(
+            {
+                "schema_version": 1,
+                "name": "dup_skill",
+                "description": "重复停止条件",
+                "triggers": ["x"],
+                "preconditions": {"allowed_tools": ["list_dir"], "max_effective_risk": "R0"},
+                "steps": [{"id": "scan", "action": "tool", "tool": "list_dir", "args": {}}],
+                "success_criteria": ["x"],
+                "validators": ["run_completed"],
+                "stop_conditions": ["same", "same"],
+            }
+        )
+
+
+def test_require_s6_annotations_rejects_incomplete_candidates() -> None:
+    from evoagent.skills.extraction import (
+        MissingSkillAnnotationsError,
+        require_s6_annotations,
+    )
+
+    base = {
+        "schema_version": 1,
+        "name": "plain_skill",
+        "description": "没有附加说明的候选",
+        "triggers": ["x"],
+        "preconditions": {"allowed_tools": ["list_dir"], "max_effective_risk": "R0"},
+        "steps": [{"id": "scan", "action": "tool", "tool": "list_dir", "args": {}}],
+        "success_criteria": ["x"],
+        "validators": ["run_completed"],
+    }
+    with pytest.raises(MissingSkillAnnotationsError, match="stop_conditions"):
+        require_s6_annotations(SkillDefinition.model_validate(base))
+
+    with pytest.raises(MissingSkillAnnotationsError, match="counterexamples"):
+        require_s6_annotations(
+            SkillDefinition.model_validate({**base, "stop_conditions": ["停止"]})
+        )
+
+    require_s6_annotations(
+        SkillDefinition.model_validate(
+            {
+                **base,
+                "stop_conditions": ["停止"],
+                "counterexamples": [{"situation": "s", "why_not": "w"}],
+            }
+        )
+    )
