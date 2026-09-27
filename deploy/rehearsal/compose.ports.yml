@@ -1,0 +1,16 @@
+# 干净环境演练用的端口覆盖层：把 Postgres/Redis/API 绑到非默认端口，
+# 这样演练可以与机器上已有的 EvoAgent 部署并存（默认 5432/6379/8000 会被占用）。
+#
+# 用法（配合仓库根目录的 docker-compose.yml，项目名单独取，卷也是全新的）：
+#   docker compose -p evoagent-m7 -f docker-compose.yml -f deploy/rehearsal/compose.ports.yml up -d
+# 详见 docs/evaluations/M7可复现评测报告-2026-09-27.md 第 4 节。
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:15433:5432"
+  redis:
+    ports: !override
+      - "127.0.0.1:16380:6379"
+  api:
+    ports: !override
+      - "127.0.0.1:18010:8000"
