@@ -225,16 +225,17 @@ class ConfiguredTaskHandler:
                 await provider.aclose()
 
     def _project_tools(self, project):
-        """装配项目只读工具；没有绑定项目时不提供任何项目工具。
+        """装配项目工具；没有绑定项目时不提供任何项目工具。
 
-        实施计划 §6：项目上下文与文件内容只通过这三个工具 + `file_read` 进入，
-        Agent 不能自行登记任意宿主路径。
+        实施计划 §6/§7：项目上下文与文件内容只通过这些工具进入，Agent 不能自行登记
+        任意宿主路径；写工具只在 `read_write` 授权下注册，只读时模型连工具都看不到。
         """
 
         if project is None:
             return []
         from evoagent.tools.builtin.find_files import FindFilesTool
         from evoagent.tools.builtin.list_dir import ListDirTool
+        from evoagent.tools.builtin.project_edit import project_edit_tools
         from evoagent.tools.builtin.project_file_read import ProjectFileReadTool
         from evoagent.tools.builtin.search_text import SearchTextTool
 
@@ -244,6 +245,7 @@ class ConfiguredTaskHandler:
             FindFilesTool(root),
             SearchTextTool(root),
             ProjectFileReadTool(root),
+            *project_edit_tools(root, authorization=project.authorization),
         ]
 
     def _provider(self, run_id: UUID) -> ModelProvider:

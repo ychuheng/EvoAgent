@@ -10,6 +10,12 @@ from evoagent.tools.builtin.artifact_write import ArtifactWriteArguments
 from evoagent.tools.builtin.calculator import CalculatorArguments
 from evoagent.tools.builtin.find_files import FindFilesArguments
 from evoagent.tools.builtin.list_dir import ListDirArguments
+from evoagent.tools.builtin.project_edit import (
+    ApplyPatchArguments,
+    DeleteFileArguments,
+    EditFileArguments,
+    MoveFileArguments,
+)
 from evoagent.tools.builtin.project_file_read import ProjectFileReadArguments
 from evoagent.tools.builtin.search_text import SearchTextArguments
 from evoagent.tools.builtin.web_fetch import WebFetchArguments
@@ -78,6 +84,38 @@ def default_skill_tool_catalog() -> ToolRegistry:
                 description="在已授权项目内按内容搜索文本。",
                 arguments_model=SearchTextArguments,
                 risk=ToolRisk.R0,
+            ),
+            ToolCatalogEntry(
+                name="edit_file",
+                description="按哈希前置条件精确修改已授权项目内的单个文件。",
+                arguments_model=EditFileArguments,
+                risk=ToolRisk.R1,
+                has_side_effects=True,
+                parallel_safe=False,
+            ),
+            ToolCatalogEntry(
+                name="apply_patch",
+                description="一次修改多个文件；全部前置条件通过才写盘，否则整体回滚。",
+                arguments_model=ApplyPatchArguments,
+                risk=ToolRisk.R1,
+                has_side_effects=True,
+                parallel_safe=False,
+            ),
+            ToolCatalogEntry(
+                name="delete_file",
+                description="删除已授权项目内的单个文件（拒绝目录）。",
+                arguments_model=DeleteFileArguments,
+                risk=ToolRisk.R1,
+                has_side_effects=True,
+                parallel_safe=False,
+            ),
+            ToolCatalogEntry(
+                name="move_file",
+                description="重命名或移动已授权项目内的单个文件（不覆盖已存在目标）。",
+                arguments_model=MoveFileArguments,
+                risk=ToolRisk.R1,
+                has_side_effects=True,
+                parallel_safe=False,
             ),
             ToolCatalogEntry(
                 name="web_fetch",

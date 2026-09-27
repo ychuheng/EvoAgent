@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "name": "m2-project-edit-dev-v1",
+  "set": "dev",
+  "fixture": "evals/fixtures/project-dev-notes",
+  "note": "M2 编辑 dev 集：验证哈希前置条件、多文件全成功/全回滚、冲突检测与 diff 证据。steps 是脚本化 Mock 的调用序列，用于验证编辑链路与 diff 证据，不代表 Agent 能自行判断改哪里。dev 可以反复运行，绝不计入 M6/M7 通过率。$read_sha 由采集器用上一步 file_read 结果的文件哈希替换，用于模拟'先读后改'的真实前置条件。最后一个用例是冲突注入：应用前由采集器改动文件，期望 edit_file 报 edit_conflict 且文件内容保持被干扰后的样子（即没有覆盖人手修改）。",
+  "cases": [
+    {
+      "id": "m2-single-file-behavior",
+      "goal": "给 add_note 增加标题为空的校验，并给出 diff。",
+      "steps": [
+        {
+          "type": "tool",
+          "tool": "file_read",
+          "arguments": {"path": "src/fieldnotes/store.py", "max_lines": 80}
+        },
+        {
+          "type": "tool",
+          "tool": "edit_file",
+          "arguments": {
+            "path": "src/fieldnotes/store.py",
+            "expected_sha256": "$read_sha",
+            "old_text": "def add_note(",
+            "replacement": "def add_note(  # title must be non-empty"
+          }
+        }
+      ],
+      "expect_applied": ["src/fieldnotes/store.py"],
+      "expect_diff_contains": ["--- a/src/fieldnotes/store.py", "@@"]
+    },
+    {
+      "id": "m2-cross-file-refactor",
+      "goal": "把 load_notes 重命名为 read_notes，并同步更新调用点。",
+      "steps": [
+        {
+          "type": "tool",
+          "tool": "apply_patch",
+          "arguments": {
+            "edits": [
+              {
+                "path": "src/fieldnotes/store.py",
+                "old_text": "def load_notes(",
+                "replacement": "def read_notes("
+              },
+              {
+                "path": "src/fieldnotes/cli.py",
+                "old_text": "render_notes(load_notes(args.file))",
+                "replacement": "render_notes(read_notes(args.file))"
+              }
+            ]
+          }
+        }
+      ],
+      "expect_applied": ["src/fieldnotes/store.py", "src/fieldnotes/cli.py"],
+      "expect_diff_contains": ["--- a/src/fieldnotes/store.py", "--- a/src/fieldnotes/cli.py"],
+      "expect_result_contains": ["文件数：2"]
+    },
+    {
+      "id": "m2-patch-rolls-back-on-conflict",
+      "goal": "同时改两个文件；如果第二个文件的前置条件不成立，第一个文件也不能留下改动。",
+      "steps": [
+        {
+          "type": "tool",
+          "tool": "apply_patch",
+          "arguments": {
+            "edits": [
+              {
+                "path": "src/fieldnotes/store.py",
+                "old_text": "def add_note(",
+                "replacement": "def create_note("
+              },
+              {
+                "path": "src/fieldnotes/cli.py",
+                "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+                "old_text": "render_notes(load_notes(args.file))",
+                "replacement": "render_notes(read_notes(args.file))"
+              }
+            ]
+          }
+        }
+      ],
+      "expect_tool_failure": "apply_patch",
+      "expect_error_code": "edit_conflict",
+      "expect_unchanged_contains": "def add_note("
+    },
+    {
+      "id": "m2-conflict-detected",
+      "goal": "修改 store.py；如果文件在读取后被别人改动，必须报冲突而不是覆盖。",
+      "steps": [
+        {
+          "type": "tool",
+          "tool": "file_read",
+          "arguments": {"path": "src/fieldnotes/store.py", "max_lines": 80}
+        },
+        {
+          "type": "tool",
+          "tool": "edit_file",
+          "arguments": {
+            "path": "src/fieldnotes/store.py",
+            "expected_sha256": "$read_sha",
+            "old_text": "def add_note(",
+            "replacement": "def create_note("
+          }
+        }
+      ],
+      "interfere_before_last_tool": {
+        "path": "src/fieldnotes/store.py",
+        "append": "\n# 人手修改：并发编辑标记\n"
+      },
+      "expect_tool_failure": "edit_file",
+      "expect_error_code": "edit_conflict",
+      "expect_unchanged_contains": "人手修改：并发编辑标记"
+    }
+  ]
+}
