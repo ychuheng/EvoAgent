@@ -249,6 +249,39 @@ async def test_provider_classifies_http_errors() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_provider_does_not_log_remote_error_text_that_echoes_a_secret() -> None:
+    secret = "private-test-token"
+    respx.post(ENDPOINT).mock(return_value=httpx.Response(401, text=secret))
+    async with OpenAICompatibleProvider(
+        api_key=secret, base_url="https://llm.example.test/v1", timeout_seconds=1
+    ) as provider:
+        with pytest.raises(ProviderError) as failure:
+            [event async for event in provider.stream(make_request())]
+    assert failure.value.code == "provider_auth_error"
+    assert secret not in str(failure.value)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_provider_does_not_log_streamed_remote_error_text() -> None:
+    secret = "private-test-token"
+    respx.post(ENDPOINT).mock(
+        return_value=httpx.Response(
+            200,
+            text=sse({"error": {"message": secret}}),
+        )
+    )
+    async with OpenAICompatibleProvider(
+        api_key=secret, base_url="https://llm.example.test/v1", timeout_seconds=1
+    ) as provider:
+        with pytest.raises(ProviderError) as failure:
+            [event async for event in provider.stream(make_request())]
+    assert failure.value.code == "provider_api_error"
+    assert secret not in str(failure.value)
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_provider_converts_http_timeout() -> None:
     respx.post(ENDPOINT).mock(side_effect=httpx.ReadTimeout("slow"))
     provider = OpenAICompatibleProvider(

@@ -34,10 +34,17 @@ class MockSearchProvider:
 class BraveSearchProvider:
     """Brave Web Search API 的最小异步适配器。"""
 
-    def __init__(self, api_key: SecretStr | str, *, timeout_seconds: float = 20) -> None:
+    def __init__(
+        self,
+        api_key: SecretStr | str,
+        *,
+        timeout_seconds: float = 20,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         self._api_key = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
         self._timeout = timeout_seconds
-        self._client = httpx.AsyncClient()
+        self._client = client or httpx.AsyncClient()
+        self._owns_client = client is None
 
     async def search(self, query: str, *, count: int) -> tuple[SearchResult, ...]:
         try:
@@ -47,24 +54,67 @@ class BraveSearchProvider:
                 headers={"X-Subscription-Token": self._api_key, "Accept": "application/json"},
                 timeout=self._timeout,
             )
-            response.raise_for_status()
-            payload = response.json()
-        except (httpx.HTTPError, ValueError) as error:
-            raise ToolExecutionError("web search request failed") from error
-        raw_results = payload.get("web", {}).get("results", [])
-        return tuple(
-            SearchResult(
-                title=str(item.get("title", "")),
-                url=str(item.get("url", "")),
-                snippet=str(item.get("description", "")),
-                source="brave",
+        except httpx.TimeoutException as error:
+            raise WebSearchError("search_timeout", "web search timed out") from error
+        except httpx.RequestError as error:
+            raise WebSearchError("search_network_error", "web search connection failed") from error
+        if response.status_code >= 400:
+            code = (
+                "search_auth_failed"
+                if response.status_code == 401
+                else "search_forbidden"
+                if response.status_code == 403
+                else "search_rate_limited"
+                if response.status_code == 429
+                else "search_service_unavailable"
+                if response.status_code >= 500
+                else "search_http_error"
             )
-            for item in raw_results[:count]
-            if isinstance(item, dict)
-        )
+            raise WebSearchError(code, f"web search returned HTTP {response.status_code}")
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise WebSearchError(
+                "search_invalid_response", "web search returned invalid JSON"
+            ) from error
+        if not isinstance(payload, dict) or not isinstance(payload.get("web"), dict):
+            raise WebSearchError(
+                "search_invalid_response", "web search response has no web results"
+            )
+        raw_results = payload["web"].get("results", [])
+        if not isinstance(raw_results, list):
+            raise WebSearchError("search_invalid_response", "web search results must be a list")
+        results: list[SearchResult] = []
+        for item in raw_results[:count]:
+            if not isinstance(item, dict) or not isinstance(item.get("url"), str):
+                raise WebSearchError("search_invalid_response", "web search result has no URL")
+            try:
+                url = httpx.URL(item["url"])
+            except httpx.InvalidURL as error:
+                raise WebSearchError(
+                    "search_invalid_response", "web search result URL is invalid"
+                ) from error
+            if url.scheme not in {"http", "https"} or not url.host:
+                raise WebSearchError("search_invalid_response", "web search result URL is invalid")
+            results.append(
+                SearchResult(
+                    title=str(item.get("title", "")),
+                    url=item["url"],
+                    snippet=str(item.get("description", "")),
+                    source="brave",
+                )
+            )
+        return tuple(results)
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        if self._owns_client:
+            await self._client.aclose()
+
+
+class WebSearchError(ToolExecutionError):
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(message)
 
 
 class WebSearchArguments(ContractModel):

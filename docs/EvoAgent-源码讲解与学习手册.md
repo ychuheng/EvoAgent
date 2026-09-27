@@ -1832,6 +1832,8 @@ Provider 使用 index 为每个调用建立缓冲区，分别拼接 ID、函数�
 
 HTTP 401/403、429、5xx、其他 HTTP 错误、网络错误、超时和协议错误都有不同错误码。v0.1 不自动重试，因为重试还需要同时考虑幂等性、预算和退避策略。
 
+当前个人模式继续沿用这些错误码，但 HTTP 错误信息只写状态码，不复制服务端响应正文；SSE 中的 `error.message` 也不进入 Trace。远端错误正文并非可信的脱敏结果，可能回显请求头、用户输入或密钥。`tests/unit/test_openai_compatible_provider.py` 用故意回显密钥的 HTTP 与 SSE 响应锁住此边界。排障时应依据 `provider_auth_error`、`provider_rate_limit`、`provider_server_error` 等分类和本地配置核查，不能依赖远端原文。
+
 Provider 可以接收外部 AsyncClient，便于测试和复用连接；只有它自己创建 Client 时，`aclose()` 才负责关闭，避免误关调用方拥有的资源。
 
 ### 15.7 CLI 怎样组装应用
@@ -2780,6 +2782,8 @@ Shell 使用 `asyncio.create_subprocess_exec()`，不使用 `shell=True`，因�
 ### 35.3 搜索为什么要再抽象一层
 
 Agent 只依赖 `web_search` 工具，工具只依赖 `SearchProvider`。这样单元测试不会访问公网，也不需要 API Key；替换搜索厂商时不需要修改 AgentLoop。Brave 的密钥用 `SecretStr` 保存，只放在请求头中，不能写入事件和 Trace。
+
+个人模式中的 `BraveSearchProvider.search()` 先把 HTTP/网络/响应结构错误转换为稳定的 `WebSearchError.code`：401 对应 `search_auth_failed`，403 对应 `search_forbidden`，429 对应 `search_rate_limited`，5xx 对应 `search_service_unavailable`，连接与超时分别是 `search_network_error`、`search_timeout`。200 响应若不是合法 JSON、缺少 `web` 对象、结果不是列表或结果 URL 不可用，则返回 `search_invalid_response`。200 且 `results=[]` 是合法的零结果，工具返回 `[]`，不能编造来源。错误信息只包含状态码或通用描述，不复述服务端响应正文。`ToolExecutor` 将 `ToolExecutionError.code` 写入工具失败记录，页面再把它转换为用户可读提示。现有代码没有为 429 自动退避，也没有证明最终回答的引用得到网页正文支持；这些仍属 B-02/B-04。
 
 ### 35.4 推荐阅读顺序
 

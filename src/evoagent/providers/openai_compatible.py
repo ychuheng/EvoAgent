@@ -119,13 +119,10 @@ class OpenAICompatibleProvider:
 
                     chunk = self._parse_chunk(data)
                     if "error" in chunk:
-                        error = chunk["error"]
-                        message = (
-                            str(error.get("message", "provider returned an API error"))
-                            if isinstance(error, dict)
-                            else str(error)
+                        # Remote error text is untrusted and may echo request headers or content.
+                        raise ProviderError(
+                            "model service returned an API error", code="provider_api_error"
                         )
-                        raise ProviderError(message[:500], code="provider_api_error")
 
                     raw_usage = chunk.get("usage")
                     if raw_usage is not None:
@@ -351,7 +348,6 @@ class OpenAICompatibleProvider:
 
     @staticmethod
     async def _raise_http_error(response: httpx.Response) -> None:
-        body = (await response.aread()).decode("utf-8", errors="replace")[:500]
         if response.status_code in {401, 403}:
             code = "provider_auth_error"
         elif response.status_code == 429:
@@ -361,6 +357,6 @@ class OpenAICompatibleProvider:
         else:
             code = "provider_http_error"
         raise ProviderError(
-            f"model service returned HTTP {response.status_code}: {body}",
+            f"model service returned HTTP {response.status_code}",
             code=code,
         )
