@@ -52,7 +52,9 @@ packages = ["src/evoagent"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 asyncio_mode = "auto"
-pythonpath = ["src"]
+# 测试既导入 src/evoagent，也导入 scripts/ 下的验收脚本（如 personal_preflight），
+# 因此两者都要进入 sys.path；否则 `pytest` 直接调用时会在收集阶段报 No module named 'scripts'。
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 markers = [
     "redis: requires explicit Redis integration environment",
