@@ -25,6 +25,18 @@ test("可以切换到评测报告页", async () => {
   await waitFor(() => expect(screen.getByText("Skill 来源与配对评测")).toBeInTheDocument());
 });
 
+test("真实模型已配置但没有 Worker 时明确提示任务可能排队", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve(
+    new Response(JSON.stringify(url.endsWith("/runtime-info") ? {
+      provider_mode: "real", provider: "openai_compatible", model: "example-model",
+      search_mode: "mock", memory_enabled: false, code_version: "test",
+      remote_model_checked: false, worker_status: "missing",
+    } : []), { status: 200 }),
+  )));
+  render(<App />);
+  expect(await screen.findByText(/未检测到在线 Worker，任务可能持续排队/)).toBeInTheDocument();
+});
+
 test("排队超过 30 秒时提示检查 Worker，而不宣称模型连接失败", async () => {
   const workspaceId = "00000000-0000-0000-0000-000000000001";
   localStorage.setItem("evoagent-chat-session", "session-1");

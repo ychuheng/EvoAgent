@@ -81,9 +81,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        from evoagent.workers.presence import WorkerPresence
         from evoagent.workers.wakeup import Wakeup, redis_client
 
         client = redis_client(resolved_settings)
+        app.state.worker_presence = WorkerPresence(client, resolved_settings.redis_namespace)
         resolved_database.session_factory.configure(
             info={"wakeup": Wakeup(client, resolved_settings.redis_namespace)}
         )
@@ -223,6 +225,7 @@ def create_app(
 
     @app.get("/api/v1/runtime-info", response_model=RuntimeInfoResponse, tags=["runtime"])
     async def runtime_info() -> RuntimeInfoResponse:
+        worker_ready = await app.state.worker_presence.is_ready()
         return RuntimeInfoResponse(
             provider_mode=("mock" if resolved_settings.provider is ProviderName.MOCK else "real"),
             provider=resolved_settings.provider.value,
@@ -230,6 +233,9 @@ def create_app(
             search_mode=resolved_settings.search_provider,
             memory_enabled=resolved_settings.memory_retrieval_enabled,
             code_version=resolved_settings.code_version,
+            worker_status=(
+                "unknown" if worker_ready is None else "ready" if worker_ready else "missing"
+            ),
         )
 
     @app.get(

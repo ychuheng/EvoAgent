@@ -230,6 +230,9 @@ async def run_worker() -> None:
     embedding_provider = provider_from_settings(settings)
     client = redis_client(settings)
     wakeup = Wakeup(client, settings.redis_namespace)
+    from evoagent.workers.presence import WorkerPresence
+
+    presence = WorkerPresence(client, settings.redis_namespace)
     async with Database(settings.database_url.get_secret_value()) as database:
         manager = JobLeaseManager(
             database.session_factory,
@@ -244,6 +247,7 @@ async def run_worker() -> None:
             handler=ConfiguredTaskHandler(settings, database, ServiceGate(settings, client)),
             concurrency=settings.worker_concurrency,
             wakeup=wakeup,
+            presence=presence,
             heartbeat_seconds=settings.heartbeat_seconds,
             poll_seconds=settings.worker_poll_seconds,
             snapshot_schema_version=settings.snapshot_schema_version,

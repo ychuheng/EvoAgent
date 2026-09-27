@@ -2597,6 +2597,12 @@ QUEUED Task 可以直接暂停、恢复或取消。运行中的取消不同：AP
 
 真实 PostgreSQL CI 负责证明 `SKIP LOCKED` 竞争结果；SQLite 测试只证明领取接口、续租、错误所有者拒绝和状态变化。
 
+### 30.5 个人模式的 Worker 存活诊断
+
+`workers/presence.py` 增加了**与任务租约不同**的 Redis 存活标记。`JobWorker.run_forever()` 启动后台循环，每 2 秒把本实例 ID 对应的标记续到 10 秒；优雅停止时删除。进程突然退出时不依赖清理动作，标记会自行过期。API 的 `/api/v1/runtime-info` 检查该命名空间下是否还有任务 Worker 标记：找到返回 `ready`，Redis 可读但未找到返回 `missing`，未配置或 Redis 查询失败返回 `unknown`。维护和评测 Worker 不写这类标记，不能冒充领取用户任务的 Worker。
+
+这个状态只回答“最近是否看到一个任务 Worker”，不授予租约、不证明模型服务可连通，也不替代 `JobLeaseManager.claim_next()` 与 `LeaseHeartbeat`。API 页面把 `missing` 转为检查容器的提示；真正的模型配置错配仍由 Worker 在领取具体 Run 后校验并记录 `provider_configuration_mismatch`。`tests/unit/test_worker_presence.py` 覆盖正常启动/停止、其他 Worker 类型不计入和 Redis 故障的 `unknown` 语义。
+
 ---
 
 ## 31. 阶段二模块 6：Artifact、Snapshot 与 LoopState

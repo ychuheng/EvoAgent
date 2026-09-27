@@ -9,6 +9,7 @@ export type RuntimeInfo = {
   memory_enabled: boolean;
   code_version: string;
   remote_model_checked: boolean;
+  worker_status: "ready" | "missing" | "unknown";
 };
 export type ChatSession = { id: string; title: string; workspace_id: string; created_at: string };
 export type ChatMessage = {

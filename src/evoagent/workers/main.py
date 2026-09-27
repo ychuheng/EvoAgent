@@ -16,6 +16,7 @@ from evoagent.tasks.lease import (
 )
 from evoagent.tasks.state_machine import PersistentRunStatus
 from evoagent.workers.heartbeat import LeaseHeartbeat
+from evoagent.workers.presence import WorkerPresence
 from evoagent.workers.wakeup import Wakeup
 
 
@@ -38,6 +39,7 @@ class JobWorker:
         maintenance_worker=None,
         concurrency: int = 1,
         wakeup: Wakeup | None = None,
+        presence: WorkerPresence | None = None,
     ) -> None:
         self._worker_id = f"{worker_id[:95]}:{uuid4().hex}"
         self._maintenance_worker = maintenance_worker
@@ -45,6 +47,7 @@ class JobWorker:
             raise ValueError("concurrency must be positive")
         self._concurrency = concurrency
         self._wakeup = wakeup or Wakeup(None, "local")
+        self._presence = presence
         self._snapshot_schema_version = snapshot_schema_version
         self._lease_manager = lease_manager
         self._handler = handler
@@ -63,6 +66,8 @@ class JobWorker:
     async def run_forever(self) -> None:
         tasks = [asyncio.create_task(self._lane()) for _ in range(self._concurrency)]
         listener = asyncio.create_task(self._wakeup.listen())
+        if self._presence is not None:
+            tasks.append(asyncio.create_task(self._presence.run(self._worker_id, self._stopping)))
         if self._maintenance_worker is not None:
             tasks.append(asyncio.create_task(self._maintenance_lane()))
         try:

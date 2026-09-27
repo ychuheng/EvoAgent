@@ -1,7 +1,7 @@
 """HTTP 层使用的请求、响应与错误契约。"""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -38,6 +38,7 @@ class RuntimeInfoResponse(ApiModel):
     memory_enabled: bool
     code_version: str
     remote_model_checked: bool = False
+    worker_status: Literal["ready", "missing", "unknown"] = "unknown"
 
 
 class SessionCreateRequest(ApiModel):

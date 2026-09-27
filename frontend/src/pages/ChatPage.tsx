@@ -198,7 +198,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     <section className="panel chat-main" aria-label="对话内容">
       <div className="chat-runtime" role="status">
         {runtimeInfo?.provider_mode === "mock" ? <><strong>当前是 Mock 演示</strong><span>回复由离线脚本生成，不是 AI 对话。请按运行说明配置真实模型。</span></> :
-          runtimeInfo?.provider_mode === "real" ? <><strong>真实模型已配置：{runtimeInfo.model}</strong><span>连接及 Worker 配置会在任务执行时验证。{runtimeInfo.search_mode === "mock" ? "网页搜索仍是 Mock。" : ""}{!runtimeInfo.memory_enabled ? "记忆召回未开启。" : ""}</span></> :
+          runtimeInfo?.provider_mode === "real" ? <><strong>真实模型已配置：{runtimeInfo.model}</strong><span>{runtimeInfo.worker_status === "ready" ? "Worker 在线；模型连接及配置一致性将在任务执行时验证。" : runtimeInfo.worker_status === "missing" ? "未检测到在线 Worker，任务可能持续排队；请检查 Worker 容器。" : "Worker 状态无法判断；模型连接将在任务执行时验证。"}{runtimeInfo.search_mode === "mock" ? "网页搜索仍是 Mock。" : ""}{!runtimeInfo.memory_enabled ? "记忆召回未开启。" : ""}</span></> :
           <><strong>运行模式未确认</strong><span>请检查 API 服务；任务详情会显示实际使用的模型。</span></>}
       </div>
       {sessionId && <button type="button" className="chat-detail-button" onClick={() => onOpenMemory(sessionId)}>查看本会话记忆</button>}

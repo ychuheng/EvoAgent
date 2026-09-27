@@ -81,6 +81,7 @@ async def test_runtime_info_discloses_demo_mode_without_secrets(tmp_path: Path) 
             "memory_enabled": False,
             "code_version": "0.4.0.dev0",
             "remote_model_checked": False,
+            "worker_status": "unknown",
         }
 
 
