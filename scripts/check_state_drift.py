@@ -158,17 +158,26 @@ def main() -> int:
     )
 
     if args.update:
-        if product:
-            print("检测到产品代码漂移，拒绝推进基准；请先重新核对下列文件：")
-            for item in product:
-                print(f"  - {item}")
-            return 1
+        # `--update` 本身就是"我已核对过这些改动"的声明，因此**不能**再以"有改动"为由拒绝，
+        # 否则基准永远无法推进。真正需要守住的边界是：被记录的提交必须已经包含被核对的内容，
+        # 所以工作树必须干净——否则记的是一个不含那些改动的提交。
         if baseline == head:
             print("基准提交已经是 HEAD，无需更新")
             return 0
+        dirty = _uncommitted_product_paths()
+        if dirty:
+            print("工作树有未提交改动，拒绝推进基准：记下的提交不会包含这些改动。")
+            for item in dirty:
+                print(f"  - {item}")
+            print("请先提交，再运行：python scripts/check_state_drift.py --update")
+            return 1
         new_line = original_line.replace(f"`{baseline}`", f"`{head}`", 1)
         STATE.write_text(text.replace(original_line, new_line, 1), encoding="utf-8")
-        print(f"已把基准提交更新为 {head}")
+        print(f"已把基准提交更新为 {head}（复核记录：{baseline}..{head}）")
+        print(
+            f"本次推进涉及产品 {len(product)} 个文件；"
+            "未验证项必须已登记在状态页第 3 节与各验收报告的『仍未验证』小节。"
+        )
         return 0
 
     if product:
@@ -180,6 +189,24 @@ def main() -> int:
 
     print("无产品代码漂移；基准提交可以推进")
     return 0
+
+
+def _uncommitted_product_paths() -> list[str]:
+    """工作树里未提交的产品路径；未跟踪的本地目录（output/ 等）不算。"""
+
+    result = git("status", "--porcelain")
+    if result.returncode != 0:
+        return []
+    paths: list[str] = []
+    for line in result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:].strip().strip('"')
+        if " -> " in path:  # 重命名：取新路径
+            path = path.split(" -> ", 1)[1]
+        if classify(path) == "product":
+            paths.append(path)
+    return sorted(set(paths))
 
 
 if __name__ == "__main__":
