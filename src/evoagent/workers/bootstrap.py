@@ -264,7 +264,9 @@ class ConfiguredTaskHandler:
         from evoagent.tools.builtin.list_dir import ListDirTool
         from evoagent.tools.builtin.project_command import project_command_tools
         from evoagent.tools.builtin.project_edit import project_edit_tools
+        from evoagent.tools.builtin.project_extract import project_extract_tools
         from evoagent.tools.builtin.project_file_read import ProjectFileReadTool
+        from evoagent.tools.builtin.project_organize import project_organize_tools
         from evoagent.tools.builtin.search_text import SearchTextTool
 
         root = project.root
@@ -273,7 +275,11 @@ class ConfiguredTaskHandler:
             FindFilesTool(root),
             SearchTextTool(root),
             ProjectFileReadTool(root),
+            # F-03：非 UTF-8 文本与文本型 PDF 的抽取是只读能力，只读授权下也提供。
+            *project_extract_tools(root),
             *project_edit_tools(root, authorization=project.authorization),
+            # F-05：目录整理是写操作，只读授权下不注册（删除仍走 delete_file 单独审批）。
+            *project_organize_tools(root, authorization=project.authorization),
             *project_command_tools(
                 root,
                 authorization=project.authorization,

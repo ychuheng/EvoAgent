@@ -20,6 +20,8 @@ dependencies = [
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.7,<3",
     "python-dotenv>=1.0,<2",
+    # M5 F-03：文本型 PDF 的明确解析器（纯 Python，无需外部二进制）。
+    "pypdf>=5.1,<7",
     "redis>=5,<7",
     "sqlalchemy[asyncio]>=2.0.52,<2.1",
     "uvicorn>=0.35,<1",

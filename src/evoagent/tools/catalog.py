@@ -17,7 +17,9 @@ from evoagent.tools.builtin.project_edit import (
     EditFileArguments,
     MoveFileArguments,
 )
+from evoagent.tools.builtin.project_extract import ExtractTextArguments
 from evoagent.tools.builtin.project_file_read import ProjectFileReadArguments
+from evoagent.tools.builtin.project_organize import OrganizeFilesArguments
 from evoagent.tools.builtin.search_text import SearchTextArguments
 from evoagent.tools.builtin.web_fetch import WebFetchArguments
 from evoagent.tools.builtin.web_search import WebSearchArguments
@@ -87,6 +89,12 @@ def default_skill_tool_catalog() -> ToolRegistry:
                 risk=ToolRisk.R0,
             ),
             ToolCatalogEntry(
+                name="extract_text",
+                description="抽取项目内非 UTF-8 文本与文本型 PDF（扫描型明确拒绝）。",
+                arguments_model=ExtractTextArguments,
+                risk=ToolRisk.R0,
+            ),
+            ToolCatalogEntry(
                 name="edit_file",
                 description="按哈希前置条件精确修改已授权项目内的单个文件。",
                 arguments_model=EditFileArguments,
@@ -114,6 +122,14 @@ def default_skill_tool_catalog() -> ToolRegistry:
                 name="move_file",
                 description="重命名或移动已授权项目内的单个文件（不覆盖已存在目标）。",
                 arguments_model=MoveFileArguments,
+                risk=ToolRisk.R1,
+                has_side_effects=True,
+                parallel_safe=False,
+            ),
+            ToolCatalogEntry(
+                name="organize_files",
+                description="批量整理：先出计划与冲突清单，dry-run 后再执行；不覆盖、不删除。",
+                arguments_model=OrganizeFilesArguments,
                 risk=ToolRisk.R1,
                 has_side_effects=True,
                 parallel_safe=False,
