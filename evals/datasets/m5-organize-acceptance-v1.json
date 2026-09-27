@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "name": "m5-organize-acceptance-v1",
+  "set": "dev",
+  "fixture": "evals/fixtures/organize-lab",
+  "note": "M5 整体验收的『本机授权目录整理』一例：在临时副本上跑『先出计划 → 核对冲突 → 执行 → 逐条核对去向』。cases[].steps 是脚本化 Mock 调用序列，用于验证整理链路与冲突处理，不代表 Agent 会自己决定分类。failure_cases 是 M5 验收点名的失败样本（重复文件名、损坏 PDF、扫描 PDF、越权路径、输入变化），每个都必须给出稳定错误码或明确冲突，而不是静默成功。",
+  "cases": [
+    {
+      "id": "m5-organize-inbox",
+      "goal": "整理 inbox：Markdown 放进 notes/，PDF 放进 reports/；先给计划再执行。",
+      "steps": [
+        {"type": "tool", "tool": "list_dir", "arguments": {"path": "inbox"}},
+        {
+          "type": "tool",
+          "tool": "organize_files",
+          "arguments": {
+            "dry_run": true,
+            "rules": [
+              {"source": "inbox/alpha.md", "destination": "notes/alpha.md"},
+              {"source": "inbox/beta.md", "destination": "notes/beta.md"},
+              {"source": "inbox/summary.pdf", "destination": "reports/summary.pdf"},
+              {"source": "inbox/dup.md", "destination": "notes/alpha.md"}
+            ]
+          }
+        },
+        {
+          "type": "tool",
+          "tool": "organize_files",
+          "arguments": {
+            "dry_run": false,
+            "rules": [
+              {"source": "inbox/alpha.md", "destination": "notes/alpha.md"},
+              {"source": "inbox/beta.md", "destination": "notes/beta.md"},
+              {"source": "inbox/summary.pdf", "destination": "reports/summary.pdf"},
+              {"source": "inbox/dup.md", "destination": "notes/alpha.md"}
+            ]
+          }
+        }
+      ],
+      "expect_plan_conflicts": 1,
+      "expect_executed": [
+        ["inbox/alpha.md", "notes/alpha.md"],
+        ["inbox/beta.md", "notes/beta.md"],
+        ["inbox/summary.pdf", "reports/summary.pdf"]
+      ],
+      "expect_untouched": ["inbox/dup.md"]
+    }
+  ],
+  "failure_cases": [
+    {
+      "id": "m5-dup-filename-conflict",
+      "kind": "organize",
+      "goal": "两个来源指向同一目标文件名，必须报冲突而不是覆盖。",
+      "rules": [
+        {"source": "inbox/alpha.md", "destination": "notes/alpha.md"},
+        {"source": "inbox/dup.md", "destination": "notes/alpha.md"}
+      ],
+      "expect_conflicts": 1
+    },
+    {
+      "id": "m5-corrupt-pdf",
+      "kind": "extract",
+      "goal": "抽取损坏 PDF，必须报 pdf_unreadable 并保留原文件。",
+      "path": "inbox/corrupt.pdf",
+      "expect_error_code": "pdf_unreadable"
+    },
+    {
+      "id": "m5-scanned-pdf",
+      "kind": "extract",
+      "goal": "抽取没有文本层的 PDF，必须报 pdf_scanned_or_empty 并提示 OCR。",
+      "path": "inbox/scanned.pdf",
+      "expect_error_code": "pdf_scanned_or_empty"
+    },
+    {
+      "id": "m5-encoding-undeclared",
+      "kind": "extract",
+      "goal": "抽取 GB18030 文本但不声明编码，必须报 unsupported_text_encoding。",
+      "path": "inbox/legacy.txt",
+      "expect_error_code": "unsupported_text_encoding"
+    },
+    {
+      "id": "m5-out-of-root-organize",
+      "kind": "organize",
+      "goal": "把文件整理到项目根之外，必须被跳过并说明原因。",
+      "rules": [{"source": "inbox/alpha.md", "destination": "../outside/alpha.md"}],
+      "expect_skipped": 1
+    },
+    {
+      "id": "m5-input-changed",
+      "kind": "input_change",
+      "goal": "冻结输入后替换原文件，任务必须以 input_changed 结束。",
+      "input_paths": ["inbox/alpha.md"],
+      "expect_error_code": "input_changed"
+    }
+  ]
+}
