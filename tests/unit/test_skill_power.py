@@ -15,6 +15,7 @@ from evoagent.skills.power import (
     PowerAnalysisError,
     detectable_effect,
     exact_p_value,
+    maximum_power,
     plan_for_family,
     power_curve,
     power_for,
@@ -133,9 +134,33 @@ def test_detectable_effect_reports_what_small_samples_can_show() -> None:
 
     weak = detectable_effect(30, 0.30)
     strong = detectable_effect(300, 0.30)
+    assert weak is not None and strong is not None
     assert weak > strong
     assert weak <= 0.30
     assert strong <= 0.10
+
+
+def test_detectable_effect_is_none_when_no_effect_is_detectable() -> None:
+    """检出力达不到目标时必须返回 None，不能拿失配率上限冒充"可检出"。
+
+    30 对 + 失配率 10% 时，即使全部不一致对同向，检出力也只有约 7.3%：
+    这时**没有**任何效应能在 80% 检出力下被检出，报告里不能出现一个百分比。
+    """
+
+    assert power_for(30, 0.10, 0.10) < 0.80
+    assert detectable_effect(30, 0.10) is None
+    assert maximum_power(30, 0.10) == pytest.approx(power_for(30, 0.10, 0.10))
+    # 一旦样本量足够，同一个失配率下又能报出具体数值。
+    assert detectable_effect(300, 0.10) is not None
+    # 失配率越高越容易检出错：低失配率不可达时高失配率可能已经可达。
+    assert maximum_power(30, 0.30) > maximum_power(30, 0.10)
+
+
+def test_plan_for_family_exposes_max_power_for_unreachable_effects() -> None:
+    plan = plan_for_family(0.10)
+    assert plan["achieved_power"] >= 0.80
+    assert plan["detectable_effect_at_planned_pairs"] == pytest.approx(0.10)
+    assert plan["max_power_at_planned_pairs"] >= 0.80
 
 
 def test_power_curve_covers_requested_effects_and_counts() -> None:

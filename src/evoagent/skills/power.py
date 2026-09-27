@@ -333,21 +333,42 @@ def detectable_effect(
     *,
     alpha: float = DEFAULT_ALPHA,
     target_power: float = DEFAULT_POWER,
-) -> float:
+) -> float | None:
     """给定配对数与失配率，找出仍能达到目标检出力的**最小**绝对效应。
 
     样本量受限时用它如实报告"本样本量在 80% 检出力下只能检出至少 X 个百分点"。
+
+    即使把效应取到上限（`effect == mismatch_rate`，即全部不一致对都同向）也达不到
+    目标检出力时返回 `None`：这种情况下**没有任何**效应是"可检出"的，绝不能拿
+    失配率上限冒充可检出效应。
     """
 
     if pairs < 1:
         raise PowerAnalysisError("配对数必须为正")
+    if not 0.0 < mismatch_rate <= 1.0:
+        raise PowerAnalysisError("失配率必须在 (0, 1] 区间")
     step = 0.001
-    candidate = step
-    while candidate <= mismatch_rate:
+    # 用整数步进避免浮点累加漂移（否则端点 0.10 可能被 `candidate <= mismatch_rate` 跳过）。
+    steps = int(math.floor(mismatch_rate / step))
+    for index in range(1, steps + 1):
+        candidate = index * step
         if power_for(pairs, mismatch_rate, candidate, alpha=alpha) >= target_power:
             return round(candidate, 3)
-        candidate += step
-    return round(mismatch_rate, 3)
+    # 端点：效应取到上限（全部不一致对同向）。
+    if power_for(pairs, mismatch_rate, mismatch_rate, alpha=alpha) >= target_power:
+        return round(mismatch_rate, 3)
+    return None
+
+
+def maximum_power(
+    pairs: int,
+    mismatch_rate: float,
+    *,
+    alpha: float = DEFAULT_ALPHA,
+) -> float:
+    """给定配对数与失配率时能达到的**最高**检出力（效应取到上限）。"""
+
+    return power_for(pairs, mismatch_rate, mismatch_rate, alpha=alpha)
 
 
 def power_curve(
@@ -403,6 +424,9 @@ def plan_for_family(
         "achieved_power": round(result.power, 4),
         "detectable_effect_at_planned_pairs": detectable_effect(
             result.pairs, mismatch_rate, alpha=alpha, target_power=target_power
+        ),
+        "max_power_at_planned_pairs": round(
+            maximum_power(result.pairs, mismatch_rate, alpha=alpha), 4
         ),
         "note": ("配对数取 30 与计算值中的较大者；30 对只防止极小样本，不保证检出 10 个百分点。"),
     }

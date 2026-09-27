@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "status": "draft",
+  "experiment_id": "m6-exp-001",
+  "candidate_id": "skill-ledger-summary-anchors",
+  "candidate_revision": "unset",
+  "task_family": "code_comprehension",
+  "dataset": "m6-skill-holdout-v1.json",
+  "dataset_sha256": "unset",
+  "mismatch_rate_assumption": 0.1,
+  "candidate_rounds": 1,
+  "pairs_required": 78,
+  "seed": 20260927,
+  "min_effect": 0.1,
+  "arms": {
+    "control": {
+      "skill_injection": "off",
+      "model": "unset",
+      "tools_revision": "unset",
+      "budget_micros": 0,
+      "max_total_tokens": 0
+    },
+    "treatment": {
+      "skill_injection": "on",
+      "model": "unset",
+      "tools_revision": "unset",
+      "budget_micros": 0,
+      "max_total_tokens": 0
+    }
+  },
+  "holdout_samples": [
+    "m6-train-summary-source",
+    "m6-config-retry-limit",
+    "m6-config-env-override",
+    "m6-currency-default"
+  ],
+  "notes": [
+    "本文件是 M6 S-03 的预注册草稿：参数按当前 M0b 台账与计划 §11 的样本量规则填写，状态仍是 draft。",
+    "启动正式运行前必须：把 status 改为 frozen、填入 model/tools_revision/dataset_sha256、填入 M0c 批准的预算额度，",
+    "并把 holdout_samples 补足到 pairs_required × candidate_rounds（当前库存只有 4 条，计划需要 78 条）。",
+    "失配率 0.10 目前是候选假设；按计划必须来自 dev 试跑实测，实测后重跑 scripts/m6_preregistration.py 并更新本文件。"
+  ]
+}
