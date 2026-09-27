@@ -235,6 +235,7 @@ class ConfiguredTaskHandler:
             return []
         from evoagent.tools.builtin.find_files import FindFilesTool
         from evoagent.tools.builtin.list_dir import ListDirTool
+        from evoagent.tools.builtin.project_command import project_command_tools
         from evoagent.tools.builtin.project_edit import project_edit_tools
         from evoagent.tools.builtin.project_file_read import ProjectFileReadTool
         from evoagent.tools.builtin.search_text import SearchTextTool
@@ -246,6 +247,14 @@ class ConfiguredTaskHandler:
             SearchTextTool(root),
             ProjectFileReadTool(root),
             *project_edit_tools(root, authorization=project.authorization),
+            *project_command_tools(
+                root,
+                authorization=project.authorization,
+                allowlist=self._settings.project_command_allowlist,
+                timeout_seconds=self._settings.project_command_timeout_seconds,
+                output_bytes=self._settings.project_command_output_bytes,
+                environment=self._settings.project_command_environment,
+            ),
         ]
 
     def _provider(self, run_id: UUID) -> ModelProvider:

@@ -99,6 +99,16 @@ class Settings(BaseSettings):
     sandbox_controller_url: str = "http://sandbox-controller:8090"
     sandbox_controller_token: SecretStr | None = None
     sandbox_staging_root: Path = Path("/var/lib/evoagent-sandbox")
+    # M3 项目命令契约：结构化 argv、固定 cwd、允许的可执行文件名白名单。
+    # 默认为空 = 项目里不能运行任何命令；需要显式列出（例如 python、pytest、node、npm）。
+    project_command_allowlist: tuple[str, ...] = ()
+    project_command_timeout_seconds: float = Field(default=120.0, gt=0, le=1_800)
+    project_command_output_bytes: int = Field(default=65_536, ge=1_024, le=1_048_576)
+    # 命令契约允许显式设置的环境变量（例如 PYTHONPATH=src）；
+    # 这是"部署者预先声明"的集合，模型不能自行指定环境变量。
+    project_command_environment: dict[str, str] = Field(default_factory=dict)
+    # 默认离线：一次"允许联网"的批准不会变成长期网络权限。
+    project_command_network_default: bool = False
 
     search_provider: Literal["mock", "brave", "ddgs"] = "mock"
     search_api_key: SecretStr | None = None

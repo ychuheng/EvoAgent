@@ -10,6 +10,7 @@ from evoagent.tools.builtin.artifact_write import ArtifactWriteArguments
 from evoagent.tools.builtin.calculator import CalculatorArguments
 from evoagent.tools.builtin.find_files import FindFilesArguments
 from evoagent.tools.builtin.list_dir import ListDirArguments
+from evoagent.tools.builtin.project_command import RunCommandArguments
 from evoagent.tools.builtin.project_edit import (
     ApplyPatchArguments,
     DeleteFileArguments,
@@ -113,6 +114,14 @@ def default_skill_tool_catalog() -> ToolRegistry:
                 name="move_file",
                 description="重命名或移动已授权项目内的单个文件（不覆盖已存在目标）。",
                 arguments_model=MoveFileArguments,
+                risk=ToolRisk.R1,
+                has_side_effects=True,
+                parallel_safe=False,
+            ),
+            ToolCatalogEntry(
+                name="run_command",
+                description="在已授权项目内运行白名单内的结构化 argv；默认离线。",
+                arguments_model=RunCommandArguments,
                 risk=ToolRisk.R1,
                 has_side_effects=True,
                 parallel_safe=False,
