@@ -106,6 +106,8 @@ async def test_web_fetch_records_final_url_and_raw_body_hash_after_redirect() ->
         "content_bytes": len("内容".encode()),
         "content_sha256": hashlib.sha256("内容".encode()).hexdigest(),
         "text_truncated": False,
+        # 没给 query 时也要显式记录（见 tools/builtin/web_fetch.py 的 excerpt_query）。
+        "excerpt_query": None,
         "redirects": 1,
     }
 
