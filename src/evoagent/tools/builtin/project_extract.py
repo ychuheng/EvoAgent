@@ -65,7 +65,9 @@ class ExtractTextTool(BaseTool[ExtractTextArguments]):
             extraction = read_file_text(physical, display=display, encoding=arguments.encoding)
         except ExtractionError as error:
             # 原样上抛，让执行层记录稳定错误码；不返回半成品内容。
-            raise ToolExecutionError(f"[{error.code}] {error}") from error
+            # 具体原因（pdf_unreadable / unsupported_text_encoding …）同时作为错误码透出，
+            # 页面与账本才能显示"到底是什么问题"。
+            raise ToolExecutionError(f"[{error.code}] {error}", code=error.code) from error
 
         text = normalize_extracted_text(extraction.text)
         header = [

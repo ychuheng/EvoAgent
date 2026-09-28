@@ -10,6 +10,8 @@ from time import monotonic
 
 import httpx
 
+from evoagent.evals.citations import report_from_trace
+
 REQUIRED_CHECKS = {
     "min_searches",
     "min_read_urls",
@@ -52,6 +54,8 @@ def score_trace(case: dict, task: dict, trace: dict) -> dict:
     fetched = [item for item in links if item.get("level") == "fetched_text"]
     unobserved = [item for item in links if item.get("level") == "unobserved"]
     limits = case["checks"]
+    # 逐结论引用核对：上面的检查只说明"引用过来源"，这里说明"每条结论引用的来源是否真读过正文"。
+    citations = report_from_trace(trace)
     checks = {
         "task_completed": task.get("status") == "completed",
         "real_search_observed": bool(searches)
@@ -60,6 +64,7 @@ def score_trace(case: dict, task: dict, trace: dict) -> dict:
         "enough_read_urls": len(read_urls) >= limits["min_read_urls"],
         "enough_fetched_answer_links": len(fetched) >= limits["min_fetched_answer_links"],
         "no_extra_unobserved_links": len(unobserved) <= limits["max_unobserved_answer_links"],
+        "conclusions_backed_by_read_text": citations.passed,
     }
     return {
         "automatic_checks": checks,
@@ -67,10 +72,18 @@ def score_trace(case: dict, task: dict, trace: dict) -> dict:
         "search_count": len(searches),
         "read_urls": sorted(read_urls),
         "answer_links": [{"url": item.get("url"), "level": item.get("level")} for item in links],
+        "per_conclusion": {
+            "counts": citations.counts,
+            "passed": citations.passed,
+            "failures": [
+                {"index": item.index, "text": item.text, "verdict": item.verdict}
+                for item in citations.failures
+            ],
+        },
         "human_review": {
             "status": "pending",
             "questions": case["review_questions"],
-            "note": "URL 对应关系不证明网页支持结论；须逐条核对 Trace 中的正文与答复。",
+            "note": citations.note,
         },
     }
 

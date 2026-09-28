@@ -65,6 +65,14 @@ class ToolExecutionError(ToolError):
 
     code = "tool_execution_error"
 
+    def __init__(self, message: str = "", *, code: str | None = None) -> None:
+        super().__init__(message)
+        # 允许工具把**具体**原因作为错误码透出（例如 `pdf_unreadable`、
+        # `unsupported_text_encoding`）。否则页面与账本只看到笼统的
+        # `tool_execution_error`，排障时不知道到底哪里不对。
+        if code is not None:
+            self.code = code
+
 
 class ToolPermissionError(ToolError):
     """工具调用违反了运行时的最低安全边界。"""
