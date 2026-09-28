@@ -1,91 +1,47 @@
 # EvoAgent
 
-EvoAgent 是一个从零实现的、可测试的 Agent Runtime：在可靠任务执行的基础上，建立可验证、可版本化、可回滚的 Skill 生命周期。
+EvoAgent 是一个在本机运行的个人 Agent。你可以在网页中对话、授权目录，让它查找和读取文件、精确修改代码、运行测试、根据失败继续修正，也可以搜索公开资料并生成可预览、可下载的产物。任务过程会记录为事件与 Trace；高风险工具调用需要审批。项目还实现了 Skill 的提炼、评测、人工发布与回滚流程。
 
-当前目标是**本机个人通用 Agent**：用户在网页中授权项目或目录，Agent 能发现和读取内容、精确修改文件、运行测试、根据失败继续修正，也能研究公开资料、处理日常文件，并从真实任务中提炼有可验证收益的 Skill。用户可查看进度、补充要求、审查差异与产物。以上是[实施目标](docs/EvoAgent-项目设计与分阶段实现计划.md)，不表示已经实现。
+**当前是 `0.4.0.dev0` 候选版。** 真实模型已在开发样本中完成读项目、改代码、失败测试修正和本机命令审批；跨多种真实项目的稳定完成率、Skill 净收益和 M7 发布集尚未验证，不能把候选版当成正式发布。准确范围见[当前状态](docs/当前状态.md)。
 
-## 当前成熟度（2026-09-28，`c2` 分支）
+## 选运行方式
 
-- 版本 `0.4.0.dev0`，**正式 `v0.4` 未放行**；默认 `docker-compose.yml` 仍是 Mock Provider、Mock 搜索、记忆关闭。
-- **已实现**：Agent 内核、PostgreSQL 租约与检查点恢复、审批与副作用账本、上下文预算与压缩、版本化记忆、混合检索与原生维度向量、MCP 审核与卸载、独立执行容器、持久队列与多 Worker、管理页面、显式任务验收条件、个人模式启动入口。
-- **已在真实环境验证**：真实模型网页对话与工具任务、显式验收通过/失败、Worker 存活探测、来源追溯（Mock 搜索）、Skill/记忆/MCP 专项链路、双 Worker 运行中故障恢复与 UNKNOWN 人工处理。
-- **项目工作能力**：项目目录发现、精确编辑、失败测试修正与复测已有开发样本实证；Windows 可信本机模式可对本机目录授权，并在逐次审批后运行本机命令，见[操作说明](docs/可信本机模式.md)。
-- **尚未验证**：跨不同真实项目的稳定完成率、多来源引用的人评、长上下文与复杂组合任务、Skill 净收益及 M7 发布集。Windows 本机命令使用当前用户权限，没有 OS 级隔离；默认 Compose 仍是 Mock。
+| 方式 | 适合什么任务 | 项目路径与命令 | 入口 |
+| --- | --- | --- | --- |
+| Windows 可信本机模式 | 使用 Windows 上的项目和本机工具链 | 登记 Windows 绝对路径；白名单命令逐次审批后以当前用户权限运行 | `http://127.0.0.1:18020/ui/` |
+| Docker 个人模式 | 在受控的 Linux Worker 内处理项目 | 宿主目录挂到 `/app/projects`；命令使用容器内工具链和 Linux 隔离 | `http://127.0.0.1:8000/ui/` |
+| Mock 演示 | 不接模型，只核对执行链路 | 假模型，不代表 Agent 能力 | CLI 或默认 Compose |
 
-完整事实清单（含证据标识、环境、提交与最近一次回归数字）见[当前状态](docs/当前状态.md)；下一步见[当前实现计划](docs/EvoAgent-项目设计与分阶段实现计划.md)。
+本机模式的获批命令**没有 Windows OS 级文件或网络沙箱**，可能触及授权目录之外的资源；它也不能控制桌面鼠标、键盘或任意应用。Docker 模式不能直接运行 Windows 程序。[安全边界说明](docs/安全边界说明.md)区分两种模式。
 
-## 最短启动步骤
+## Windows 本机模式：最短启动
 
-需要 Python 3.12/3.13 与 Docker（含 Compose v2），以及一个支持 tool calling 的 OpenAI-compatible 模型服务。
-
-以下是 Windows PowerShell 的最短启动步骤。
+需要 Windows、Python 3.12/3.13、Docker Desktop、Node.js 24 与 pnpm 11，以及支持 tool calling 的 OpenAI-compatible 对话模型。下列命令在仓库根目录运行：
 
 ```powershell
-# 1. 安装项目
 py -3.13 -m venv .venv
-.\.venv\Scripts\python -m pip install -e ".[dev]"
-
-# 2. 建私有配置并填写 Key / Base URL / 模型名 / 模型实际上下文窗口
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+pnpm --dir frontend install --frozen-lockfile
 Copy-Item .env.personal.example .env.personal
-
-# 3. 本地检查（不访问远端、不消耗额度）
-.\.venv\Scripts\python.exe scripts/personal_preflight.py
-docker compose -f docker-compose.yml -f deploy/personal/compose.yml config --quiet
-
-# 4. 启动并打开 http://127.0.0.1:8000/ui/
-docker compose -p evoagent-personal -f docker-compose.yml -f deploy/personal/compose.yml up -d --build --wait
 ```
 
-关闭时用相同的项目名和两个 Compose 文件执行 `down`（**不要**加 `-v`，否则会删除会话、任务与 Workspace）：
+在 `.env.personal` 中填写模型连接、真实上下文窗口、`trial` 费用上限与价格假设，并显式设置 `EVOAGENT_PROJECT_COMMAND_ALLOWLIST`（例如 `python`、`git`；需要 PowerShell 时单独加入 `powershell`）。不要把密钥提交到仓库。随后执行：
 
 ```powershell
-docker compose -p evoagent-personal -f docker-compose.yml -f deploy/personal/compose.yml down
+pnpm --dir frontend run build
+.\.venv\Scripts\python.exe scripts/host_mode.py
 ```
 
-首条任务、验收条件、错误码排障与可选能力见[个人模式操作手册](docs/个人模式操作手册.md)。
-需要直接访问 Windows 项目及本机工具链时，按[可信本机模式](docs/可信本机模式.md)另行启动独立实例。
+打开 `http://127.0.0.1:18020/ui/`。可以直接创建不绑定项目的会话；要让某条任务操作文件，先在页面登记目录、选择只读或可写，再选择“绑定到本会话”或“仅下一任务使用”。命令审批时核对完整 argv。完整配置、关闭方式及限制见[Windows 可信本机模式](docs/可信本机模式.md)。
 
-只想离线看完整链路时，不需要任何 API Key：
+若希望使用 Docker 隔离的项目工具链，按[个人模式操作手册](docs/个人模式操作手册.md)配置宿主挂载并启动。首次操作与备份恢复见[用户手册](docs/用户手册.md)。不接模型的 CLI 演示运行 `.\.venv\Scripts\evoagent.exe --demo --show-events`。
 
-```powershell
-.\.venv\Scripts\evoagent --demo --show-events
-```
+## 仓库与验证
 
-不配置真实模型的完整环境（Mock 演示）仍然可用，但属于离线/开发用途，不作为当前推荐入口：
+- `src/evoagent/`：Agent 内核、持久化运行时、工具、项目授权、Skill 与 API。
+- `frontend/`：React 页面；`tests/`：单元、集成、端到端与故障测试。
+- `deploy/`、`scripts/`：部署入口、演练和检查工具；`docs/`：操作、架构、计划与证据。
 
-```powershell
-docker compose up --build          # Mock Provider，网页入口 http://127.0.0.1:8000/ui/
-```
+开发检查：`.\.venv\Scripts\ruff.exe check .`、`.\.venv\Scripts\ruff.exe format --check .`、`.\.venv\Scripts\python.exe -m pytest`；前端在 `frontend/` 执行 `pnpm test`、`pnpm build`、`pnpm e2e`。完整集成测试依赖专用 PostgreSQL/Redis；Linux 沙箱测试需要相应容器环境。最近一次 CI 结果以 GitHub Actions 为准。
 
-阶段三的确定性 Skill 生命周期演示、阶段四的演示与发布证据门禁脚本见[归档索引](docs/archive/README.md)中对应的模块说明；这些命令针对专用测试库，不要指向日常数据。
-
-## 运行检查
-
-```powershell
-ruff check .
-ruff format --check .
-pytest
-```
-
-前端（仅在开发或构建管理页面时需要 Node.js 24 与 pnpm 11）：在 `frontend/` 下执行 `pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm e2e`。
-
-文档相对链接检查（移动或重命名文档后必跑）：
-
-```powershell
-.\.venv\Scripts\python.exe scripts/check_doc_links.py .
-```
-
-## 文档导航
-
-| 你的问题 | 看这份 |
-| --- | --- |
-| 怎么运行、怎么发第一条任务 | [个人模式操作手册](docs/个人模式操作手册.md) |
-| 现在能做什么、什么已经真实验证 | [当前状态](docs/当前状态.md) |
-| 接下来做什么、验收门槛 | [个人通用 Agent 当前实现计划](docs/EvoAgent-项目设计与分阶段实现计划.md) |
-| 全部文档怎么找 | [docs/README](docs/README.md) |
-| 源码怎么读 | [源码地图](docs/源码地图.md) → [手册总目录](docs/manual/00-总览与目录.md) |
-| 技术取舍为什么这样定 | [ADR 索引](docs/adr/README.md) |
-| 真实评测与故障实验的结论 | [评测索引](docs/evaluations/README.md)、[证据索引](docs/reports/README.md) |
-| 阶段一至四当时怎么设计与验收 | [归档索引](docs/archive/README.md) |
-
-页面、Trace、审批与失败恢复的展示语义见[运行模式与任务验收条件](docs/Agent运行模式与任务验收条件-2026-09-26.md)；真实任务评测与失败样本见[质量评测](docs/evaluations/Agent真实任务质量评测-2026-09-26.md)和[整体能力核查](docs/evaluations/整体Agent能力核查-2026-09-26.md)。
+文档从[文档导航](docs/README.md)进入：先读[用户手册](docs/用户手册.md)，需要实现细节再看[源码地图](docs/源码地图.md)和[手册总目录](docs/manual/00-总览与目录.md)。[当前实施计划](docs/EvoAgent-项目设计与分阶段实现计划.md)记录尚未关闭的验收门槛；历史阶段文档和逐次报告不代表当前状态。
