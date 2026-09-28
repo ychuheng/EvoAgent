@@ -30,13 +30,25 @@ class RateLimited(ProviderError):
         super().__init__("service quota unavailable within bounded wait", code="rate_limited")
 
 
+class ServiceDependencyUnavailable(ProviderError):
+    """配额所依赖的 Redis 不可用——**不是**限流，也不是模型的错。
+
+    早先这条路径复用 `RateLimited`，运维看到 `rate_limited` 会去查服务商限流，而真实原因是
+    依赖不可用。行为不变：仍然 fail-closed（外部请求一次都不会发出），只是错误码如实表达；
+    它在 `runtime/retry.py` 里被归为瞬时错误，因此 Redis 恢复后任务会按退避重试并自行完成。
+    """
+
+    def __init__(self, message: str = "service quota dependency unavailable") -> None:
+        super().__init__(message, code="dependency_unavailable")
+
+
 class ServiceGate:
     def __init__(self, settings, client=None):
         self.settings = settings
         self.client = client
         self.semaphores = {}
 
-    async def _quota(self, service):
+    async def _quota(self, service, answered: list[bool] | None = None):
         if self.client is None:
             return
         digest = hashlib.sha256(service.encode()).hexdigest()
@@ -53,7 +65,14 @@ class ServiceGate:
                     )
                 )
             except (RedisError, OSError, TimeoutError) as error:
-                raise RateLimited() from error
+                # 依赖不可用（Redis 宕、网络断）区别于"等不到配额"：错误码必须让运维看得出
+                # 该去修依赖还是该降速。这里仍然不发外部请求。
+                raise ServiceDependencyUnavailable(
+                    f"quota dependency unavailable: {type(error).__name__}"
+                ) from error
+            if answered is not None:
+                # 配额服务答复过至少一次：之后即使等待窗口用尽，也是**真的**在限流。
+                answered[0] = True
             if delay <= 0:
                 return
             await asyncio.sleep(min(delay, 0.25))
@@ -64,13 +83,22 @@ class ServiceGate:
             service, asyncio.Semaphore(self.settings.service_concurrency)
         )
         acquired = False
+        entered_quota = False
+        answered: list[bool] = [False]
         try:
             try:
                 async with asyncio.timeout(self.settings.rate_wait_seconds):
                     await semaphore.acquire()
                     acquired = True
-                    await self._quota(service)
+                    entered_quota = True
+                    await self._quota(service, answered)
             except TimeoutError as error:
+                if entered_quota and not answered[0]:
+                    # 走到了配额检查、而配额服务一次都没答复：这是依赖不可用（Redis 挂死、
+                    # 连接被黑洞），不是服务商限流。不能用等待超时把它说成限流。
+                    raise ServiceDependencyUnavailable(
+                        "quota dependency did not answer within the bounded wait"
+                    ) from error
                 raise RateLimited() from error
             # 等待之后必须重新验证租约；数据库不可用时不会发出外部请求。
             if check is not None:

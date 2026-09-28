@@ -19,6 +19,7 @@ from evoagent.db.models import (
     ToolEffectStatus,
 )
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.runtime.retry import INFRASTRUCTURE_RETRY_CODES
 from evoagent.tasks.lease_guard import LeaseGuard, database_now
 from evoagent.tasks.lease_guard import LeaseLostError as LeaseLostError
 from evoagent.tasks.state_machine import (
@@ -141,7 +142,7 @@ class JobLeaseManager:
             task.lease_owner = normalized_owner
             task.lease_expires_at = expires_at
             task.heartbeat_at = current_time
-            if run.error_code != "rate_limited":
+            if run.error_code not in INFRASTRUCTURE_RETRY_CODES:
                 task.attempt_count += 1
             task.lease_epoch += 1
             task.lock_version += 1

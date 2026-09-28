@@ -63,9 +63,10 @@ def make_loop(
     max_iterations: int = 8,
     max_total_tokens: int = 32_000,
     max_repeated_tool_calls: int = 3,
+    tools: list | None = None,
 ) -> tuple[AgentLoop, InMemoryEventSink]:
     sink = InMemoryEventSink(uuid4())
-    registry = ToolRegistry([CalculatorTool()])
+    registry = ToolRegistry(tools if tools is not None else [CalculatorTool()])
     executor = ToolExecutor(
         registry,
         sink,
@@ -190,6 +191,56 @@ async def test_loop_reports_provider_error() -> None:
     assert result.status is AgentLoopStatus.FAILED
     assert result.error_code == "provider_timeout"
     assert sink.events[-1].type is EventType.MODEL_FAILED
+
+
+@pytest.mark.asyncio
+async def test_loop_reports_pre_request_refusals_with_their_own_codes() -> None:
+    """预算拒绝与配额依赖不可用都发生在**发出请求之前**，错误码必须原样上报。
+
+    早先 `BudgetExceededError` 不是 `ProviderError`，于是终态落成通用码
+    `persistent_runtime_error`；`Redis` 不可用则冒充 `rate_limited`。两种情况运维都会被
+    引到错误的方向（"运行时崩了"/"服务商限流"），而真实原因分别是"没额度"和"依赖挂了"。
+    """
+
+    from evoagent.runtime.budget import BudgetExceededError
+    from evoagent.workers.rate_limit import ServiceDependencyUnavailable
+
+    cases = (
+        (BudgetExceededError("正式评测预算未配置"), "budget_exceeded"),
+        (ServiceDependencyUnavailable(), "dependency_unavailable"),
+    )
+    for error, expected in cases:
+        loop, sink = make_loop(MockProvider([error]))
+
+        result = await loop.run(initial_messages())
+
+        assert result.status is AgentLoopStatus.FAILED
+        assert result.error_code == expected
+        assert sink.events[-1].type is EventType.MODEL_FAILED
+        assert sink.events[-1].payload["error_code"] == expected
+
+
+@pytest.mark.asyncio
+async def test_loop_preserves_a_tool_infrastructure_code() -> None:
+    """工具侧报"配额依赖不可用"时，终态要用**它自己的**错误码，而不是被改写。
+
+    改写的后果很实际：运维看到 `rate_limited` 会去查服务商限流，而真实原因是本地依赖挂了。
+    """
+
+    from evoagent.tools.base import ToolExecutionError
+
+    class FailingCalculator(CalculatorTool):
+        async def invoke(self, arguments):  # type: ignore[override]
+            raise ToolExecutionError("quota dependency down", code="dependency_unavailable")
+
+    call = ToolCall(call_id="call-1", name="calculator", arguments={"expression": "1+1"})
+    provider = MockProvider([tool_response(call), text_response("recovered")])
+    loop, _ = make_loop(provider, tools=[FailingCalculator()])
+
+    result = await loop.run(initial_messages())
+
+    assert result.status is AgentLoopStatus.FAILED
+    assert result.error_code == "dependency_unavailable"
 
 
 @pytest.mark.asyncio

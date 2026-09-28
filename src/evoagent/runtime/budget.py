@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.db.models import SpendRecord
+from evoagent.providers.base import ProviderError
 
 MICROS_PER_UNIT = 1_000_000
 
@@ -34,8 +35,17 @@ class BudgetScope(StrEnum):
     FORMAL = "formal"
 
 
-class BudgetExceededError(Exception):
-    """额度不足、未填数值或已达到停止阈值。"""
+class BudgetExceededError(ProviderError):
+    """额度不足、未填数值或已达到停止阈值。
+
+    必须是 `ProviderError`：预算闸门在**发出请求之前**拒绝，异常从 provider 包装层抛出，
+    只有归一化过的 Provider 错误才会被 AgentLoop 如实写成 `model.failed` 的 `error_code`。
+    早先它只是普通 `Exception`，于是终态落成通用码 `persistent_runtime_error`，
+    运维看到的是"运行时崩了"，而不是"额度用完了/没配额度"。
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="budget_exceeded")
 
     code = "budget_exceeded"
 

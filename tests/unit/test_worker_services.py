@@ -5,8 +5,9 @@ import pytest
 from redis.exceptions import ConnectionError
 
 from evoagent.config import Settings
-from evoagent.runtime.budget import BudgetScope
-from evoagent.workers.rate_limit import RateLimited, ServiceGate
+from evoagent.providers.base import ProviderError
+from evoagent.runtime.budget import BudgetExceededError, BudgetScope
+from evoagent.workers.rate_limit import RateLimited, ServiceDependencyUnavailable, ServiceGate
 from evoagent.workers.wakeup import Wakeup
 
 
@@ -20,10 +21,61 @@ class BrokenRedis:
 
 async def test_redis_failure_is_closed_for_quota_but_best_effort_for_wakeup():
     gate = ServiceGate(Settings(_env_file=None), BrokenRedis())
-    with pytest.raises(RateLimited):
+    with pytest.raises(ServiceDependencyUnavailable) as failure:
         async with gate.acquire("model:test"):
             pytest.fail("external request must not execute")
+    # 依然是 fail-closed，只是错误码要说真话：Redis 不可用 ≠ 服务商限流。
+    assert failure.value.code == "dependency_unavailable"
+    assert not isinstance(failure.value, RateLimited)
     await Wakeup(BrokenRedis(), "test").publish()
+
+
+async def test_silent_redis_is_a_dependency_failure_not_a_rate_limit():
+    """Redis 挂死（连接被黑洞、答复超时）同样必须是 `dependency_unavailable`。
+
+    这条路径比"立刻连接被拒"更常见，也更容易被误报：等待窗口用尽是 `asyncio.timeout`
+    抛出来的，早先一律转成 `rate_limited`，于是运维去查服务商配额。
+    """
+
+    class SilentRedis:
+        async def eval(self, *args):
+            await asyncio.sleep(60)
+
+    gate = ServiceGate(
+        Settings(_env_file=None, rate_wait_seconds=0.05, service_concurrency=1), SilentRedis()
+    )
+    with pytest.raises(ServiceDependencyUnavailable) as failure:
+        async with gate.acquire("model:test"):
+            pytest.fail("external request must not execute")
+    assert failure.value.code == "dependency_unavailable"
+
+
+async def test_genuine_throttling_still_reports_rate_limited():
+    """配额服务答复过、但等不到令牌：这才是真正的限流，不能改口说成依赖不可用。"""
+
+    class EmptyBucket:
+        async def eval(self, *args):
+            return "30"  # 服务答复：还要等 30 秒才有令牌
+
+    gate = ServiceGate(
+        Settings(_env_file=None, rate_wait_seconds=0.05, service_concurrency=1), EmptyBucket()
+    )
+    with pytest.raises(RateLimited) as failure:
+        async with gate.acquire("model:test"):
+            pytest.fail("external request must not execute")
+    assert failure.value.code == "rate_limited"
+
+
+def test_dependency_and_budget_errors_are_provider_errors() -> None:
+    """两条"调用前拒绝"的路径都必须是 ProviderError，否则终态会退化成通用码。
+
+    `AgentLoop` 只把 `ProviderError` 归一化成 `model.failed` 的 `error_code`；
+    普通 Exception 落到 `persistent_runtime_error`，运维看不出到底是没额度还是依赖挂了。
+    """
+
+    assert isinstance(ServiceDependencyUnavailable(), ProviderError)
+    assert isinstance(BudgetExceededError("no limit configured"), ProviderError)
+    assert BudgetExceededError("no limit configured").code == "budget_exceeded"
 
 
 async def test_service_concurrency_and_cancel_release():

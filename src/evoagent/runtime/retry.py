@@ -31,6 +31,9 @@ _TRANSIENT_CODES = {
     "internal_provider_error",
     "tool_timeout",
     "temporary_tool_error",
+    # 配额依赖（Redis）不可用：基础设施问题，恢复后应按退避重试；早先它冒充 `rate_limited`，
+    # 既不进限流集合也不进瞬时集合，只能靠 persistent_runner 的特例兜住。
+    "dependency_unavailable",
 }
 _RATE_LIMIT_CODES = {
     "provider_rate_limit",
@@ -43,6 +46,13 @@ _REQUIRES_USER_CODES = {
     "authentication_required",
     "provider_auth_error",
 }
+
+# 基础设施还没准备好（服务商限流、配额依赖 Redis 不可用）**不是任务失败**：
+# 既不计入尝试次数、也不该在依赖恢复前把任务的重试预算耗光，而且已经完成的迭代要落成
+# 检查点，恢复后不重做。早先只有 `rate_limited` 享受这个待遇，Redis 故障正是冒充它
+# 才顺带被豁免的；现在这三处（`loop` 存检查点、`lease` 计次、`persistent_runner` 重试）
+# 共用这一份定义，避免再出现"一个改了、另一个没改"。
+INFRASTRUCTURE_RETRY_CODES = frozenset({"rate_limited", "dependency_unavailable"})
 
 
 class RetryPolicy:

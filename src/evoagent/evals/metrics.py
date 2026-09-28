@@ -30,6 +30,12 @@ from evoagent.evals.lifecycle import EvalRunMode
 from evoagent.skills.canonical import canonical_json, content_hash
 from evoagent.trace.artifacts import ArtifactService
 
+# 这些 `model.failed` 事件发生时**请求根本没发出去**（预算是调用前拒绝、配额依赖不可用、
+# 限流等待超时），因此它们不代表模型能力，也不该被算成"模型失败尝试"。
+_NO_PROVIDER_REQUEST_CODES = frozenset(
+    {"rate_limited", "budget_exceeded", "dependency_unavailable"}
+)
+
 
 class RunMetrics(BaseModel):
     """单次 EvalRun 的原始指标；未知值保持为 ``None``。"""
@@ -135,7 +141,8 @@ def model_usage_rows(turns, events):
     failed = [
         None
         for event in events
-        if event.event_type == "model.failed" and event.payload.get("error_code") != "rate_limited"
+        if event.event_type == "model.failed"
+        and event.payload.get("error_code") not in _NO_PROVIDER_REQUEST_CODES
     ]
     return completed + failed if completed or failed else [turn.usage for turn in turns]
 

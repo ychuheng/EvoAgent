@@ -36,7 +36,7 @@ from evoagent.tasks.service import TaskService
 from evoagent.tasks.state_machine import PersistentRunStatus
 from evoagent.tools.registry import ToolRegistry
 from evoagent.trace.artifacts import LocalArtifactStore
-from evoagent.workers.rate_limit import RateLimited, ServiceGate
+from evoagent.workers.rate_limit import ServiceDependencyUnavailable, ServiceGate
 from evoagent.workers.wakeup import Wakeup
 
 
@@ -236,7 +236,9 @@ async def test_demo_real_redis_outage_keeps_db_task(demo_db, tmp_path, record_pr
             )
             assert lease.task_id == task.task.id
             gate = ServiceGate(Settings(_env_file=None, rate_wait_seconds=0.1), client)
-            with pytest.raises(RateLimited):
+            # 真实连接被拒（或答复超时）都是依赖不可用；早先一律报 `rate_limited`，
+            # 断言在当时还依赖"连接拒绝比等待窗口更快"这种时序，现在两条路径同码。
+            with pytest.raises(ServiceDependencyUnavailable):
                 async with gate.acquire("model:demo"):
                     pytest.fail("must not dispatch external request during quota outage")
             await JobLeaseManager(demo_db.session_factory, lease_seconds=60).finalize(

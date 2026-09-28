@@ -24,7 +24,7 @@ from evoagent.projects.schema import ProjectAuthorizationRevoked
 from evoagent.providers.base import ModelProvider
 from evoagent.runtime.checkpoints import PersistentCheckpointStore, SnapshotCompatibilityError
 from evoagent.runtime.context_store import ContextStore
-from evoagent.runtime.retry import RetryPolicy
+from evoagent.runtime.retry import INFRASTRUCTURE_RETRY_CODES, RetryPolicy
 from evoagent.runtime.run_config import RunConfigSnapshot, RunMode, sha256_text
 from evoagent.sessions.service import history_for_task
 from evoagent.skills.canonical import content_hash
@@ -378,7 +378,7 @@ class PersistentAgentRunner:
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=UTC)
         if (
-            error_code == "rate_limited"
+            error_code in INFRASTRUCTURE_RETRY_CODES
             and (datetime.now(UTC) - created_at).total_seconds()
             < self._settings.retry_max_elapsed_seconds
         ):

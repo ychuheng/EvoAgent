@@ -24,6 +24,7 @@ from evoagent.core.models import (
     ToolResultStatus,
 )
 from evoagent.providers.base import ModelProvider, ProviderError, ProviderProtocolError
+from evoagent.runtime.retry import INFRASTRUCTURE_RETRY_CODES
 from evoagent.tools.executor import ToolExecutor
 from evoagent.tools.registry import ToolRegistry
 
@@ -246,7 +247,9 @@ class AgentLoop:
             except asyncio.CancelledError:
                 raise
             except ProviderError as error:
-                if error.code == "rate_limited":
+                if error.code in INFRASTRUCTURE_RETRY_CODES:
+                    # 限流与配额依赖不可用都会被重试：先把已完成的迭代落成检查点，
+                    # 恢复后不重做（Redis 故障原先冒充 `rate_limited` 才走到这里）。
                     await self._save_checkpoint(
                         messages=messages,
                         completed_iterations=iteration - 1,
@@ -389,11 +392,22 @@ class AgentLoop:
             previous_tool_fingerprint=previous_tool_fingerprint,
             repeated_tool_calls=repeated_tool_calls,
         )
-        if any(result.error_code == "rate_limited" for result in results):
+        quota_failure = next(
+            (result for result in results if result.error_code in INFRASTRUCTURE_RETRY_CODES),
+            None,
+        )
+        if quota_failure is not None:
+            # 工具侧的基础设施拒绝（MCP 配额/依赖不可用）按同一套码上报，交给重试策略处理。
             return (
                 previous_tool_fingerprint,
                 repeated_tool_calls,
-                self._failure(messages, iteration, usage, "rate_limited", "tool quota unavailable"),
+                self._failure(
+                    messages,
+                    iteration,
+                    usage,
+                    quota_failure.error_code,
+                    "tool quota unavailable",
+                ),
             )
         if repeated_tool_calls >= self._max_repeated_tool_calls:
             return (
