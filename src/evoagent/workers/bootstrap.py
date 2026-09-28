@@ -291,6 +291,7 @@ class ConfiguredTaskHandler:
                 memory_bytes=self._settings.project_command_memory_bytes,
                 max_processes=self._settings.project_command_max_processes,
                 environment=self._settings.project_command_environment,
+                trusted_host_mode=self._settings.trusted_host_mode,
             ),
         ]
 

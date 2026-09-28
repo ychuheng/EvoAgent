@@ -82,6 +82,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
   const [error, setError] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectScope, setProjectScope] = useState<"session" | "task">("session");
   const [projectPath, setProjectPath] = useState("");
   const [projectName, setProjectName] = useState("");
   const [projectWritable, setProjectWritable] = useState(false);
@@ -171,6 +172,10 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     setError("");
     const selected = sessions.find((item) => item.id === id);
     if (selected) setWorkspaceId(selected.workspace_id);
+    if (selected) {
+      setProjectId(selected.project_id);
+      setProjectScope("session");
+    }
     localStorage.setItem(STORAGE_KEY, id);
     setSessionId(id);
   }
@@ -211,7 +216,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     setProjectId(next);
     if (next === null) localStorage.removeItem(PROJECT_STORAGE_KEY);
     else localStorage.setItem(PROJECT_STORAGE_KEY, next);
-    if (sessionId) {
+    if (sessionId && projectScope === "session") {
       try {
         const updated = await chat.selectSessionProject(sessionId, next);
         setSessions((items) => items.map((item) => (item.id === updated.id ? updated : item)));
@@ -281,7 +286,9 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
     try {
       let id = sessionId;
       if (!id) {
-        const created = await chat.createSession(goal.slice(0, 80), workspaceId, projectId);
+        const created = await chat.createSession(
+          goal.slice(0, 80), workspaceId, projectScope === "session" ? projectId : null,
+        );
         id = created.id;
         setSessions((items) => [created, ...items]);
         selectSession(id);
@@ -291,7 +298,11 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
         required_tools: requiredTool.trim() ? [requiredTool.trim()] : [],
         required_files: requiredFile.trim() ? [{ path: requiredFile.trim() }] : [],
       } : null;
-      const task = await chat.createTask(id, goal, acceptance);
+      const task = await chat.createTask(id, goal, acceptance, projectScope === "task" ? projectId : undefined);
+      if (projectScope === "task") {
+        setProjectId(sessions.find((item) => item.id === id)?.project_id ?? null);
+        setProjectScope("session");
+      }
       setDraft("");
       setRequiredText("");
       setRequiredTool("");
@@ -327,6 +338,10 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
         <li key={item.id}><button type="button" className={`skill-row ${sessionId === item.id ? "selected" : ""}`} onClick={() => selectSession(item.id)}>{item.title}</button></li>
       )}</ul>
       <div className="chat-project">
+        <label>项目使用范围<select aria-label="项目使用范围" value={projectScope} onChange={event => setProjectScope(event.target.value as "session" | "task")}>
+          <option value="session">绑定到本会话</option>
+          <option value="task">仅下一任务使用</option>
+        </select></label>
         <label>授权项目<select aria-label="当前项目" value={projectId ?? ""} onChange={event => void selectProject(event.target.value)}>
           <option value="">不使用项目</option>
           {projects.map(item => <option key={item.id} value={item.id} disabled={item.status === "revoked"}>{item.name} · {projectStatusLabel(item)}</option>)}
@@ -335,26 +350,28 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
           const current = projects.find(item => item.id === projectId);
           if (!current) return null;
           return <div className="chat-project-detail">
-            <p className="chat-meta">Agent 可见的根：<code>{current.root}</code>（授权版本 {current.authorization_version}）</p>
+            <p className="chat-meta">文件工具的授权根：<code>{current.root}</code>（授权版本 {current.authorization_version}）</p>
             <p className="chat-meta">{projectStatusLabel(current)}。切换项目不影响已经在跑的任务；撤销或改级会让在跑任务的下一次工具调用被拒绝并留下审计。</p>
+            {projectScope === "task" && <p className="chat-meta">此目录只用于下一条任务，不改变对话绑定的项目。</p>}
             <button type="button" className="chat-detail-button" onClick={() => void toggleProjectWrite()}>{current.authorization === "read_write" ? "改为只读授权" : "改为可写授权"}</button>
             <button type="button" className="chat-detail-button" onClick={() => void revokeProject()}>撤销该授权</button>
             <button type="button" className="chat-detail-button" onClick={() => void refreshProjects()}>重新检查目录</button>
           </div>;
         })()}
         <details className="chat-project-register"><summary>登记新的项目目录</summary>
-          <label>绝对路径<input aria-label="项目根路径" value={projectPath} onChange={event => setProjectPath(event.target.value)} placeholder="例如：D:\work\my-repo" /></label>
+          <label>绝对路径<input aria-label="项目根路径" value={projectPath} onChange={event => setProjectPath(event.target.value)} placeholder={runtimeInfo?.execution_mode === "trusted_windows_host" ? "例如：D:\work\my-repo" : "例如：/app/projects/my-repo"} /></label>
           <label>显示名（可选）<input aria-label="项目显示名" value={projectName} onChange={event => setProjectName(event.target.value)} placeholder="例如：示例仓库" /></label>
           <label className="chat-checkbox"><input type="checkbox" checked={projectWritable} onChange={event => setProjectWritable(event.target.checked)} />同时授予可写授权（Agent 可修改文件）</label>
-          <p className="chat-meta">默认只读。路径必须是绝对路径、已存在且不是符号链接；登记后 Agent 只能看到这个根。</p>
+          <p className="chat-meta">默认只读。路径必须是绝对路径、已存在且不是符号链接。{runtimeInfo?.execution_mode === "trusted_windows_host" ? "本机文件工具受这个根约束；获批的本机命令使用当前 Windows 用户权限。" : "容器项目工具受这个根约束。"}</p>
           <button type="button" disabled={!projectPath.trim()} onClick={() => void registerProject()}>登记</button>
         </details>
       </div>
     </aside>
     <section className="panel chat-main" aria-label="对话内容">
       <div className="chat-runtime" role="status">
+        {runtimeInfo?.execution_mode === "trusted_windows_host" && <p><strong>Windows 本机模式</strong>：授权目录中的文件由本机进程访问；本机命令每次需要审批，执行程序拥有当前 Windows 用户的权限。</p>}
         {runtimeInfo?.provider_mode === "mock" ? <><strong>当前是 Mock 演示</strong><span>回复由离线脚本生成，不是 AI 对话。请按运行说明配置真实模型。</span></> :
-          runtimeInfo?.provider_mode === "real" ? <><strong>真实模型已配置：{runtimeInfo.model}</strong><span>{runtimeInfo.worker_status === "ready" ? "Worker 在线；模型连接及配置一致性将在任务执行时验证。" : runtimeInfo.worker_status === "missing" ? "未检测到在线 Worker，任务可能持续排队；请检查 Worker 容器。" : "Worker 状态无法判断；模型连接将在任务执行时验证。"}{runtimeInfo.search_mode === "mock" ? "网页搜索仍是 Mock。" : `网页搜索提供方：${runtimeInfo.search_mode}；可用性将在任务执行时验证。`}{!runtimeInfo.memory_enabled ? "记忆召回未开启。" : ""}</span></> :
+          runtimeInfo?.provider_mode === "real" ? <><strong>真实模型已配置：{runtimeInfo.model}</strong><span>{runtimeInfo.worker_status === "ready" ? "Worker 在线；模型连接及配置一致性将在任务执行时验证。" : runtimeInfo.worker_status === "missing" ? `未检测到在线 Worker，任务可能持续排队；请检查${runtimeInfo.execution_mode === "trusted_windows_host" ? "本机 Worker" : "Worker 容器"}。` : "Worker 状态无法判断；模型连接将在任务执行时验证。"}{runtimeInfo.search_mode === "mock" ? "网页搜索仍是 Mock。" : `网页搜索提供方：${runtimeInfo.search_mode}；可用性将在任务执行时验证。`}{!runtimeInfo.memory_enabled ? "记忆召回未开启。" : ""}</span></> :
           <><strong>运行模式未确认</strong><span>请检查 API 服务；任务详情会显示实际使用的模型。</span></>}
       </div>
       {sessionId && <button type="button" className="chat-detail-button" onClick={() => onOpenMemory(sessionId)}>查看本会话记忆</button>}
@@ -367,7 +384,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
           {message.task_id && <button type="button" className="chat-detail-button" onClick={() => setSelectedTask(message.task_id)}>{selectedTask === message.task_id ? "正在查看执行过程" : "查看执行过程"}</button>}
         </article>)}
         {pendingTask && <p role="status" className="state">{taskStatus === "waiting_user" ? "等待人工决定，请在下方处理。" : `Agent 正在处理… ${taskStatusLabel[taskStatus] ?? taskStatus}${progress.current ? ` · ${progress.current}` : ""}`}{unfinishedTasks(messages).length > 1 ? ` · 后续排队 ${unfinishedTasks(messages).length - 1} 项` : ""}</p>}
-        {pendingTask && taskStatus === "queued" && queuedSince !== null && queueWaitSeconds >= 30 && <p role="alert" className="state">任务已排队超过 30 秒，Worker 尚未领取。请检查 Worker 容器是否运行；模型连接状态要在任务开始执行后才能确认。</p>}
+        {pendingTask && taskStatus === "queued" && queuedSince !== null && queueWaitSeconds >= 30 && <p role="alert" className="state">任务已排队超过 30 秒，Worker 尚未领取。请检查{runtimeInfo?.execution_mode === "trusted_windows_host" ? "本机 Worker" : "Worker 容器"}是否运行；模型连接状态要在任务开始执行后才能确认。</p>}
         {progress.steps.length > 0 && <details className="chat-progress" open={!!pendingTask}>
           <summary>执行进度（已收到 {progress.steps.length} 个事件）</summary>
           <ol>{progress.steps.map((step) => <li key={step.sequence} data-event-type={step.type}>

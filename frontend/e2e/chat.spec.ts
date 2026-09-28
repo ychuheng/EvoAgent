@@ -4,6 +4,34 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/runtime-info", route => route.fulfill({ json: { provider_mode: "mock", provider: "mock", model: "mock-model", search_mode: "mock", memory_enabled: false, code_version: "0.4.0.dev0", remote_model_checked: false } }));
 });
 
+test("无项目会话可给下一任务临时授权目录", async ({ page }) => {
+  const workspaceId = "00000000-0000-0000-0000-000000000001";
+  const projectId = "00000000-0000-0000-0000-000000000099";
+  const now = new Date().toISOString();
+  const project = { id: projectId, name: "临时目录", root: "D:/work/sample", authorization: "read", status: "available", authorization_version: 1, root_status: "available", created_at: now };
+  await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [{ id: workspaceId, name: "Local", created_at: now }] }));
+  await page.route("**/api/v1/projects", route => route.fulfill({ json: [project] }));
+  await page.route("**/api/v1/sessions", async route => {
+    if (route.request().method() === "POST") {
+      expect(route.request().postDataJSON().project_id).toBeNull();
+      await route.fulfill({ status: 201, json: { id: "session-once", title: "临时处理", workspace_id: workspaceId, project_id: null, created_at: now } });
+    } else await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/v1/sessions/session-once/messages", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/tasks", async route => {
+    expect(route.request().postDataJSON().project_id).toBe(projectId);
+    await route.fulfill({ status: 202, json: { id: "task-once", status: "queued", created_at: now, latest_run: { id: "run-once" } } });
+  });
+  await page.route("**/api/v1/tasks/task-once", route => route.fulfill({ json: { id: "task-once", status: "queued", created_at: now, latest_run: { id: "run-once" } } }));
+  await page.goto("/ui/");
+  await page.getByLabel("项目使用范围").selectOption("task");
+  await page.getByLabel("当前项目").selectOption(projectId);
+  await page.getByLabel("发送消息").fill("临时处理");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(page.getByLabel("项目使用范围")).toHaveValue("session");
+  await expect(page.getByLabel("当前项目")).toHaveValue("");
+});
+
 test("网页对话可发送、等待回复并在刷新后恢复同一 Session", async ({ page }) => {
   const workspaceId = "00000000-0000-0000-0000-000000000001";
   const sessions: Array<{ id: string; title: string; workspace_id: string; created_at: string }> = [];

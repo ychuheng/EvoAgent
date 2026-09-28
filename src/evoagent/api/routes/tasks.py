@@ -57,6 +57,7 @@ async def create_task(
         model=request.model or settings.model or "mock-model",
         run_mode=request.run_mode,
         project_id=request.project_id,
+        project_override="project_id" in request.model_fields_set,
         input_paths=request.input_paths,
     )
     return _response(aggregate)

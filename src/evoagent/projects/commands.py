@@ -19,6 +19,7 @@ import asyncio
 import os
 import re
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -129,7 +130,9 @@ def command_category(argv: Sequence[str]) -> str:
     return "general"
 
 
-def validate_argv(argv: Sequence[str], *, allowlist: Sequence[str]) -> tuple[str, ...]:
+def validate_argv(
+    argv: Sequence[str], *, allowlist: Sequence[str], trusted_host_mode: bool = False
+) -> tuple[str, ...]:
     """校验 argv 的结构、长度与可执行文件白名单，返回规范化后的元组。"""
 
     if not argv:
@@ -150,13 +153,21 @@ def validate_argv(argv: Sequence[str], *, allowlist: Sequence[str]) -> tuple[str
     if _SHELL_METACHARACTER_PATTERN.search(program):
         raise ToolExecutionError("第一个参数必须是可执行文件名，不能包含 shell 元字符")
     for item in argv[1:]:
-        if any(token in item for token in SHELL_METACHARACTERS):
+        if not trusted_host_mode and any(token in item for token in SHELL_METACHARACTERS):
             raise ToolExecutionError("参数含 shell 元字符；请用结构化 argv，不要拼接命令")
 
     name = Path(program).name
     if command_category(argv) == "publish":
         raise ToolPermissionError("发布与 Git 远端操作需要独立工具授权，不能通过项目命令执行")
-    if name.lower() in {"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "sh", "bash"}:
+    if not trusted_host_mode and name.lower() in {
+        "cmd",
+        "cmd.exe",
+        "powershell",
+        "powershell.exe",
+        "pwsh",
+        "sh",
+        "bash",
+    }:
         raise ToolExecutionError("不允许通过 shell 解释器执行命令")
     if name not in allowlist:
         raise ToolExecutionError(
@@ -273,6 +284,7 @@ async def run_command(
     environment_extra: Mapping[str, str] | None = None,
     memory_limit_bytes: int = 1_073_741_824,
     max_processes: int = DEFAULT_MAX_PROCESSES,
+    trusted_host_mode: bool = False,
 ) -> CommandOutcome:
     """执行一次结构化命令并返回结构化结果；超时或越界都以异常或字段如实表达。
 
@@ -282,14 +294,37 @@ async def run_command(
     也算在内），做不了 per-command 配额；原委记在 `_watch_process_tree` 的文档里。
     """
 
-    argv = validate_argv(spec.argv, allowlist=allowlist)
+    argv = validate_argv(spec.argv, allowlist=allowlist, trusted_host_mode=trusted_host_mode)
     cwd, cwd_display = validate_cwd(root, spec.cwd)
-    validate_arguments_inside_root(root, argv)
+    # A trusted host interpreter may include paths in its command text. Approval,
+    # not lexical path inspection, is the boundary for that deliberately broad call.
+    host_interpreter = Path(argv[0]).name.lower() in {
+        "cmd",
+        "cmd.exe",
+        "powershell",
+        "powershell.exe",
+        "pwsh",
+        "pwsh.exe",
+    }
+    if not (trusted_host_mode and host_interpreter):
+        validate_arguments_inside_root(root, argv)
 
     if memory_limit_bytes < 134_217_728:
         raise ToolExecutionError("项目命令内存上限不能低于 128 MiB")
     if max_processes < MIN_PROCESSES:
         raise ToolExecutionError(f"项目命令进程数上限不能低于 {MIN_PROCESSES}")
+    if trusted_host_mode:
+        if os.name != "nt":
+            raise ToolExecutionError("可信本机模式只支持 Windows 主机进程")
+        return await _run_trusted_windows_command(
+            argv,
+            cwd=cwd,
+            cwd_display=cwd_display,
+            spec=spec,
+            timeout_seconds=timeout_seconds,
+            output_limit=output_limit,
+            environment_extra=environment_extra,
+        )
     if not sys.platform.startswith("linux"):
         raise ToolExecutionError("项目命令需要 Linux Landlock/seccomp 隔离执行环境")
 
@@ -358,6 +393,104 @@ async def run_command(
         cwd=cwd_display,
         program=Path(argv[0]).name,
         process_limit_exceeded=process_limit_exceeded,
+    )
+
+
+async def _read_bounded(stream: asyncio.StreamReader, limit: int) -> tuple[bytes, bool]:
+    chunks = bytearray()
+    truncated = False
+    while chunk := await stream.read(65_536):
+        remaining = max(0, limit + 1 - len(chunks))
+        chunks.extend(chunk[:remaining])
+        if len(chunks) > limit or len(chunk) > remaining:
+            truncated = True
+    return bytes(chunks[:limit]), truncated
+
+
+async def _kill_windows_tree(pid: int) -> None:
+    try:
+        killer = await asyncio.create_subprocess_exec(
+            "taskkill",
+            "/PID",
+            str(pid),
+            "/T",
+            "/F",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(killer.wait(), timeout=5)
+    except (OSError, TimeoutError) as error:
+        raise ToolExecutionError(f"无法终止 Windows 命令进程树 {pid}: {error}") from error
+
+
+async def _run_trusted_windows_command(
+    argv: tuple[str, ...],
+    *,
+    cwd: Path,
+    cwd_display: str,
+    spec: CommandSpec,
+    timeout_seconds: float,
+    output_limit: int,
+    environment_extra: Mapping[str, str] | None,
+) -> CommandOutcome:
+    """Explicitly approved Windows command, with no claim of OS sandboxing.
+
+    An interpreter can reach outside the project using its own code. The UI must
+    therefore approve every call and must describe this as trusted host access.
+    """
+    if not spec.allow_network:
+        raise ToolPermissionError(
+            "Windows 本机命令无法保证断网；请显式设置 allow_network=true 并等待逐次审批"
+        )
+    environment = build_environment(allow_network=True, extra=environment_extra)
+    started = time.perf_counter()
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=str(cwd),
+            env=environment,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+    except (OSError, ValueError) as error:
+        raise ToolExecutionError(f"Windows 命令无法启动：{error}") from error
+    assert process.stdout is not None and process.stderr is not None
+    stdout_task = asyncio.create_task(_read_bounded(process.stdout, output_limit))
+    stderr_task = asyncio.create_task(_read_bounded(process.stderr, output_limit))
+    timed_out = False
+    try:
+        await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
+    except TimeoutError:
+        timed_out = True
+        await _kill_windows_tree(process.pid)
+        await asyncio.wait_for(process.wait(), timeout=5)
+    except asyncio.CancelledError:
+        await _kill_windows_tree(process.pid)
+        await asyncio.wait_for(process.wait(), timeout=5)
+        stdout_task.cancel()
+        stderr_task.cancel()
+        raise
+    try:
+        (stdout, stdout_truncated), (stderr, stderr_truncated) = await asyncio.wait_for(
+            asyncio.gather(stdout_task, stderr_task), timeout=5
+        )
+    except TimeoutError:
+        stdout_task.cancel()
+        stderr_task.cancel()
+        raise ToolExecutionError("Windows 命令的子进程仍持有输出流，无法安全收尾") from None
+    duration = time.perf_counter() - started
+    return CommandOutcome(
+        return_code=process.returncode,
+        stdout=stdout.decode("utf-8", errors="replace"),
+        stderr=stderr.decode("utf-8", errors="replace"),
+        stdout_truncated=stdout_truncated,
+        stderr_truncated=stderr_truncated,
+        duration_seconds=round(duration, 3),
+        timed_out=timed_out,
+        cwd=cwd_display,
+        program=Path(argv[0]).name,
     )
 
 

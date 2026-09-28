@@ -1,5 +1,6 @@
 """FastAPI 应用工厂与进程生命周期。"""
 
+import mimetypes
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -166,6 +167,9 @@ def create_app(
     app.include_router(evals.router, prefix="/api/v1")
     app.add_api_route("/viewer", trace_viewer, response_class=HTMLResponse, include_in_schema=False)
     if resolved_settings.frontend_dist.is_dir():
+        # Windows may register .js as text/plain. Browsers refuse to execute an
+        # ES module served with that MIME type, leaving the UI entirely blank.
+        mimetypes.add_type("text/javascript", ".js")
         app.mount(
             "/ui",
             StaticFiles(directory=resolved_settings.frontend_dist, html=True),
@@ -268,6 +272,9 @@ def create_app(
             search_mode=resolved_settings.search_provider,
             memory_enabled=resolved_settings.memory_retrieval_enabled,
             code_version=resolved_settings.code_version,
+            execution_mode=(
+                "trusted_windows_host" if resolved_settings.trusted_host_mode else "container"
+            ),
             worker_status=(
                 "unknown" if worker_ready is None else "ready" if worker_ready else "missing"
             ),

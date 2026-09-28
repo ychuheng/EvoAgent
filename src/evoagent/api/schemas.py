@@ -40,6 +40,7 @@ class RuntimeInfoResponse(ApiModel):
     code_version: str
     remote_model_checked: bool = False
     worker_status: Literal["ready", "missing", "unknown"] = "unknown"
+    execution_mode: Literal["container", "trusted_windows_host"] = "container"
 
 
 class SessionCreateRequest(ApiModel):

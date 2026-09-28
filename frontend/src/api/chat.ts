@@ -10,6 +10,7 @@ export type RuntimeInfo = {
   code_version: string;
   remote_model_checked: boolean;
   worker_status: "ready" | "missing" | "unknown";
+  execution_mode?: "container" | "trusted_windows_host";
 };
 export type ChatSession = {
   id: string;
@@ -147,8 +148,8 @@ export const chat = {
     }),
   messages: (sessionId: string) =>
     request<ChatMessage[]>(`/sessions/${encodeURIComponent(sessionId)}/messages`),
-  createTask: (sessionId: string, goal: string, acceptance?: ChatTask["acceptance"]) => request<ChatTask>("/tasks", {
-    method: "POST", body: JSON.stringify({ session_id: sessionId, goal, acceptance: acceptance ?? null }),
+  createTask: (sessionId: string, goal: string, acceptance?: ChatTask["acceptance"], projectId?: string | null) => request<ChatTask>("/tasks", {
+    method: "POST", body: JSON.stringify({ session_id: sessionId, goal, acceptance: acceptance ?? null, ...(projectId !== undefined ? { project_id: projectId } : {}) }),
   }),
   task: (taskId: string) => request<ChatTask>(`/tasks/${encodeURIComponent(taskId)}`),
   addInstruction: (taskId: string, content: string) =>

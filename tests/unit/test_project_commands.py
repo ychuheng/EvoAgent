@@ -27,11 +27,78 @@ PYTHON = Path(sys.executable).name
 ALLOWLIST = (PYTHON, "pytest")
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "win32", reason="可信本机命令只在 Windows 上运行")
+async def test_windows_host_command_requires_explicit_network_acknowledgement(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ToolPermissionError, match="allow_network=true"):
+        await run_command(
+            tmp_path,
+            CommandSpec((sys.executable, "-V")),
+            allowlist=ALLOWLIST,
+            timeout_seconds=10,
+            output_limit=1024,
+            trusted_host_mode=True,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "win32", reason="可信本机命令只在 Windows 上运行")
+async def test_windows_host_command_runs_only_when_explicitly_enabled(tmp_path: Path) -> None:
+    spec = CommandSpec((sys.executable, "-V"), allow_network=True)
+    with pytest.raises(ToolExecutionError, match="Linux Landlock/seccomp"):
+        await run_command(
+            tmp_path,
+            spec,
+            allowlist=ALLOWLIST,
+            timeout_seconds=10,
+            output_limit=1024,
+        )
+    outcome = await run_command(
+        tmp_path,
+        spec,
+        allowlist=ALLOWLIST,
+        timeout_seconds=10,
+        output_limit=1024,
+        trusted_host_mode=True,
+    )
+    assert outcome.return_code == 0
+    assert "Python" in outcome.stdout + outcome.stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "win32", reason="可信本机命令只在 Windows 上运行")
+async def test_windows_host_command_timeout_terminates_process(tmp_path: Path) -> None:
+    outcome = await run_command(
+        tmp_path,
+        CommandSpec(
+            ("powershell", "-NoProfile", "-Command", "Start-Sleep -Seconds 5"),
+            allow_network=True,
+        ),
+        allowlist=("powershell",),
+        timeout_seconds=0.2,
+        output_limit=1024,
+        trusted_host_mode=True,
+    )
+    assert outcome.timed_out
+    assert outcome.return_code != 0
+
+
 def test_validate_argv_rejects_shell_metacharacters() -> None:
     with pytest.raises(ToolExecutionError, match="shell 元字符"):
         validate_argv((PYTHON, "-c", "print(1); print(2)"), allowlist=ALLOWLIST)
     with pytest.raises(ToolExecutionError, match="shell 元字符"):
         validate_argv((PYTHON, "-m", "pytest", "&&", "rm"), allowlist=ALLOWLIST)
+
+
+def test_trusted_host_shell_still_requires_explicit_allowlist() -> None:
+    argv = ("powershell", "-NoProfile", "-Command", "Get-Location; Get-ChildItem")
+    with pytest.raises(ToolExecutionError, match="shell"):
+        validate_argv(argv, allowlist=("powershell",))
+    with pytest.raises(ToolExecutionError, match="允许列表"):
+        validate_argv(argv, allowlist=(), trusted_host_mode=True)
+    assert validate_argv(argv, allowlist=("powershell",), trusted_host_mode=True) == argv
     with pytest.raises(ToolExecutionError, match="shell 元字符"):
         validate_argv((PYTHON, "-c", "cat a | b"), allowlist=ALLOWLIST)
     with pytest.raises(ToolExecutionError, match="shell"):

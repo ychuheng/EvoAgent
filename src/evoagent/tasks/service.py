@@ -118,6 +118,7 @@ class TaskService:
         model: str,
         run_mode: RunMode = RunMode.RETRIEVAL,
         project_id: UUID | None = None,
+        project_override: bool = False,
         input_paths: list[str] | None = None,
     ) -> TaskAggregate:
         """在同一事务中创建 Task、首个 Run 和初始事件。
@@ -146,7 +147,9 @@ class TaskService:
             session = await unit.session.get(SessionRecord, session_id)
             if session is None:
                 raise SessionNotFoundError(f"session does not exist: {session_id}")
-            bound_project_id = project_id if project_id is not None else session.project_id
+            bound_project_id = (
+                project_id if project_override or project_id is not None else session.project_id
+            )
             authorization_version: int | None = None
             project_root: Path | None = None
             if bound_project_id is not None:

@@ -1,5 +1,6 @@
 """从 ``EVOAGENT_*`` 环境变量加载的类型化运行配置。"""
 
+import os
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
@@ -114,6 +115,9 @@ class Settings(BaseSettings):
     project_command_environment: dict[str, str] = Field(default_factory=dict)
     # 默认离线：一次"允许联网"的批准不会变成长期网络权限。
     project_command_network_default: bool = False
+    # Explicitly opt into native Windows execution. This is a trusted local mode:
+    # Windows commands are not protected by the Linux Landlock/seccomp sandbox.
+    trusted_host_mode: bool = False
     # 产物下载上限：超过即拒绝导出，不把"下载"变成绕过上下文预算读任意文件的通道。
     artifact_download_max_bytes: int = Field(default=16_777_216, ge=1_024, le=268_435_456)
 
@@ -215,6 +219,12 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_provider_requirements(self) -> Self:
         """仅在使用真实模型服务时要求提供连接信息。"""
+
+        if self.trusted_host_mode:
+            if os.name != "nt":
+                raise ValueError("trusted host mode requires a Windows process")
+            if self.api_host not in {"127.0.0.1", "localhost", "::1"}:
+                raise ValueError("trusted host API must bind to loopback")
 
         if (
             self.retrieval_backend == "hybrid"

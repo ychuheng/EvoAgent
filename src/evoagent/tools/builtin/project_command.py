@@ -57,6 +57,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
         memory_bytes: int = 1_073_741_824,
         max_processes: int = DEFAULT_MAX_PROCESSES,
         environment: dict[str, str] | None = None,
+        trusted_host_mode: bool = False,
     ) -> None:
         self._root = root
         self._allowlist = allowlist
@@ -65,8 +66,19 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
         self._memory_bytes = memory_bytes
         self._max_processes = max_processes
         self._environment = dict(environment or {})
+        self._trusted_host_mode = trusted_host_mode
+        if trusted_host_mode:
+            self.description = (
+                "Run an allowlisted program on the Windows host in the authorized directory. "
+                "Every call requires human approval. Host commands can reach files and network "
+                "outside the project through the program they execute; set allow_network=true "
+                "to acknowledge this trusted access. If PowerShell is allowlisted, use "
+                'argv=["powershell","-NoProfile","-Command","..."]. No Linux sandbox applies.'
+            )
 
     def effective_risk(self, arguments: RunCommandArguments) -> ToolRisk:
+        if self._trusted_host_mode:
+            return ToolRisk.R2
         # Only recognizable offline checks are auto-approved. Build, install,
         # arbitrary interpreters and networking require a decision per call.
         category = command_category(arguments.argv)
@@ -81,6 +93,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             "memory_bytes": self._memory_bytes,
             "max_processes": self._max_processes,
             "timeout_seconds": self._timeout_seconds,
+            "trusted_host_mode": self._trusted_host_mode,
         }
 
     async def invoke(self, arguments: RunCommandArguments) -> str:
@@ -97,12 +110,19 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             memory_limit_bytes=self._memory_bytes,
             max_processes=self._max_processes,
             environment_extra=self._environment,
+            trusted_host_mode=self._trusted_host_mode,
         )
         payload = {
             "program": outcome.program,
             "argv": list(arguments.argv),
             "cwd": outcome.cwd,
-            "network": "allowed" if arguments.allow_network else "isolated",
+            "network": (
+                "host_unrestricted"
+                if self._trusted_host_mode
+                else "allowed"
+                if arguments.allow_network
+                else "isolated"
+            ),
             "category": command_category(arguments.argv),
             "return_code": outcome.return_code,
             "timed_out": outcome.timed_out,
@@ -128,6 +148,7 @@ def project_command_tools(
     memory_bytes: int = 1_073_741_824,
     max_processes: int = DEFAULT_MAX_PROCESSES,
     environment: dict[str, str] | None = None,
+    trusted_host_mode: bool = False,
 ) -> list[BaseTool]:
     """装配命令工具；只读授权或空白名单时返回空列表。"""
 
@@ -142,5 +163,6 @@ def project_command_tools(
             memory_bytes=memory_bytes,
             max_processes=max_processes,
             environment=environment,
+            trusted_host_mode=trusted_host_mode,
         )
     ]

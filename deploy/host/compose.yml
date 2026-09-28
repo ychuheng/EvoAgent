@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg17
+    environment:
+      POSTGRES_DB: evoagent
+      POSTGRES_USER: evoagent
+      POSTGRES_PASSWORD: evoagent
+    ports:
+      - "127.0.0.1:15436:5432"
+    volumes:
+      - evoagent-host-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evoagent -d evoagent"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "127.0.0.1:16382:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+volumes:
+  evoagent-host-postgres:

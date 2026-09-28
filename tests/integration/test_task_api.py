@@ -69,6 +69,35 @@ async def test_create_task_is_atomic_and_returns_202(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_task_can_override_session_project_without_rebinding(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    async with api_client(tmp_path) as (client, _database):
+        project = (await client.post("/api/v1/projects", json={"path": str(project_root)})).json()
+        bound = (
+            await client.post(
+                "/api/v1/sessions", json={"title": "项目会话", "project_id": project["id"]}
+            )
+        ).json()
+        inherited = await client.post(
+            "/api/v1/tasks", json={"session_id": bound["id"], "goal": "继承项目"}
+        )
+        assert inherited.json()["project_id"] == project["id"]
+        projectless = await client.post(
+            "/api/v1/tasks",
+            json={"session_id": bound["id"], "goal": "只聊天", "project_id": None},
+        )
+        assert projectless.json()["project_id"] is None
+        unbound = (await client.post("/api/v1/sessions", json={"title": "普通会话"})).json()
+        one_task = await client.post(
+            "/api/v1/tasks",
+            json={"session_id": unbound["id"], "goal": "临时处理项目", "project_id": project["id"]},
+        )
+        assert one_task.json()["project_id"] == project["id"]
+        assert (await client.get("/api/v1/sessions")).json()[-1]["project_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_runtime_info_discloses_demo_mode_without_secrets(tmp_path: Path) -> None:
     async with api_client(tmp_path) as (client, _database):
         response = await client.get("/api/v1/runtime-info")
@@ -82,7 +111,26 @@ async def test_runtime_info_discloses_demo_mode_without_secrets(tmp_path: Path) 
             "code_version": "0.4.0.dev0",
             "remote_model_checked": False,
             "worker_status": "unknown",
+            "execution_mode": "container",
         }
+
+
+@pytest.mark.asyncio
+async def test_frontend_javascript_is_served_as_executable_module(tmp_path: Path) -> None:
+    frontend = tmp_path / "dist"
+    frontend.mkdir()
+    (frontend / "index.html").write_text("<div id='root'></div>", encoding="utf-8")
+    (frontend / "app.js").write_text("export const ready = true;", encoding="utf-8")
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'mime.db'}",
+        workspace=tmp_path / "workspace",
+        frontend_dist=frontend,
+    )
+    app = create_app(settings)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/ui/app.js")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
 
 
 @pytest.mark.asyncio
