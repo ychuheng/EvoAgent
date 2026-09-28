@@ -66,11 +66,30 @@ async def execute(args: argparse.Namespace) -> int:
             .json()
         )
         deadline = monotonic() + args.timeout
+        intervention = None
         while task["status"] not in {"completed", "failed", "cancelled", "waiting_user"}:
             if monotonic() >= deadline:
                 await client.post(f"/tasks/{task['id']}/cancel")
                 raise TimeoutError(f"task exceeded {args.timeout} seconds")
-            await asyncio.sleep(2)
+            if args.intervention and intervention is None and task["status"] == "running":
+                partial = (
+                    (await client.get(f"/runs/{task['latest_run']['id']}/trace"))
+                    .raise_for_status()
+                    .json()
+                )
+                if len(partial.get("tool_calls", [])) >= args.intervention_after_tools:
+                    response = await client.post(
+                        f"/tasks/{task['id']}/instructions",
+                        json={"content": args.intervention},
+                    )
+                    if response.status_code == 409:
+                        intervention = {"sent": False, "reason": "task_ended_before_injection"}
+                    else:
+                        intervention = {
+                            "sent": True,
+                            "record": response.raise_for_status().json(),
+                        }
+            await asyncio.sleep(0.25 if args.intervention else 2)
             task = (await client.get(f"/tasks/{task['id']}")).raise_for_status().json()
         trace = (
             (await client.get(f"/runs/{task['latest_run']['id']}/trace")).raise_for_status().json()
@@ -90,6 +109,12 @@ async def execute(args: argparse.Namespace) -> int:
             for call in trace.get("tool_calls", [])
         ],
         "answer": trace.get("final_answer"),
+        "intervention": intervention,
+        "intervention_events": [
+            {"sequence": event["sequence"], "type": event["event_type"]}
+            for event in trace.get("events", [])
+            if event["event_type"].startswith("instruction.")
+        ],
         "pending_approvals": [
             approval["id"]
             for approval in trace.get("approvals", [])
@@ -111,6 +136,8 @@ def main() -> int:
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--authorization", choices=("read", "read_write"), default="read")
     parser.add_argument("--goal", required=True)
+    parser.add_argument("--intervention", help="Development-only instruction sent while running")
+    parser.add_argument("--intervention-after-tools", type=int, default=1)
     parser.add_argument("--output", type=Path, default=Path("output/personal-project-trial.json"))
     parser.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args()
