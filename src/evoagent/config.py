@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     project_command_memory_bytes: int = Field(
         default=1_073_741_824, ge=134_217_728, le=4_294_967_296
     )
+    # 一条命令的进程树规模上限（含它自己）：内核 RLIMIT_NPROC 与父进程的会话计数两层都用它。
+    project_command_max_processes: int = Field(default=256, ge=8, le=4_096)
     # 命令契约允许显式设置的环境变量（例如 PYTHONPATH=src）；
     # 这是"部署者预先声明"的集合，模型不能自行指定环境变量。
     project_command_environment: dict[str, str] = Field(default_factory=dict)

@@ -150,7 +150,14 @@ def resolve_inside_root(root: Path, requested: str) -> tuple[Path, Path]:
         raise ToolExecutionError("路径无效") from error
     ensure_candidate_inside_root(root, lexical_target)
 
-    if not lexical_target.exists():
+    try:
+        exists = lexical_target.exists()
+    except OSError:
+        # 名字过长、父目录不可读等情况下 `exists()` 会抛 OSError；此时**词法包含性已经在上面
+        # 检查过**，按"目标不存在"处理即可。否则一个超长参数会把内部错误码泄露给用户
+        # （实测：`python -c "<含绝对路径的长脚本>"` 曾以 `File name too long` 崩在验证阶段）。
+        exists = False
+    if not exists:
         # 目标不存在：调用方按"目录可遍历、文件不可读"处理。
         return lexical_target, lexical_target
 

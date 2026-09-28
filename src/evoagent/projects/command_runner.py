@@ -112,11 +112,28 @@ def _landlock(project: Path, scratch: Path) -> None:
         os.close(ruleset_fd)
 
 
-def _block_network() -> None:
+def _load_seccomp() -> ctypes.CDLL:
+    """加载 libseccomp：**先直接 dlopen 已知 soname**，最后才退回 `find_library`。
+
+    `ctypes.util.find_library` 在 Linux 上会去跑 `ldconfig`/`gcc`——也就是**沙箱初始化
+    自己需要 fork**。这在受限环境里很脆：一旦本进程带着偏紧的资源上限（或 Landlock 下
+    禁止执行这些辅助程序），它会静默返回 `None`，命令以"libseccomp is required"这种
+    误导性理由失败（实测：`RLIMIT_NPROC` 调紧时必现）。dlopen 不 fork，因此先试它。
+    """
+
+    for soname in ("libseccomp.so.2", "libseccomp.so"):
+        try:
+            return ctypes.CDLL(soname, use_errno=True)
+        except OSError:
+            continue
     library = ctypes.util.find_library("seccomp")
     if not library:
         raise RuntimeError("libseccomp is required for offline commands")
-    seccomp = ctypes.CDLL(library, use_errno=True)
+    return ctypes.CDLL(library, use_errno=True)
+
+
+def _block_network() -> None:
+    seccomp = _load_seccomp()
     seccomp.seccomp_init.argtypes = [ctypes.c_uint32]
     seccomp.seccomp_init.restype = ctypes.c_void_p
     seccomp.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]

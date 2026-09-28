@@ -289,6 +289,7 @@ class ConfiguredTaskHandler:
                 timeout_seconds=self._settings.project_command_timeout_seconds,
                 output_bytes=self._settings.project_command_output_bytes,
                 memory_bytes=self._settings.project_command_memory_bytes,
+                max_processes=self._settings.project_command_max_processes,
                 environment=self._settings.project_command_environment,
             ),
         ]

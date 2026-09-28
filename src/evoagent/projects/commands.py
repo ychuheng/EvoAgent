@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,14 @@ from evoagent.tools.base import ToolExecutionError, ToolPermissionError
 MAX_ARGV_ITEMS = 64
 MAX_ARGV_BYTES = 16_384
 MAX_CWD_LENGTH = 4_096
+
+# 一条命令最多能同时存在多少进程（含它自己）。这是**进程树**配额：失控的 fork 循环
+# 无法通过 3 → 6 → 12 的方式炸掉 Worker。默认值给正常构建/测试留足余量
+# （`make -j`、`pytest -n auto` 通常只用到几十个进程）。
+DEFAULT_MAX_PROCESSES = 256
+MIN_PROCESSES = 8
+# 父进程盯进程树的轮询间隔；命令是低频操作，0.05 秒足够便宜，同时把"有界超杀"压到很小。
+_PROCESS_POLL_SECONDS = 0.05
 
 # 这些字符一旦出现就说明调用方想做 shell 拼接，而不是结构化 argv。
 # 注意不把换行算进来：`python -c "<多行脚本>"` 是正常用法，而这里本来就不过 shell，
@@ -82,6 +91,7 @@ class CommandOutcome:
     timed_out: bool
     cwd: str
     program: str
+    process_limit_exceeded: bool = False
 
 
 def command_category(argv: Sequence[str]) -> str:
@@ -262,17 +272,26 @@ async def run_command(
     output_limit: int,
     environment_extra: Mapping[str, str] | None = None,
     memory_limit_bytes: int = 1_073_741_824,
+    max_processes: int = DEFAULT_MAX_PROCESSES,
 ) -> CommandOutcome:
-    """执行一次结构化命令并返回结构化结果；超时或越界都以异常或字段如实表达。"""
+    """执行一次结构化命令并返回结构化结果；超时或越界都以异常或字段如实表达。
+
+    进程数上限是**父进程按会话实施的进程树配额**（见 `_watch_process_tree`）：超限即
+    杀掉整条命令的进程组，`process_limit_exceeded` 如实置位。这里**没有**用内核的
+    `RLIMIT_NPROC`，因为它的计数是全 user namespace 共享的（同机同 UID 的其它容器
+    也算在内），做不了 per-command 配额；原委记在 `_watch_process_tree` 的文档里。
+    """
 
     argv = validate_argv(spec.argv, allowlist=allowlist)
     cwd, cwd_display = validate_cwd(root, spec.cwd)
     validate_arguments_inside_root(root, argv)
 
-    if not sys.platform.startswith("linux"):
-        raise ToolExecutionError("项目命令需要 Linux Landlock/seccomp 隔离执行环境")
     if memory_limit_bytes < 134_217_728:
         raise ToolExecutionError("项目命令内存上限不能低于 128 MiB")
+    if max_processes < MIN_PROCESSES:
+        raise ToolExecutionError(f"项目命令进程数上限不能低于 {MIN_PROCESSES}")
+    if not sys.platform.startswith("linux"):
+        raise ToolExecutionError("项目命令需要 Linux Landlock/seccomp 隔离执行环境")
 
     environment = build_environment(allow_network=spec.allow_network, extra=environment_extra)
     started = time.perf_counter()
@@ -305,15 +324,23 @@ async def run_command(
         except (OSError, ValueError) as error:
             raise ToolExecutionError(f"命令无法启动：{error}") from error
         timed_out = False
+        process_limit_exceeded = False
+        drain = asyncio.ensure_future(process.communicate())
+        watcher = asyncio.ensure_future(_watch_process_tree(process, max_processes, drain))
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+            stdout, stderr = await asyncio.wait_for(asyncio.shield(drain), timeout=timeout_seconds)
         except TimeoutError:
             timed_out = True
             os.killpg(process.pid, signal.SIGKILL)
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
+                stdout, stderr = await asyncio.wait_for(drain, timeout=5)
             except (TimeoutError, ProcessLookupError):  # pragma: no cover - 强杀兜底
                 stdout, stderr = b"", b""
+        finally:
+            process_limit_exceeded = watcher.done() and not watcher.cancelled() and watcher.result()
+            watcher.cancel()
+            with suppress(asyncio.CancelledError):
+                await watcher
         if process.returncode == 125 and b"EVOAGENT_COMMAND_SETUP_FAILED:" in stderr:
             raise ToolExecutionError(stderr.decode("utf-8", errors="replace").strip())
     duration = time.perf_counter() - started
@@ -330,7 +357,58 @@ async def run_command(
         timed_out=timed_out,
         cwd=cwd_display,
         program=Path(argv[0]).name,
+        process_limit_exceeded=process_limit_exceeded,
     )
+
+
+async def _watch_process_tree(
+    process: asyncio.subprocess.Process, max_processes: int, drain: asyncio.Future
+) -> bool:
+    """盯住这条会话的进程数；超限即杀掉整个进程组，返回 `True`。
+
+    为什么不用内核的 `RLIMIT_NPROC`（试过，撤了）：它的计数是**整个 user namespace 里
+    该 UID 的进程数**，不是某棵进程树，也不是某个容器的。本机实测同一个应用镜像里
+    PID 命名空间内只有 1 个进程时，`RLIMIT_NPROC=40` 连**第一次** fork 都拒绝（EAGAIN），
+    要到 80 才放行——差额来自同机其它同样以该 UID 运行的容器。这种"按 UID 共享"的语义
+    既做不了per-command配额，还会让命令连自己的沙箱初始化（`ldconfig`）都跑不起来。
+
+    因此配额完全由父进程按**会话**计数实施：命令子进程是 `setsid` 后的会话首进程，
+    未被显式 `setsid` 的后代都留在同一会话里，double-fork 也甩不掉统计。代价是**有界
+    超杀**：最多多跑一个轮询间隔的进程，随后整组被 SIGKILL。轮询间隔取 0.05 秒，
+    命令是低频操作，这个开销可以忽略。
+    """
+
+    while True:
+        if _session_process_count(process.pid) > max_processes:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            return True
+        if drain.done():
+            return False
+        await asyncio.sleep(_PROCESS_POLL_SECONDS)
+
+
+def _session_process_count(session_id: int) -> int:
+    """统计 `/proc` 里会话号等于 `session_id` 的进程数（Linux；读不到就跳过该条）。"""
+
+    total = 0
+    try:
+        entries = os.listdir("/proc")
+    except OSError:  # pragma: no cover - 非 Linux 或 /proc 不可读
+        return 0
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", "rb") as handle:
+                # 格式：`pid (comm) state ppid pgrp session …`；comm 可能含空格与括号，
+                # 因此按最后一个 `) ` 切开，之后的第 4 个字段才是 session（从 0 数起）。
+                fields = handle.read().rsplit(b") ", 1)[1].split()
+            if int(fields[3]) == session_id:
+                total += 1
+        except (OSError, IndexError, ValueError):
+            continue
+    return total
 
 
 def _decode(raw: bytes, limit: int) -> tuple[str, bool]:

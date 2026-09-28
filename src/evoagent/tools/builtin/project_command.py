@@ -17,7 +17,12 @@ from pathlib import Path
 from pydantic import Field
 
 from evoagent.core.models import ContractModel, ToolRisk
-from evoagent.projects.commands import CommandSpec, command_category, run_command
+from evoagent.projects.commands import (
+    DEFAULT_MAX_PROCESSES,
+    CommandSpec,
+    command_category,
+    run_command,
+)
 from evoagent.projects.schema import ProjectAuthorization
 from evoagent.tools.base import BaseTool
 
@@ -50,6 +55,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
         timeout_seconds: float,
         output_bytes: int,
         memory_bytes: int = 1_073_741_824,
+        max_processes: int = DEFAULT_MAX_PROCESSES,
         environment: dict[str, str] | None = None,
     ) -> None:
         self._root = root
@@ -57,6 +63,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
         self._timeout_seconds = timeout_seconds
         self._output_bytes = output_bytes
         self._memory_bytes = memory_bytes
+        self._max_processes = max_processes
         self._environment = dict(environment or {})
 
     def effective_risk(self, arguments: RunCommandArguments) -> ToolRisk:
@@ -72,6 +79,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             "environment": sorted(self._environment),
             "output_bytes": self._output_bytes,
             "memory_bytes": self._memory_bytes,
+            "max_processes": self._max_processes,
             "timeout_seconds": self._timeout_seconds,
         }
 
@@ -87,6 +95,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             timeout_seconds=self._timeout_seconds,
             output_limit=self._output_bytes,
             memory_limit_bytes=self._memory_bytes,
+            max_processes=self._max_processes,
             environment_extra=self._environment,
         )
         payload = {
@@ -97,6 +106,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             "category": command_category(arguments.argv),
             "return_code": outcome.return_code,
             "timed_out": outcome.timed_out,
+            "process_limit_exceeded": outcome.process_limit_exceeded,
             "duration_seconds": outcome.duration_seconds,
             "stdout": outcome.stdout,
             "stderr": outcome.stderr,
@@ -116,6 +126,7 @@ def project_command_tools(
     timeout_seconds: float,
     output_bytes: int,
     memory_bytes: int = 1_073_741_824,
+    max_processes: int = DEFAULT_MAX_PROCESSES,
     environment: dict[str, str] | None = None,
 ) -> list[BaseTool]:
     """装配命令工具；只读授权或空白名单时返回空列表。"""
@@ -129,6 +140,7 @@ def project_command_tools(
             timeout_seconds=timeout_seconds,
             output_bytes=output_bytes,
             memory_bytes=memory_bytes,
+            max_processes=max_processes,
             environment=environment,
         )
     ]
