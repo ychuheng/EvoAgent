@@ -14,6 +14,8 @@ import resource
 import sys
 from pathlib import Path
 
+from evoagent.projects.commands import command_readable_roots
+
 _READ = (1 << 0) | (1 << 2) | (1 << 3)
 _WRITE = sum(1 << bit for bit in (1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
 _LANDLOCK_CREATE_RULESET = 444
@@ -83,8 +85,10 @@ def _landlock(project: Path, scratch: Path) -> None:
             os.close(fd)
 
     try:
-        for path in ("/usr", "/bin", "/lib", "/lib64", "/etc/ssl"):
-            allow(Path(path), _READ)
+        # 系统目录 + **应用自己的解释器前缀**：CI 上 Python 装在 /opt/hostedtoolcache，
+        # 不放行它的话，下面 execvpe 目标解释器会 EACCES（详见 command_readable_roots）。
+        for path in command_readable_roots():
+            allow(path, _READ)
         for path in (
             "/etc/ld.so.cache",
             "/etc/nsswitch.conf",

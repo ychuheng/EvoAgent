@@ -7,6 +7,8 @@
 - 真实仓库上运行一次：基准与 HEAD 一致时通过（不一致时本测试会失败并在断言信息里给出提示）。
 """
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,6 +18,18 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_state_drift as gate  # noqa: E402
+
+
+def _skip_if_history_is_incomplete(baseline: str) -> None:
+    """浅克隆里历史提交根本取不到，此时不能把"闸门跑不了"报成"基准提交是假的"。
+
+    CI 的 checkout 已设 `fetch-depth: 0`（见 `.github/workflows/ci.yml`），
+    这里只兜住本地 `git clone --depth=1` 的情况。
+    """
+
+    unresolved = gate.git("rev-parse", "--verify", f"{baseline}^{{commit}}").returncode != 0
+    if unresolved and gate.is_shallow_clone():
+        pytest.skip("浅克隆无法解析基准提交；请先 git fetch --unshallow（CI 用 fetch-depth: 0）")
 
 
 @pytest.mark.parametrize(
@@ -87,8 +101,34 @@ def test_state_page_has_a_resolvable_baseline() -> None:
     found = gate.read_baseline(text)
     assert found is not None, "当前状态页缺少『产品代码核对基准』提交号"
     baseline, _line = found
+    _skip_if_history_is_incomplete(baseline)
     resolved = gate.git("rev-parse", "--verify", f"{baseline}^{{commit}}")
     assert resolved.returncode == 0, f"基准提交 {baseline} 在仓库中不存在"
+
+
+def test_unresolvable_baseline_is_reported_actionably() -> None:
+    """取不到基准提交时，报错必须区分"提交号是假的"和"仓库是浅克隆"。
+
+    这条以前是 CI 上真实的红：`actions/checkout` 默认 `--depth=1`，而基准按约定
+    总是 HEAD 的祖先，于是闸门以"基准提交 36b5075 在仓库中不存在"这种误导性理由失败。
+    """
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check_state_drift.py"), "--reference", "0" * 40],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        # Windows 控制台默认用本地代码页写 stdout，显式钉住 UTF-8 才能读回中文报错。
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+
+    assert result.returncode == 1
+    assert "在仓库中不存在" in result.stdout
+    if gate.is_shallow_clone():
+        assert "浅克隆" in result.stdout
 
 
 def test_update_requires_a_clean_working_tree() -> None:
@@ -111,6 +151,7 @@ def test_drift_detection_matches_git_diff() -> None:
     found = gate.read_baseline(text)
     assert found is not None
     baseline, _line = found
+    _skip_if_history_is_incomplete(baseline)
     changed = gate.changed_files(baseline)
     product = [item for item in changed if gate.classify(item) == "product"]
     # 无论当前是否漂移，这里只要求分类结果是"文件子集"且能稳定复现。

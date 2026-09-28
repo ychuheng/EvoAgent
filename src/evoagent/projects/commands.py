@@ -156,6 +156,28 @@ def validate_argv(argv: Sequence[str], *, allowlist: Sequence[str]) -> tuple[str
     return tuple(argv)
 
 
+def command_readable_roots() -> tuple[Path, ...]:
+    """命令子进程在 Landlock 下必须能**读并执行**的目录。
+
+    除了系统目录，还必须包含**应用自己的解释器前缀**：CI（GitHub Actions 的
+    `setup-python`）把 Python 装在 `/opt/hostedtoolcache/Python/...`，而隔离子进程是
+    先施加 Landlock、再 `os.execvpe` 目标解释器；若白名单只有 `/usr` 等系统目录，
+    exec 会 `EACCES`，命令以 `EVOAGENT_COMMAND_SETUP_FAILED`（退出码 125）失败——
+    表现就是"所有项目命令测试在 CI 上全红"。
+
+    放行解释器前缀不扩大攻击面：那是 Worker 自己正在执行的受信代码，
+    而原白名单本来就放行了整个 `/usr`。
+    """
+
+    roots = [Path("/usr"), Path("/bin"), Path("/lib"), Path("/lib64"), Path("/etc/ssl")]
+    interpreter = Path(sys.executable).resolve()
+    roots.append(interpreter.parent)
+    for prefix in (sys.prefix, getattr(sys, "base_prefix", sys.prefix)):
+        if prefix:
+            roots.append(Path(prefix).resolve())
+    return tuple(dict.fromkeys(roots))
+
+
 def validate_cwd(root: Path, cwd: str) -> tuple[Path, str]:
     """cwd 必须是项目根内的目录。"""
 

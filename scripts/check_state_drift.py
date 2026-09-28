@@ -80,6 +80,23 @@ def current_branch() -> str:
     return result.stdout.strip() if result.returncode == 0 else "?"
 
 
+def is_shallow_clone() -> bool:
+    """仓库是否为浅克隆（`--depth`）。浅克隆里历史提交取不到，闸门无法工作。"""
+
+    result = git("rev-parse", "--is-shallow-repository")
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def _unresolved_baseline_reason(baseline: str) -> str:
+    reason = f"基准提交 {baseline} 在仓库中不存在"
+    if is_shallow_clone():
+        reason += (
+            "（当前是浅克隆：历史提交没有被取下来，闸门无法比较；"
+            "请先 `git fetch --unshallow`，CI 上给 actions/checkout 设 `fetch-depth: 0`）"
+        )
+    return reason
+
+
 def classify(path: str) -> str:
     parts = Path(path).parts
     if not parts:
@@ -108,7 +125,10 @@ def read_baseline(text: str) -> tuple[str, str] | None:
 def changed_files(baseline: str) -> list[str]:
     result = git("diff", "--name-only", f"{baseline}..HEAD")
     if result.returncode != 0:
-        raise SystemExit(f"无法比较 {baseline}..HEAD：" + result.stderr.strip())
+        raise SystemExit(
+            f"无法比较 {baseline}..HEAD：{result.stderr.strip()}"
+            + ("（当前是浅克隆：请先 `git fetch --unshallow`）" if is_shallow_clone() else "")
+        )
     return [item for item in result.stdout.splitlines() if item.strip()]
 
 
@@ -135,7 +155,7 @@ def main() -> int:
 
     resolved = git("rev-parse", "--verify", f"{baseline}^{{commit}}")
     if resolved.returncode != 0:
-        print(f"基准提交 {baseline} 在仓库中不存在")
+        print(_unresolved_baseline_reason(baseline))
         return 1
     ancestor = git("merge-base", "--is-ancestor", baseline, "HEAD")
     if ancestor.returncode != 0:

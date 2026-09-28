@@ -13,6 +13,7 @@ from evoagent.projects.commands import (
     CommandSpec,
     build_environment,
     command_category,
+    command_readable_roots,
     run_command,
     validate_argv,
     validate_cwd,
@@ -95,6 +96,30 @@ def test_build_environment_excludes_secrets_and_proxies(monkeypatch: pytest.Monk
     assert offline["PATH"] == "/usr/bin"
     assert offline["EVOAGENT_COMMAND_NETWORK"] == "isolated"
     assert online["EVOAGENT_COMMAND_NETWORK"] == "allowed"
+
+
+def test_command_readable_roots_include_interpreter_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """解释器装在 `/usr` 之外时（CI 的 setup-python），放行清单必须覆盖它。
+
+    GitHub Actions 把 Python 装在 `/opt/hostedtoolcache/Python/...`，而隔离子进程是
+    先施加 Landlock、再 `os.execvpe` 目标解释器；清单里只有系统目录时 exec 会 EACCES，
+    命令以 `EVOAGENT_COMMAND_SETUP_FAILED` 失败——这正是 CI 上项目命令全红的原因。
+    """
+
+    outside = Path("/opt/hostedtoolcache/Python/3.13.7/x64")
+    monkeypatch.setattr(sys, "executable", str(outside / "bin" / "python3.13"))
+    monkeypatch.setattr(sys, "prefix", str(outside))
+    monkeypatch.setattr(sys, "base_prefix", str(outside))
+
+    roots = command_readable_roots()
+
+    assert Path("/usr") in roots
+    assert Path("/etc/ssl") in roots
+    assert outside.resolve() in roots
+    assert (outside / "bin").resolve() in roots
+    assert len(roots) == len(set(roots))
 
 
 @pytest.mark.asyncio

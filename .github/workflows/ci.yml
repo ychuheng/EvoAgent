@@ -62,8 +62,15 @@ jobs:
         python-version: ["3.12", "3.13"]
 
     steps:
+      # 必须取完整历史：`tests/unit/test_state_drift_gate.py` 会把
+      # `docs/当前状态.md` 里记录的基准提交解析成真实提交，并比较 `基准..HEAD`。
+      # 基准按约定总是 HEAD 的祖先（推进基准的那次提交之后必然还有提交），
+      # 因此默认的 `--depth=1` 浅克隆里它**永远**取不到，状态漂移闸门会以
+      # "基准提交不存在"这种误导性的理由在每个 push 上报红。
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
