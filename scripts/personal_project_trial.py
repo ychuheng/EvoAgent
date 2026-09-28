@@ -61,7 +61,16 @@ async def execute(args: argparse.Namespace) -> int:
             .json()
         )
         task = (
-            (await client.post("/tasks", json={"session_id": session["id"], "goal": args.goal}))
+            (
+                await client.post(
+                    "/tasks",
+                    json={
+                        "session_id": session["id"],
+                        "goal": args.goal,
+                        "input_paths": args.input_path,
+                    },
+                )
+            )
             .raise_for_status()
             .json()
         )
@@ -104,6 +113,7 @@ async def execute(args: argparse.Namespace) -> int:
         "error_code": trace.get("error_code"),
         "model": runtime.get("model"),
         "project_root": args.project_root,
+        "input_paths": args.input_path,
         "tool_calls": [
             {"tool": call["tool_name"], "status": call["status"], "error": call.get("error_code")}
             for call in trace.get("tool_calls", [])
@@ -136,6 +146,7 @@ def main() -> int:
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--authorization", choices=("read", "read_write"), default="read")
     parser.add_argument("--goal", required=True)
+    parser.add_argument("--input-path", action="append", default=[])
     parser.add_argument("--intervention", help="Development-only instruction sent while running")
     parser.add_argument("--intervention-after-tools", type=int, default=1)
     parser.add_argument("--output", type=Path, default=Path("output/personal-project-trial.json"))
