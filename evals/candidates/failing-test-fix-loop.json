@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "name": "failing_test_fix_loop",
+  "description": "给定一个能复现失败的测试命令，先取回真实失败输出，再读实现文件、做最小修改，最后用完全相同的一条命令复测。适用于“测试失败→定位→改一处→复测”的项目任务。",
+  "triggers": [
+    "项目里有失败的测试",
+    "测试失败后要求修好并复测",
+    "要求用同一条命令验证修复"
+  ],
+  "inputs": {
+    "test_command": {
+      "type": "string",
+      "required": true,
+      "description": "能复现失败的完整命令（结构化 argv 形式，例如 python -m pytest -q）"
+    },
+    "source_path": {
+      "type": "string",
+      "required": true,
+      "description": "承载失败断言的实现文件相对路径"
+    }
+  },
+  "preconditions": {
+    "allowed_tools": [
+      "run_command",
+      "file_read",
+      "edit_file"
+    ],
+    "max_effective_risk": "R1"
+  },
+  "steps": [
+    {
+      "id": "run_failing_test",
+      "action": "tool",
+      "tool": "run_command",
+      "args": {
+        "argv": [
+          "python",
+          "-m",
+          "pytest",
+          "-q"
+        ]
+      }
+    },
+    {
+      "id": "read_failure",
+      "action": "model",
+      "depends_on": [
+        "run_failing_test"
+      ],
+      "instruction": "阅读上一步的完整输出，指出失败的测试名、断言期望值与实际值；如果退出码为 0，直接停止并说明“没有可复现的失败”。",
+      "expected_output": "失败的测试名 + 期望值/实际值 + 指向的实现文件"
+    },
+    {
+      "id": "read_source",
+      "action": "tool",
+      "depends_on": [
+        "read_failure"
+      ],
+      "tool": "file_read",
+      "args": {
+        "path": "{{source_path}}"
+      }
+    },
+    {
+      "id": "apply_minimal_edit",
+      "action": "tool",
+      "depends_on": [
+        "read_source"
+      ],
+      "tool": "edit_file",
+      "args": {
+        "path": "{{source_path}}",
+        "old_text": "{{exact_failing_literal}}",
+        "replacement": "{{corrected_literal}}"
+      }
+    },
+    {
+      "id": "rerun_same_command",
+      "action": "tool",
+      "depends_on": [
+        "apply_minimal_edit"
+      ],
+      "tool": "run_command",
+      "args": {
+        "argv": [
+          "python",
+          "-m",
+          "pytest",
+          "-q"
+        ]
+      }
+    },
+    {
+      "id": "report_both_exit_codes",
+      "action": "model",
+      "depends_on": [
+        "rerun_same_command"
+      ],
+      "instruction": "用两次运行的**原始退出码**对比修复前后，并说明改动只发生在哪一处；不得声称没有跑过的命令已经通过。",
+      "expected_output": "修复前退出码 / 修复后退出码 / 改动位置"
+    }
+  ],
+  "stop_conditions": [
+    "第一次运行退出码为 0：确认没有可复现的失败后停止，不要为了“完成流程”而改代码",
+    "同一处修改连续两次没有让测试转绿：停止并报告，而不是继续扩大改动范围",
+    "命令被隔离层或审批拒绝：停止并转人工，不要绕过审批"
+  ],
+  "approval_points": [
+    {
+      "step_id": "apply_minimal_edit",
+      "condition": "改动会波及 {{source_path}} 之外的任何文件",
+      "reason": "跨文件修改超出“最小修复”的授权范围，需要人工确认"
+    },
+    {
+      "step_id": "rerun_same_command",
+      "condition": "需要联网、安装依赖或执行非测试类命令",
+      "reason": "联网与安装属于更高风险动作，必须逐次审批"
+    }
+  ],
+  "counterexamples": [
+    {
+      "situation": "测试失败原因是缺少依赖或环境不可用",
+      "why_not": "这不是代码缺陷；本 Skill 只做“读失败→改一处→复测”，装依赖属于另一类授权动作"
+    },
+    {
+      "situation": "失败来自断言本身写错（实现是对的）",
+      "why_not": "改测试期望值会让“通过”失去意义；必须先由人确认期望值才是权威"
+    },
+    {
+      "situation": "项目里有多个失败测试且需要一起修",
+      "why_not": "本 Skill 只针对单一失败点，多处修改需要拆成多次运行并逐一复核"
+    }
+  ],
+  "success_criteria": [
+    "第一次运行有非零退出码且失败输出被引用",
+    "第二次运行使用与第一次**完全相同**的命令",
+    "最终答复给出两次退出码与唯一改动位置"
+  ],
+  "validators": [
+    "run_completed",
+    "no_unknown_effects"
+  ]
+}

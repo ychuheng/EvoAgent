@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "skill_id": "candidate-fix-loop",
+      "source_run_id": "cebc1b41-19cb-4329-aed6-07518c4a21c1",
+      "set": "dev",
+      "task_family": "failure_fix",
+      "evidence": "docs/evaluations/真实模型开发试跑-2026-09-28.md"
+    }
+  ]
+}

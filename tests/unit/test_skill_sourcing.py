@@ -13,6 +13,7 @@ from evoagent.skills.sourcing import (
     classify_sample_set,
     classify_trace_source,
     find_holdout_dataset_files,
+    load_dev_run_ids,
     load_ledger,
     review_human_confirmation,
 )
@@ -114,7 +115,50 @@ def test_legacy_and_unknown_are_refused(tmp_path: Path) -> None:
 
     assert legacy.allowed is False and legacy.set_name == "legacy"
     assert unknown.allowed is False
-    assert "登记样本" in unknown.reason
+    assert "dev_runs.jsonl" in unknown.reason
+
+
+def test_registered_dev_run_is_allowed_but_unregistered_is_not(tmp_path: Path) -> None:
+    """S-01 的允许路径：只有登记在 dev_runs.jsonl 的轨迹才能提炼；没登记的一律拒绝。"""
+
+    write_ledger(tmp_path, samples=[])
+    (tmp_path / "dev_runs.jsonl").write_text(
+        '{"run_id": "dev-1", "task_id": "task-1", "task_family": "failure_fix", "set": "dev"}\n',
+        encoding="utf-8",
+    )
+    manifest, used = load_ledger(tmp_path)
+    dev_runs = load_dev_run_ids(tmp_path)
+
+    registered = classify_trace_source(
+        manifest=manifest,
+        used_runs=used,
+        dev_runs=dev_runs,
+        run_id="dev-1",
+        dataset="m3-failure-fix-dev-v1.json",
+        split="train",
+    )
+    assert registered.allowed is True and registered.set_name == "dev"
+
+    other = classify_trace_source(
+        manifest=manifest,
+        used_runs=used,
+        dev_runs=dev_runs,
+        run_id="dev-2",
+        dataset="m3-failure-fix-dev-v1.json",
+        split="train",
+    )
+    assert other.allowed is False
+
+    # 已登记为 dev 的 run 一旦出现在正式使用台账里（说明它其实是 holdout 运行），必须拒绝。
+    holdout_used = classify_trace_source(
+        manifest=manifest,
+        used_runs={"dev-1"},
+        dev_runs={"dev-1"},
+        run_id="dev-1",
+        dataset="m3-failure-fix-dev-v1.json",
+        split="train",
+    )
+    assert holdout_used.allowed is False and holdout_used.set_name == "holdout-used"
 
 
 def test_holdout_dataset_name_is_refused_without_a_manifest_entry(tmp_path: Path) -> None:

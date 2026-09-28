@@ -57,6 +57,28 @@ def load_ledger(datasets_root: Path) -> tuple[dict, set[str]]:
     return manifest, used_runs
 
 
+def load_dev_run_ids(datasets_root: Path) -> set[str]:
+    """读取 dev 轨迹登记（`dev_runs.jsonl`）里的 run_id。
+
+    S-01 只允许从 dev/日常轨迹提炼 Skill。只看正式使用台账无法区分"没跑过的 dev 运行"
+    和"跑过的 holdout 运行"（两者都不在里面），所以 dev 轨迹单独登记一份；
+    没有登记过的运行一律拒绝，而不是默认放行。
+    """
+
+    path = datasets_root / "dev_runs.jsonl"
+    if not path.is_file():
+        return set()
+    run_ids: set[str] = set()
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        run_id = row.get("run_id")
+        if isinstance(run_id, str) and run_id:
+            run_ids.add(run_id)
+    return run_ids
+
+
 def classify_sample_set(manifest: dict, *, dataset: str | None, split: str | None) -> str:
     """按台账与数据集名判断样本集合。"""
 
@@ -83,6 +105,7 @@ def classify_trace_source(
     dataset: str | None = None,
     split: str | None = None,
     sample_set: str | None = None,
+    dev_runs: set[str] | None = None,
 ) -> SourceVerdict:
     """判断一条运行/样本能否作为 Skill 提炼来源。"""
 
@@ -95,6 +118,14 @@ def classify_trace_source(
                 f"run {run_id} 已出现在正式使用台账里（可能已评分，也可能只是看过轨迹）；"
                 "计划禁止把 M6/M7 holdout 的运行作为 Skill 提炼来源"
             ),
+        )
+
+    # 2) 明确登记为 dev 的轨迹：允许提炼（仍需人工确认与脱敏）。
+    if run_id is not None and dev_runs and run_id in dev_runs:
+        return SourceVerdict(
+            allowed=True,
+            set_name="dev",
+            reason="已登记在 dev_runs.jsonl；仍需人工确认成功条件、失败案例与适用边界",
         )
 
     resolved = sample_set or classify_sample_set(manifest, dataset=dataset, split=split)
@@ -125,7 +156,10 @@ def classify_trace_source(
     return SourceVerdict(
         allowed=False,
         set_name=resolved,
-        reason="无法从台账判定该运行属于哪个集合；先登记样本再提炼，避免误用 holdout",
+        reason=(
+            "无法判定该运行属于哪个集合；dev 轨迹要登记进 evals/datasets/dev_runs.jsonl，"
+            "否则一律按「不可证明不是 holdout」拒绝"
+        ),
     )
 
 

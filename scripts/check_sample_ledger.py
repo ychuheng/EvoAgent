@@ -408,7 +408,9 @@ def check_run_ledger(
     audit.note(f"正式使用记录：{len(rows)} 行")
 
 
-def check_skill_sources(sources: dict | None, rows: list[dict], audit: Audit) -> None:
+def check_skill_sources(
+    sources: dict | None, rows: list[dict], dev_runs: dict[str, dict], audit: Audit
+) -> None:
     """Skill 提炼来源检查：holdout 的 Run 一律拒绝，已评分与仅看过轨迹都算。"""
 
     if sources is None:
@@ -454,10 +456,10 @@ def check_skill_sources(sources: dict | None, rows: list[dict], audit: Audit) ->
                 f"{where}: source_run_id {source_run_id} 属于 {holdout_runs[source_run_id]} "
                 "holdout，禁止作为 Skill 提炼来源"
             )
-        elif source_run_id not in rows_by_run:
+        elif source_run_id not in dev_runs:
             audit.error(
-                f"{where}: source_run_id {source_run_id} 不在正式使用台账中，"
-                "无法证明它不是 M6/M7 holdout"
+                f"{where}: source_run_id {source_run_id} 没有登记在 dev_runs.jsonl，"
+                "无法证明它是 dev 轨迹（不是 holdout）"
             )
         if entry.get("traces_viewed") is True and source_run_id in holdout_runs:
             audit.error(f"{where}: 仅看过轨迹的 holdout Run 同样不得登记")
@@ -584,6 +586,60 @@ def check_third_party_reservation(manifest: dict, samples: dict[str, dict], audi
             audit.error(f"{set_name}: coverage.third_party_reservation 有记录但样本没打预留标记")
 
 
+DEV_RUNS = DATASETS / "dev_runs.jsonl"
+
+
+def load_dev_runs(audit: Audit) -> dict[str, dict]:
+    """读取 dev 运行登记（只追加）。缺少文件不是错误：还没有登记过 dev 轨迹。"""
+
+    if not DEV_RUNS.is_file():
+        return {}
+    entries: dict[str, dict] = {}
+    for number, line in enumerate(DEV_RUNS.read_text(encoding="utf-8-sig").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            audit.error(f"dev_runs.jsonl 第 {number} 行不是合法 JSON：{exc}")
+            continue
+        if not isinstance(row, dict):
+            audit.error(f"dev_runs.jsonl 第 {number} 行不是对象")
+            continue
+        run_id = row.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            audit.error(f"dev_runs.jsonl 第 {number} 行缺少 run_id")
+            continue
+        if run_id in entries:
+            audit.error(f"dev_runs.jsonl 第 {number} 行 run_id 重复：{run_id}")
+            continue
+        entries[run_id] = {**row, "_line": number}
+    return entries
+
+
+def check_dev_runs(entries: dict[str, dict], rows: list[dict], audit: Audit) -> None:
+    """dev 运行登记检查。
+
+    为什么需要它：Skill 提炼**只允许来自 dev/日常真实轨迹**，而 M6/M7 holdout 运行一律拒绝。
+    只看正式使用台账无法区分"没跑过的 dev 运行"和"跑过的 holdout 运行"——两者都不在里面，
+    于是来源登记要么全部拒绝（无法提炼），要么无法证明。所以 dev 轨迹单独登记一份，
+    规则是：**必须登记在 dev_runs.jsonl，且绝不能出现在 M6/M7 正式使用台账里**。
+    """
+
+    holdout_runs = {row.get("run_id") for row in rows if row.get("milestone") in {"M6", "M7"}}
+    for run_id, entry in sorted(entries.items()):
+        where = f"dev_runs.jsonl:{entry['_line']}"
+        for field in ("task_id", "task_family", "evidence"):
+            if not isinstance(entry.get(field), str) or not entry[field].strip():
+                audit.error(f"{where}: 缺少 {field}")
+        if entry.get("set") != "dev":
+            audit.error(f"{where}: set 必须是 dev（{entry.get('set')!r}）")
+        if run_id in holdout_runs:
+            audit.error(f"{where}: {run_id} 出现在 M6/M7 正式使用台账中，不能登记为 dev 轨迹")
+    if entries:
+        audit.note(f"dev 轨迹登记：{len(entries)} 条（可用于 Skill 提炼）")
+
+
 def run_check(*, source_skill: str | None, source_run: str | None) -> int:
     audit = Audit()
     manifest = load_json(MANIFEST, audit)
@@ -593,9 +649,11 @@ def run_check(*, source_skill: str | None, source_run: str | None) -> int:
         return 1
 
     rows = load_run_ledger(audit)
+    dev_runs = load_dev_runs(audit)
     by_id = check_manifest(manifest, audit)
     check_run_ledger(rows, by_id, audit)
-    check_skill_sources(sources, rows, audit)
+    check_dev_runs(dev_runs, rows, audit)
+    check_skill_sources(sources, rows, dev_runs, audit)
     reviews = manifest.get("fixture_reviews")
     check_preregistration(reviews if isinstance(reviews, dict) else {}, by_id, audit)
     check_m7_release_coverage(manifest, by_id, audit)
@@ -607,20 +665,32 @@ def run_check(*, source_skill: str | None, source_run: str | None) -> int:
         elif source_run is None:
             audit.error("--source-skill 需要同时给出 --source-run")
         else:
-            holdout = {row.get("run_id") for row in rows if row.get("milestone") in {"M6", "M7"}}
-            if source_run not in {row.get("run_id") for row in rows}:
-                audit.error(f"{source_run} 不在正式使用台账中，不能作为 Skill 提炼来源")
-            elif source_run in holdout:
-                audit.error(f"{source_run} 属于 M6/M7 holdout，不能作为 Skill 提炼来源")
+            verdict = _source_verdict(source_run, rows, dev_runs)
+            if verdict == "ok":
+                audit.note(f"来源预检通过：{source_skill} <- {source_run}（dev 轨迹）")
             else:
-                audit.note(f"来源预检通过：{source_skill} <- {source_run}")
+                audit.error(verdict)
 
     report(audit)
     return 1 if audit.errors else 0
 
 
+def _source_verdict(source_run: str, rows: list[dict], dev_runs: dict[str, dict]) -> str:
+    """判断一条运行能否作为 Skill 提炼来源：`ok` 或错误说明。"""
+
+    holdout = {row.get("run_id") for row in rows if row.get("milestone") in {"M6", "M7"}}
+    if source_run in holdout:
+        return f"source_run_id {source_run} 属于 M6/M7 holdout，不能作为 Skill 提炼来源"
+    if source_run in dev_runs:
+        return "ok"
+    return (
+        f"source_run_id {source_run} 没有登记在 dev_runs.jsonl；"
+        "无法证明它是 dev 轨迹（不是 holdout），拒绝登记"
+    )
+
+
 def register_source(skill_id: str, source_run: str) -> int:
-    """追加一条 Skill 来源登记；holdout 来源直接拒绝，不写文件。"""
+    """追加一条 Skill 来源登记；holdout 来源直接拒绝，未登记的运行同样拒绝。"""
 
     audit = Audit()
     manifest = load_json(MANIFEST, audit)
@@ -628,20 +698,16 @@ def register_source(skill_id: str, source_run: str) -> int:
         report(audit)
         return 1
     rows = load_run_ledger(audit)
+    dev_runs = load_dev_runs(audit)
     if audit.errors:
         report(audit)
         return 1
 
     if not _SKILL_ID.match(skill_id):
         audit.error(f"skill_id 非法：{skill_id!r}")
-    holdout = {row.get("run_id") for row in rows if row.get("milestone") in {"M6", "M7"}}
-    known = {row.get("run_id") for row in rows}
-    if source_run not in known:
-        audit.error(
-            f"source_run_id {source_run} 不在正式使用台账中；无法证明它不是 M6/M7 holdout，拒绝登记"
-        )
-    elif source_run in holdout:
-        audit.error(f"source_run_id {source_run} 属于 M6/M7 holdout，拒绝登记")
+    verdict = _source_verdict(source_run, rows, dev_runs)
+    if verdict != "ok":
+        audit.error(verdict)
     if audit.errors:
         report(audit)
         return 1
@@ -651,11 +717,19 @@ def register_source(skill_id: str, source_run: str) -> int:
         if SKILL_SOURCES.is_file()
         else {"schema_version": SCHEMA_VERSION, "sources": []}
     )
-    document["sources"].append({"skill_id": skill_id, "source_run_id": source_run})
+    document["sources"].append(
+        {
+            "skill_id": skill_id,
+            "source_run_id": source_run,
+            "set": "dev",
+            "task_family": dev_runs[source_run].get("task_family"),
+            "evidence": dev_runs[source_run].get("evidence"),
+        }
+    )
     SKILL_SOURCES.write_text(
         json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    audit.note(f"已登记 {skill_id} <- {source_run}")
+    audit.note(f"已登记 {skill_id} <- {source_run}（dev 轨迹）")
     report(audit)
     return 0
 

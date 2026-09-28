@@ -182,6 +182,25 @@ REVIEW_CASES: list[tuple[str, Callable[[dict], object], str]] = [
 ]
 
 
+def audit_dev_runs(entries: list[dict], *, holdout_rows: list[dict] | None = None) -> ledger.Audit:
+    """直接跑 dev 轨迹登记检查（不经文件），用于验证"holdout 不得登记为 dev"。"""
+
+    audit = ledger.Audit()
+    indexed = {entry["run_id"]: {**entry, "_line": index} for index, entry in enumerate(entries, 1)}
+    rows = [dict(item, _line=index) for index, item in enumerate(holdout_rows or [], 1)]
+    ledger.check_dev_runs(indexed, rows, audit)
+    return audit
+
+
+DEV_CASE = {
+    "run_id": "dev-run-0001",
+    "task_id": "dev-task-0001",
+    "task_family": "failure_fix",
+    "set": "dev",
+    "evidence": "docs/evaluations/示例.md",
+}
+
+
 def main() -> int:
     failed = 0
     for title, rows, retired, expected in CASES:
@@ -200,7 +219,26 @@ def main() -> int:
             failed += 1
             print("  期望包含：" + expected)
             print("  实际错误：" + ("；".join(audit.errors) or "（无错误）"))
-    total = len(CASES) + len(REVIEW_CASES)
+    for title, audit, expected in (
+        ("dev 轨迹登记合法", audit_dev_runs([DEV_CASE]), ""),
+        (
+            "holdout 运行不得登记成 dev 轨迹",
+            audit_dev_runs([DEV_CASE], holdout_rows=[dict(DEV_CASE, milestone="M6", _line=1)]),
+            "不能登记为 dev 轨迹",
+        ),
+        (
+            "dev 轨迹必须写明证据",
+            audit_dev_runs([{**DEV_CASE, "evidence": ""}]),
+            "evidence",
+        ),
+    ):
+        ok = any(expected in message for message in audit.errors) if expected else not audit.errors
+        print(f"[{'通过' if ok else '失败'}] {title}")
+        if not ok:
+            failed += 1
+            print("  期望包含：" + (expected or "（无错误）"))
+            print("  实际错误：" + ("；".join(audit.errors) or "（无错误）"))
+    total = len(CASES) + len(REVIEW_CASES) + 3
     print(f"自检结束：{total - failed}/{total} 通过")
     return 1 if failed else 0
 
