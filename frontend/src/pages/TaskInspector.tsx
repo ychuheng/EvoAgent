@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { chat, type ApprovalPreview, type ChatTask, type TaskTrace } from "../api/chat";
+import { chat, type ApprovalPreview, type ArtifactDetail, type ChatTask, type TaskTrace } from "../api/chat";
 import { ApiError } from "../api/client";
 import { phase4, type RetrievalEvidence } from "../api/phase4";
 import { errorLabel, taskStatusLabel } from "./taskLabels";
@@ -27,6 +27,7 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
   const [retrieval, setRetrieval] = useState<RetrievalEvidence | null>(null);
   const [responses, setResponses] = useState<Record<string, string>>({});
   const [previews, setPreviews] = useState<Record<string, { data?: ApprovalPreview; error?: string }>>({});
+  const [artifactPreviews, setArtifactPreviews] = useState<Record<string, { data?: ArtifactDetail; error?: string }>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -39,6 +40,7 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
     setError("");
     setResponses({});
     setPreviews({});
+    setArtifactPreviews({});
     const refresh = async () => {
       try {
         const current = await chat.task(taskId);
@@ -101,6 +103,25 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
     await act(() => chat.decideApproval(approvalId, "approve", response), approvalId);
   }
 
+  async function toggleArtifactPreview(artifactId: string) {
+    const shown = artifactPreviews[artifactId];
+    if (shown?.data || shown?.error) {
+      setArtifactPreviews((values) => {
+        const next = { ...values };
+        delete next[artifactId];
+        return next;
+      });
+      return;
+    }
+    try {
+      const detail = await chat.artifact(artifactId);
+      setArtifactPreviews((values) => ({ ...values, [artifactId]: { data: detail } }));
+    } catch (reason) {
+      // 预览失败（例如存储内容与登记哈希不一致时后端 409）必须显示原因，不能静默。
+      setArtifactPreviews((values) => ({ ...values, [artifactId]: { error: String(reason) } }));
+    }
+  }
+
   const pendingApprovals = task && !TERMINAL.has(task.status)
     ? trace?.approvals.filter((approval) => approval.status === "pending") ?? [] : [];
   const previewIds = pendingApprovals
@@ -155,10 +176,27 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
     {trace?.artifacts && trace.artifacts.length > 0 &&
       <div className="chat-evidence"><h4>产物（F-04）</h4>
         <p className="chat-meta">下载响应头带 SHA-256，可与下面的登记哈希逐位核对；预览过长时会指向下载。</p>
-        {trace.artifacts.map((artifact) => <p className="chat-meta" key={artifact.id}>
-          {artifact.uri.split("/").pop()} · {artifact.type} · {artifact.size_bytes} 字节 · SHA-256 {artifact.content_hash}
-          <a className="chat-detail-button" href={`/api/v1/artifacts/${artifact.id}/download`} download>下载</a>
-        </p>)}
+        {trace.artifacts.map((artifact) => <div key={artifact.id}>
+          <p className="chat-meta">
+            {artifact.uri.split("/").pop()} · {artifact.type} · {artifact.size_bytes} 字节 · SHA-256 {artifact.content_hash}
+            <button type="button" className="chat-detail-button" disabled={busy}
+              onClick={() => { void toggleArtifactPreview(artifact.id); }}>
+              {artifactPreviews[artifact.id]?.data || artifactPreviews[artifact.id]?.error ? "收起预览" : "预览"}
+            </button>
+            <a className="chat-detail-button" href={`/api/v1/artifacts/${artifact.id}/download`} download>下载</a>
+          </p>
+          {artifactPreviews[artifact.id]?.error && <p role="alert" className="error">预览失败：{artifactPreviews[artifact.id]?.error}</p>}
+          {artifactPreviews[artifact.id]?.data && (() => {
+            const detail = artifactPreviews[artifact.id]?.data;
+            if (!detail) return null;
+            return <div className="chat-artifact-preview">
+              <p className="chat-meta">{detail.note}{detail.preview_truncated ? "（预览已截断）" : ""}</p>
+              {detail.preview === null
+                ? <p className="chat-meta">该产物没有文本预览（二进制或未启用预览）；请下载后核对 SHA-256。</p>
+                : <pre>{detail.preview}</pre>}
+            </div>;
+          })()}
+        </div>)}
       </div>}
     {trace?.sources && (trace.sources.searches.length > 0 || trace.sources.reads.length > 0 || trace.sources.answer_links.length > 0) &&
       <div className="chat-evidence"><h4>网页来源证据</h4>

@@ -27,9 +27,14 @@ from evoagent.tools.sandbox import RunSandbox, ShellSandbox
 async def test_file_write_is_atomic_and_confined_to_run_directory(tmp_path: Path) -> None:
     tool = FileWriteTool(RunSandbox(tmp_path, uuid4()))
 
-    relative = await tool.invoke(FileWriteArguments(path="reports/result.md", content="完成"))
+    result = await tool.invoke(FileWriteArguments(path="reports/result.md", content="完成"))
 
-    assert relative == "reports/result.md"
+    # 没有接 ArtifactService 时（例如单元测试或受限装配）只报路径与不可下载。
+    payload = json.loads(result)
+    assert payload["path"] == "reports/result.md"
+    assert payload["bytes"] == len("完成".encode())
+    assert payload["downloadable"] is False
+    assert "artifact_id" not in payload
     assert (
         tool.effective_risk(FileWriteArguments(path="result.md", content="x", overwrite=True))
         is ToolRisk.R2

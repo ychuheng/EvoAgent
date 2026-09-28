@@ -190,7 +190,9 @@ class ConfiguredTaskHandler:
             [
                 CalculatorTool(),
                 *self._project_tools(project),
-                FileWriteTool(RunSandbox(self._settings.artifact_root, lease.run_id)),
+                FileWriteTool(
+                    RunSandbox(self._settings.artifact_root, lease.run_id), artifact_service
+                ),
                 ArtifactWriteTool(lease.run_id, artifact_service),
                 ArtifactReadTool(
                     ToolOutputStore(lease.run_id, artifact_service, self._database.session_factory)

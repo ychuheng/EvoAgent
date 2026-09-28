@@ -19,6 +19,7 @@ from evoagent.mcp.schema import MCPError
 from evoagent.mcp.service import MCPService
 from evoagent.memory.repository import check_run_references
 from evoagent.memory.schema import MemoryError
+from evoagent.projects.inputs import InputChangedError
 from evoagent.projects.schema import ProjectAuthorizationRevoked
 from evoagent.providers.base import ModelProvider
 from evoagent.runtime.checkpoints import PersistentCheckpointStore, SnapshotCompatibilityError
@@ -310,6 +311,11 @@ class PersistentAgentRunner:
         except ProjectAuthorizationRevoked:
             # 授权在运行中变化：不重试、不续跑，交给调用方落成明确终态；
             # 拒绝事件已由工具中间件写入 Run 事件，已执行的动作保留。
+            raise
+        except InputChangedError:
+            # F-02：冻结输入被替换同样有明确终态 `input_changed`。
+            # 这里必须原样抛出——早先被下面的兜底 `except Exception` 吃掉，
+            # 于是终态变成通用码 `persistent_runtime_error`，运维看不出"输入被换了"。
             raise
         except TimeoutError:
             return TaskExecutionResult(

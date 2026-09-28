@@ -101,6 +101,23 @@ export type ApprovalPreview = {
   files: Array<{ path: string; created: boolean; added_lines: number; removed_lines: number; diff: string; diff_truncated: boolean }>;
 };
 
+/** F-04 产物详情：预览可能截断，二进制或未启用预览时 preview 为 null。 */
+export type ArtifactDetail = {
+  id: string;
+  run_id: string;
+  type: string;
+  name: string;
+  content_type: string;
+  content_hash: string;
+  size_bytes: number;
+  created_at: string;
+  metadata: Record<string, unknown>;
+  preview: string | null;
+  preview_truncated: boolean;
+  download_url: string;
+  note: string;
+};
+
 export const chat = {
   runtimeInfo: () => request<RuntimeInfo>("/runtime-info"),
   workspaces: () => request<ChatWorkspace[]>("/workspaces"),
@@ -153,4 +170,5 @@ export const chat = {
       method: "POST", body: JSON.stringify({ response: response.trim() || null }),
     }),
   approvalPreview: (approvalId: string) => request<ApprovalPreview>(`/tool-approvals/${encodeURIComponent(approvalId)}/preview`),
+  artifact: (artifactId: string) => request<ArtifactDetail>(`/artifacts/${encodeURIComponent(artifactId)}`),
 };

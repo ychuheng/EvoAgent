@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import time
 from datetime import UTC, datetime
@@ -165,6 +166,51 @@ def main() -> int:
                     (trace.get("final_answer") or "")[:120],
                 )
             )
+            # F-04：离线任务写出的文件必须能在页面上预览、下载，并且哈希与内容一致。
+            artifacts = trace.get("artifacts", [])
+            checks.append(
+                check(
+                    "artifact_registered",
+                    bool(artifacts),
+                    [item["uri"] for item in artifacts],
+                )
+            )
+            if artifacts:
+                artifact_id = artifacts[0]["id"]
+                detail = client.get(f"/api/v1/artifacts/{artifact_id}").json()
+                download = client.get(f"/api/v1/artifacts/{artifact_id}/download")
+                body = download.content
+                digest = "sha256:" + hashlib.sha256(body).hexdigest()
+                checks.append(
+                    check(
+                        "artifact_preview_matches_download",
+                        detail.get("preview") is not None
+                        and detail["preview"] == body.decode("utf-8"),
+                        {
+                            "name": detail.get("name"),
+                            "preview_truncated": detail.get("preview_truncated"),
+                        },
+                    )
+                )
+                checks.append(
+                    check(
+                        "artifact_download_hash_matches",
+                        download.status_code == 200
+                        and digest == detail.get("content_hash")
+                        and download.headers.get("x-content-sha256") == detail.get("content_hash"),
+                        {"sha256": digest, "status": download.status_code},
+                    )
+                )
+                checks.append(
+                    check(
+                        "artifact_unknown_id_is_404",
+                        client.get(
+                            "/api/v1/artifacts/00000000-0000-0000-0000-000000000000"
+                        ).status_code
+                        == 404,
+                        None,
+                    )
+                )
 
     report = {
         "schema_version": 1,

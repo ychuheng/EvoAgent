@@ -176,6 +176,41 @@ test("网页可建立 Workspace 并把新对话放入所选作用域", async ({ 
   await expect(page.getByRole("button", { name: "新问题" })).toBeVisible();
 });
 
+test("文件任务在页面上可预览产物并下载核对哈希", async ({ page }) => {
+  const workspaceId = "00000000-0000-0000-0000-000000000001";
+  const now = new Date().toISOString();
+  const body = "# 摘要\n\n结论：可用。\n";
+  const hash = "a".repeat(64);
+  await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [{ id: workspaceId, name: "Local workspace", created_at: now }] }));
+  await page.route("**/api/v1/sessions", route => route.fulfill({ json: [{ id: "session-file", title: "文件任务", workspace_id: workspaceId, created_at: now }] }));
+  await page.route("**/api/v1/sessions/session-file/messages", route => route.fulfill({ json: [{ id: "goal-file", task_id: "task-file", run_id: "run-file", sequence: 1, kind: "goal", role: "user", content: "把笔记整理成摘要文件", created_at: now }] }));
+  await page.route("**/api/v1/tasks/task-file", route => route.fulfill({ json: { id: "task-file", status: "completed", cancel_requested: false, latest_run: { id: "run-file", provider: "mock", model: "fixture" } } }));
+  await page.route("**/api/v1/runs/run-file/trace", route => route.fulfill({ json: {
+    run_id: "run-file", task_id: "task-file", status: "completed", final_answer: "已生成 reports/summary.md",
+    error_code: null, events: [], tool_calls: [], tool_effects: [], approvals: [],
+    artifacts: [{ id: "artifact-file", type: "text/markdown", uri: "run-file/reports/summary.md", content_hash: hash, size_bytes: body.length, metadata: {} }],
+  } }));
+  await page.route("**/api/v1/artifacts/artifact-file", route => route.fulfill({ json: {
+    id: "artifact-file", run_id: "run-file", type: "text/markdown", name: "summary.md",
+    content_type: "text/markdown", content_hash: hash, size_bytes: body.length, created_at: now,
+    metadata: {}, preview: body, preview_truncated: false,
+    download_url: "/api/v1/artifacts/artifact-file/download",
+    note: "内容为二进制或未启用预览时 preview 为空；下载响应头带 SHA-256 供核对。",
+  } }));
+  await page.goto("/ui/");
+  await page.getByRole("button", { name: "文件任务" }).click();
+  await expect(page.getByRole("heading", { name: "产物（F-04）" })).toBeVisible();
+  // 页面上直接给出登记哈希，用户下载后可以逐位核对。
+  await expect(page.getByText(hash)).toBeVisible();
+  // 点"预览"才请求详情，并把正文显示出来。
+  await page.getByRole("button", { name: "预览" }).click();
+  await expect(page.locator(".chat-artifact-preview pre")).toContainText("结论：可用。");
+  const download = page.getByRole("link", { name: "下载" });
+  await expect(download).toHaveAttribute("href", "/api/v1/artifacts/artifact-file/download");
+  // 这里只核对页面把下载入口指向了产物接口；"下载到的字节与登记哈希一致"由后端端到端测试
+  // （tests/e2e/test_task_artifacts.py）逐字节核对，浏览器点击下载在无头环境下不走可拦截的路由。
+});
+
 test("页面展示超时、无效参数和 UNKNOWN 副作用", async ({ page }) => {
   const workspaceId = "00000000-0000-0000-0000-000000000001";
   const now = new Date().toISOString();

@@ -13,6 +13,7 @@ class RunSandbox:
     """把每个 Run 的写入限制在独立目录。"""
 
     def __init__(self, root: Path, run_id: UUID) -> None:
+        self.run_id = run_id
         self.root = (root.expanduser().resolve(strict=False) / str(run_id)).resolve(strict=False)
         self.root.mkdir(parents=True, exist_ok=True)
 

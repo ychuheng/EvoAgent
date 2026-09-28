@@ -92,6 +92,88 @@ test("执行详情区分已读正文、搜索摘要和未观察到的答复链�
   expect(screen.getByText(/仍需人工判断网页内容是否支持答复/)).toBeInTheDocument();
 });
 
+test("产物可以先预览再下载，并按类型/二进制如实提示", async () => {
+  const artifacts = [
+    {
+      id: "artifact-md", type: "text/markdown", uri: "run-1/report.md",
+      content_hash: "a".repeat(64), size_bytes: 24, metadata: {},
+    },
+    {
+      id: "artifact-bin", type: "application/octet-stream", uri: "run-1/data.bin",
+      content_hash: "b".repeat(64), size_bytes: 8, metadata: {},
+    },
+  ];
+  vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+    const path = new URL(url, "http://localhost").pathname;
+    const payload = path.endsWith("/tasks/task-artifacts") ? {
+      id: "task-artifacts", status: "completed", cancel_requested: false, acceptance: null,
+      latest_run: { id: "run-artifacts", provider: "mock", model: "fixture" },
+    } : path.endsWith("/runs/run-artifacts/trace") ? {
+      run_id: "run-artifacts", task_id: "task-artifacts", status: "completed",
+      final_answer: "报告已生成", error_code: null, events: [], tool_calls: [],
+      tool_effects: [], approvals: [], artifacts,
+    } : path.endsWith("/artifacts/artifact-md") ? {
+      id: "artifact-md", run_id: "run-artifacts", type: "text/markdown", name: "report.md",
+      content_type: "text/markdown", content_hash: "a".repeat(64), size_bytes: 24,
+      created_at: "2026-09-28T00:00:00Z", metadata: {}, preview: "# 报告\n结论：可用。\n",
+      preview_truncated: false, download_url: "/api/v1/artifacts/artifact-md/download",
+      note: "内容为二进制或未启用预览时 preview 为空；下载响应头带 SHA-256 供核对。",
+    } : path.endsWith("/artifacts/artifact-bin") ? {
+      id: "artifact-bin", run_id: "run-artifacts", type: "application/octet-stream",
+      name: "data.bin", content_type: "application/octet-stream",
+      content_hash: "b".repeat(64), size_bytes: 8, created_at: "2026-09-28T00:00:00Z",
+      metadata: {}, preview: null, preview_truncated: false,
+      download_url: "/api/v1/artifacts/artifact-bin/download",
+      note: "内容为二进制或未启用预览时 preview 为空；下载响应头带 SHA-256 供核对。",
+    } : {};
+    return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
+  }));
+  render(<TaskInspector taskId="task-artifacts" onOpenVersion={vi.fn()} onOpenContext={vi.fn()} />);
+
+  // 产物列表带登记哈希与下载入口。
+  expect(await screen.findByRole("heading", { name: "产物（F-04）" })).toBeInTheDocument();
+  expect(screen.getByText(new RegExp(`SHA-256 ${"a".repeat(64)}`))).toBeInTheDocument();
+  const download = screen.getAllByRole("link", { name: "下载" });
+  expect(download[0]).toHaveAttribute("href", "/api/v1/artifacts/artifact-md/download");
+
+  // 点"预览"后才请求详情，并把正文显示出来。
+  const previewButtons = screen.getAllByRole("button", { name: "预览" });
+  fireEvent.click(previewButtons[0]);
+  expect(await screen.findByText(/# 报告/)).toBeInTheDocument();
+  expect(screen.getByText(/下载响应头带 SHA-256 供核对/)).toBeInTheDocument();
+
+  // 二进制产物不假装有正文，只指向下载核对。
+  fireEvent.click(screen.getAllByRole("button", { name: "预览" })[0]);
+  expect(await screen.findByText(/该产物没有文本预览/)).toBeInTheDocument();
+});
+
+test("产物预览失败（例如内容与登记哈希不一致）时显示原因", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+    const path = new URL(url, "http://localhost").pathname;
+    if (path.endsWith("/artifacts/artifact-broken")) {
+      return Promise.resolve(new Response(JSON.stringify({
+        error: { code: "artifact_mismatch", message: "产物内容哈希与登记记录不一致，拒绝导出" },
+      }), { status: 409 }));
+    }
+    const payload = path.endsWith("/tasks/task-broken") ? {
+      id: "task-broken", status: "completed", cancel_requested: false, acceptance: null,
+      latest_run: { id: "run-broken", provider: "mock", model: "fixture" },
+    } : {
+      run_id: "run-broken", task_id: "task-broken", status: "completed", final_answer: null,
+      error_code: null, events: [], tool_calls: [], tool_effects: [], approvals: [],
+      artifacts: [{
+        id: "artifact-broken", type: "text/plain", uri: "run-broken/report.txt",
+        content_hash: "c".repeat(64), size_bytes: 4, metadata: {},
+      }],
+    };
+    return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
+  }));
+  render(<TaskInspector taskId="task-broken" onOpenVersion={vi.fn()} onOpenContext={vi.fn()} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "预览" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("预览失败");
+});
+
 test("项目编辑审批先显示实际文件差异再允许批准", async () => {
   vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
     const path = new URL(url, "http://localhost").pathname;

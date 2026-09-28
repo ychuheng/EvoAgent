@@ -18,7 +18,13 @@ class ArtifactWriteArguments(ContractModel):
 
 class ArtifactWriteTool(BaseTool[ArtifactWriteArguments]):
     name = "artifact_write"
-    description = "为当前运行创建一个不可覆盖的新 Artifact 文件。"
+    description = (
+        "Create a new, never-overwritten artifact for the current run and return its id, uri "
+        "and SHA-256. Use it when the user must receive a file that later steps must not "
+        "replace; a second call with the same name is rejected. For ordinary file output by "
+        "path (with optional overwrite) use file_write, which also registers a downloadable "
+        "artifact."
+    )
     arguments_model = ArtifactWriteArguments
     risk = ToolRisk.R1
     has_side_effects = True

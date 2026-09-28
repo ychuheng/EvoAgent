@@ -65,6 +65,12 @@ async def test_submitted_task_is_completed_by_independent_worker_components(
         "web_search",
         "file_write",
     ]
+    # file_write 写出的文件必须同时登记成产物，否则页面上看不到任何可下载内容
+    # （2026-09-28 真实 dev 试跑就是这样：文件在输出目录里，产物列表却是空的）。
+    artifacts = trace.json()["artifacts"]
+    assert [artifact["uri"].rsplit("/", 1)[-1] for artifact in artifacts] == ["report.md"]
+    assert artifacts[0]["type"] == "text/markdown"
+    assert artifacts[0]["content_hash"].startswith("sha256:")
     assert trace.json()["sources"]["searches"][0]["query"] == "EvoAgent 可靠任务执行"
     assert trace.json()["sources"]["searches"][0]["provider"] == "mock"
     assert trace.json()["sources"]["searches"][0]["result_count"] == 1
