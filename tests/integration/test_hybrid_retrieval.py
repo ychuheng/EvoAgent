@@ -21,8 +21,9 @@ from evoagent.retrieval.indexing import IndexService
 from evoagent.retrieval.sources import load_source
 from evoagent.runtime.context_resolver import ContextResolver
 from evoagent.runtime.run_config import RunMode
-from evoagent.tasks.lease import JobLeaseManager
+from evoagent.tasks.lease import JobLeaseManager, TaskExecutionResult
 from evoagent.tasks.lease_guard import LeaseGuard
+from evoagent.tasks.state_machine import PersistentRunStatus
 from evoagent.tools.registry import ToolRegistry
 
 env = foundations.env
@@ -126,9 +127,14 @@ async def test_missing_or_failed_vector_falls_back_to_filtered_lexical(env, tmp_
 
 
 async def test_zero_hit_is_frozen_after_later_confirmation(env, tmp_path):
+    db, _, _, _ = env
     task, resolve = await resolver(env, tmp_path)
     first = await resolve.resolve(task.task, task.run)
     assert first.memory_texts == ()
+    await JobLeaseManager(db.session_factory, lease_seconds=60).finalize(
+        resolve.guard.lease,
+        TaskExecutionResult(status=PersistentRunStatus.COMPLETED, final_answer="已完成"),
+    )
     # 在当前 Run 之后发布的记忆不能改变已冻结负选择。
     await indexed(env)
     assert await resolve.resolve(task.task, task.run) == first

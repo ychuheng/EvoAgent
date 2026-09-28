@@ -66,6 +66,39 @@ test("排队超过 30 秒时提示检查 Worker，而不宣称模型连接失败
   expect(screen.getByText(/模型连接状态要在任务开始执行后才能确认/)).toBeInTheDocument();
 });
 
+test("前一任务运行时可以提交下一任务并显示持久队列", async () => {
+  const workspaceId = "00000000-0000-0000-0000-000000000001";
+  localStorage.setItem("evoagent-chat-session", "session-1");
+  const messages = [{
+    id: "message-1", task_id: "task-1", run_id: "run-1", sequence: 1,
+    kind: "goal", role: "user", content: "先处理 A", created_at: new Date().toISOString(),
+  }];
+  const submitted: string[] = [];
+  vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string, options?: RequestInit) => {
+    const path = new URL(url, "http://localhost").pathname;
+    let payload: unknown = {};
+    if (path.endsWith("/runtime-info")) payload = { provider_mode: "mock", worker_status: "ready" };
+    else if (path.endsWith("/sessions") && !options?.method) payload = [{ id: "session-1", title: "测试", workspace_id: workspaceId }];
+    else if (path.endsWith("/workspaces")) payload = [{ id: workspaceId, name: "默认" }];
+    else if (path.endsWith("/projects")) payload = [];
+    else if (path.endsWith("/sessions/session-1/messages")) payload = messages;
+    else if (path.endsWith("/tasks/task-1")) payload = { id: "task-1", status: "running", created_at: new Date().toISOString() };
+    else if (path.endsWith("/tasks") && options?.method === "POST") {
+      const body = JSON.parse(String(options.body)) as { goal: string };
+      submitted.push(body.goal);
+      messages.push({ id: "message-2", task_id: "task-2", run_id: "run-2", sequence: 2, kind: "goal", role: "user", content: body.goal, created_at: new Date().toISOString() });
+      payload = { id: "task-2", status: "queued", created_at: new Date().toISOString(), latest_run: { id: "run-2", provider: "mock", model: "mock" } };
+    }
+    return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
+  }));
+  render(<App />);
+  const queueButton = await screen.findByRole("button", { name: "排队下一任务" });
+  fireEvent.change(screen.getByLabelText("发送消息"), { target: { value: "接着处理 B" } });
+  fireEvent.click(queueButton);
+  await waitFor(() => expect(submitted).toEqual(["接着处理 B"]));
+  expect(await screen.findByText(/后续排队 1 项/)).toBeInTheDocument();
+});
+
 test("执行详情区分已读正文、搜索摘要和未观察到的答复链接", async () => {
   vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => Promise.resolve(
     new Response(JSON.stringify(url.endsWith("/tasks/task-1") ? {

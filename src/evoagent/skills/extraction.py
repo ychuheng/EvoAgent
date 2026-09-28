@@ -67,14 +67,18 @@ class MockCandidateGenerator:
 
 
 class ModelCandidateGenerator:
-    def __init__(self, provider: ModelProvider, *, model: str) -> None:
+    def __init__(
+        self, provider: ModelProvider, *, model: str, max_output_tokens: int = 4096
+    ) -> None:
         self._provider = provider
         self._model = model
+        self._max_output_tokens = max_output_tokens
 
     async def generate(self, sources: tuple[FrozenSkillSource, ...]) -> SkillDefinition:
         source_payload = [source.payload for source in sources]
         request = ModelRequest(
             model=self._model,
+            max_output_tokens=self._max_output_tokens,
             messages=(
                 Message(
                     role=MessageRole.SYSTEM,

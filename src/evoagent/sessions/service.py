@@ -4,9 +4,9 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 
-from evoagent.db.models import MessageRecord, SessionRecord
+from evoagent.db.models import MessageRecord, SessionRecord, TaskRecord
 
 # I-03：运行中补充的指令与任务目标分开记账。
 INSTRUCTION_KIND = "instruction"
@@ -62,12 +62,25 @@ async def project_terminal(session, task, run):
 
 
 async def history_for_task(session, task):
+    # 用户可以在前一任务执行时排队下一任务。后者创建时的截止序号仍冻结，
+    # 但前一任务的终态/补充指令可能稍后才写入；只补入更早任务的这些结果，
+    # 不泄漏已排队的后续任务目标。
+    earlier_tasks = select(TaskRecord.id).where(
+        TaskRecord.session_id == task.session_id,
+        TaskRecord.history_before_sequence < task.history_before_sequence,
+    )
     return tuple(
         await session.scalars(
             select(MessageRecord)
             .where(
                 MessageRecord.session_id == task.session_id,
-                MessageRecord.session_sequence < task.history_before_sequence,
+                or_(
+                    MessageRecord.session_sequence < task.history_before_sequence,
+                    and_(
+                        MessageRecord.task_id.in_(earlier_tasks),
+                        MessageRecord.kind.in_(("instruction", "terminal")),
+                    ),
+                ),
             )
             .order_by(MessageRecord.session_sequence)
         )

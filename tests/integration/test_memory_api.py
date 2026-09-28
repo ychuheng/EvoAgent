@@ -7,9 +7,42 @@ from evoagent.db.base import Base
 from evoagent.db.models import MemoryVersionRecord
 from evoagent.db.session import Database
 from evoagent.memory.maintenance import MaintenanceWorker
+from evoagent.runtime.budget import BudgetExceededError
 from evoagent.tasks.lease import JobLeaseManager, TaskExecutionResult
 from evoagent.tasks.state_machine import PersistentRunStatus
 from evoagent.trace.artifacts import LocalArtifactStore
+
+
+async def test_memory_model_budget_rejection_is_reported_without_creating_proposal(tmp_path):
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'budget-memory.db'}")
+    async with db.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    app = create_app(Settings(workspace=tmp_path / "workspace"), database=db)
+
+    class RejectBudget:
+        async def generate(self, _message):
+            raise BudgetExceededError("trial limit reached")
+
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        app.state.memory_generator = RejectBudget()
+        sid = (await client.post("/api/v1/sessions", json={"title": "budget"})).json()["id"]
+        await client.post("/api/v1/tasks", json={"session_id": sid, "goal": "请记住这件事"})
+        manager = JobLeaseManager(db.session_factory, lease_seconds=60)
+        lease = await manager.claim_next("budget-test")
+        await manager.finalize(
+            lease, TaskExecutionResult(status=PersistentRunStatus.COMPLETED, final_answer="好")
+        )
+        messages = (await client.get(f"/api/v1/sessions/{sid}/messages")).json()
+        response = await client.post(
+            f"/api/v1/sessions/{sid}/memory-extractions/{messages[0]['id']}"
+        )
+        assert response.status_code == 503
+        assert response.json()["detail"] == "budget_exceeded"
+        assert (await client.get(f"/api/v1/sessions/{sid}/memories")).json() == []
+    await db.dispose()
 
 
 async def test_memory_api_confirm_query_revoke_archive_and_erase(tmp_path):

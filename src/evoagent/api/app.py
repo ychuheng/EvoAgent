@@ -31,6 +31,7 @@ from evoagent.mcp.service import MCPService
 from evoagent.memory.extraction import ModelMemoryExtractor
 from evoagent.memory.schema import MemoryError
 from evoagent.providers.openai_compatible import OpenAICompatibleProvider
+from evoagent.runtime.budget import BudgetScope
 from evoagent.skills.extraction import CandidateGenerator, ModelCandidateGenerator
 from evoagent.skills.sanitizer import TraceSanitizer
 from evoagent.skills.service import SkillServiceError
@@ -39,6 +40,7 @@ from evoagent.tools.approvals import ApprovalServiceError
 from evoagent.tools.catalog import default_skill_tool_catalog
 from evoagent.tools.registry import ToolRegistry
 from evoagent.web.viewer import trace_viewer
+from evoagent.workers.rate_limit import BudgetedProvider
 
 
 def create_app(
@@ -71,7 +73,17 @@ def create_app(
             timeout_seconds=10,
         )
         memory_generator = ModelMemoryExtractor(
-            owned_memory_provider, resolved_settings.memory_extractor_model
+            BudgetedProvider(
+                owned_memory_provider,
+                settings=resolved_settings,
+                session_factory=resolved_database.session_factory,
+                scope=BudgetScope(resolved_settings.budget_scope),
+                task_id=None,
+                run_id=None,
+                provider_name=resolved_settings.provider.value,
+                model=resolved_settings.memory_extractor_model,
+            ),
+            resolved_settings.memory_extractor_model,
         )
     if (
         resolved_candidate_generator is None
@@ -86,8 +98,18 @@ def create_app(
             timeout_seconds=resolved_settings.model_timeout_seconds,
         )
         resolved_candidate_generator = ModelCandidateGenerator(
-            owned_extractor_provider,
+            BudgetedProvider(
+                owned_extractor_provider,
+                settings=resolved_settings,
+                session_factory=resolved_database.session_factory,
+                scope=BudgetScope(resolved_settings.budget_scope),
+                task_id=None,
+                run_id=None,
+                provider_name=resolved_settings.provider.value,
+                model=resolved_settings.skill_extractor_model,
+            ),
             model=resolved_settings.skill_extractor_model,
+            max_output_tokens=min(resolved_settings.model_request_max_output_tokens or 4096, 4096),
         )
 
     @asynccontextmanager

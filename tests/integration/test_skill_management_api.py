@@ -18,12 +18,14 @@ from evoagent.db.models import (
 from evoagent.db.session import Database
 from evoagent.evals.gates import GateReport
 from evoagent.evals.lifecycle import DatasetStatus, EvalExperimentKind, EvalExperimentStatus
+from evoagent.runtime.budget import BudgetScope
 from evoagent.runtime.run_config import sha256_text
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.lifecycle import SkillVersionStatus
 from evoagent.skills.schema import SkillDefinition, SkillPreconditions, ToolStep
 from evoagent.tools.builtin.calculator import CalculatorTool
 from evoagent.tools.registry import ToolRegistry
+from evoagent.workers.rate_limit import BudgetedProvider
 
 
 def make_definition(expression: str) -> SkillDefinition:
@@ -60,6 +62,32 @@ async def management_client(tmp_path: Path) -> AsyncIterator[tuple[AsyncClient, 
         AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
     ):
         yield client, database
+    await database.dispose()
+
+
+async def test_paid_skill_and_memory_helpers_share_budget_ledger(tmp_path):
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'helpers.db'}")
+    settings = Settings(
+        _env_file=None,
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'helpers.db'}",
+        provider="openai_compatible",
+        model="test-model",
+        context_window_tokens=8192,
+        api_key="test-only-key",
+        base_url="https://example.invalid",
+        skill_extractor_model="skill-model",
+        memory_extractor_model="memory-model",
+        budget_scope="trial",
+    )
+    app = create_app(settings, database=database)
+    async with app.router.lifespan_context(app):
+        skill_provider = app.state.candidate_generator._provider
+        memory_provider = app.state.memory_generator.provider
+        assert isinstance(skill_provider, BudgetedProvider)
+        assert isinstance(memory_provider, BudgetedProvider)
+        assert skill_provider.scope is memory_provider.scope is BudgetScope.TRIAL
+        assert skill_provider.session_factory is database.session_factory
+        assert memory_provider.session_factory is database.session_factory
     await database.dispose()
 
 

@@ -40,18 +40,25 @@ function displayMessage(message: ChatMessage): string {
 }
 
 /** 运行中补充的约束只在"最后一个 goal 之后没有 terminal"时才有意义。 */
-function instructionTarget(messages: ChatMessage[]): string | null {
-  let lastGoal: string | null = null;
+function unfinishedTasks(messages: ChatMessage[]): string[] {
+  const active: string[] = [];
   for (const message of messages) {
-    if (message.kind === "goal") lastGoal = message.task_id;
-    else if (message.kind === "terminal") lastGoal = null;
+    if (!message.task_id) continue;
+    if (message.kind === "goal" && !active.includes(message.task_id)) active.push(message.task_id);
+    else if (message.kind === "terminal") {
+      const index = active.indexOf(message.task_id);
+      if (index >= 0) active.splice(index, 1);
+    }
   }
-  return lastGoal;
+  return active;
 }
 
 function unfinishedTask(messages: ChatMessage[]): string | null {
-  const last = messages.at(-1);
-  return last?.kind === "goal" ? last.task_id : null;
+  return unfinishedTasks(messages)[0] ?? null;
+}
+
+function instructionTarget(messages: ChatMessage[]): string | null {
+  return unfinishedTask(messages);
 }
 
 export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpenVersion: (id: string) => void; onOpenContext: (id: string) => void; onOpenMemory: (id: string) => void }) {
@@ -146,7 +153,9 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
           const items = await chat.messages(sessionId);
           if (!active) return;
           setMessages(items);
-          setPendingTask(null);
+          const next = unfinishedTask(items);
+          setPendingTask(next);
+          if (next) setSelectedTask(next);
           return;
         }
       } catch (reason) {
@@ -266,7 +275,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
   async function send(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const goal = draft.trim();
-    if (!goal || sending || pendingTask) return;
+    if (!goal || sending) return;
     setSending(true);
     setError("");
     try {
@@ -288,11 +297,13 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       setRequiredTool("");
       setRequiredFile("");
       setMessages(await chat.messages(id));
-      setPendingTask(task.id);
-      setSelectedTask(task.id);
-      setTaskStatus(task.status);
-      setQueuedSince(task.status === "queued" ? Date.parse(task.created_at) : null);
-      setQueueWaitSeconds(0);
+      if (!pendingTask) {
+        setPendingTask(task.id);
+        setSelectedTask(task.id);
+        setTaskStatus(task.status);
+        setQueuedSince(task.status === "queued" ? Date.parse(task.created_at) : null);
+        setQueueWaitSeconds(0);
+      }
     } catch (reason) {
       setError(failure(reason));
     } finally {
@@ -355,7 +366,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
           {message.kind === "instruction" && <small className="chat-meta">接受时间 {new Date(message.created_at).toLocaleTimeString()}{message.injected_at ? ` · 注入时间 ${new Date(message.injected_at).toLocaleTimeString()}` : " · 等待下一个模型/工具边界"}</small>}
           {message.task_id && <button type="button" className="chat-detail-button" onClick={() => setSelectedTask(message.task_id)}>{selectedTask === message.task_id ? "正在查看执行过程" : "查看执行过程"}</button>}
         </article>)}
-        {pendingTask && <p role="status" className="state">{taskStatus === "waiting_user" ? "等待人工决定，请在下方处理。" : `Agent 正在处理… ${taskStatusLabel[taskStatus] ?? taskStatus}${progress.current ? ` · ${progress.current}` : ""}`}</p>}
+        {pendingTask && <p role="status" className="state">{taskStatus === "waiting_user" ? "等待人工决定，请在下方处理。" : `Agent 正在处理… ${taskStatusLabel[taskStatus] ?? taskStatus}${progress.current ? ` · ${progress.current}` : ""}`}{unfinishedTasks(messages).length > 1 ? ` · 后续排队 ${unfinishedTasks(messages).length - 1} 项` : ""}</p>}
         {pendingTask && taskStatus === "queued" && queuedSince !== null && queueWaitSeconds >= 30 && <p role="alert" className="state">任务已排队超过 30 秒，Worker 尚未领取。请检查 Worker 容器是否运行；模型连接状态要在任务开始执行后才能确认。</p>}
         {progress.steps.length > 0 && <details className="chat-progress" open={!!pendingTask}>
           <summary>执行进度（已收到 {progress.steps.length} 个事件）</summary>
@@ -377,7 +388,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
           <label>必须成功调用的工具<input value={requiredTool} maxLength={64} onChange={(event) => setRequiredTool(event.target.value)} placeholder="例如：calculator" /></label>
           <label>必须生成的文件<input value={requiredFile} maxLength={1024} onChange={(event) => setRequiredFile(event.target.value)} placeholder="例如：report.md" /></label>
         </details>
-        <div className="chat-actions"><small>Enter 发送 · Shift+Enter 换行</small><button disabled={!draft.trim() || sending || !!pendingTask}>{sending ? "提交中…" : "发送"}</button></div>
+        <div className="chat-actions"><small>Enter 发送 · Shift+Enter 换行</small><button disabled={!draft.trim() || sending}>{sending ? "提交中…" : pendingTask ? "排队下一任务" : "发送"}</button></div>
       </form>
       {(pendingTask ?? instructionTarget(messages)) && <form className="chat-instruction" onSubmit={(event) => { event.preventDefault(); void sendInstruction(); }}>
         <label htmlFor="chat-instruction-input">运行中补充约束（I-03）</label>

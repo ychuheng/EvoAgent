@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import aliased
 
 from evoagent.db.models import (
     ApprovalStatus,
@@ -97,6 +98,18 @@ class JobLeaseManager:
             runtime_tasks = select(RunRecord.task_id).join(
                 RuntimeEvalRunRecord, RuntimeEvalRunRecord.run_id == RunRecord.id
             )
+            earlier = aliased(TaskRecord)
+            unfinished_predecessor = (
+                select(earlier.id)
+                .where(
+                    earlier.session_id == TaskRecord.session_id,
+                    earlier.history_before_sequence < TaskRecord.history_before_sequence,
+                    earlier.status.not_in(
+                        (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+                    ),
+                )
+                .exists()
+            )
             statement = (
                 select(TaskRecord)
                 .where(
@@ -109,6 +122,7 @@ class JobLeaseManager:
                     if self._runtime_experiment_id
                     else TaskRecord.id.not_in(runtime_tasks),
                     TaskRecord.status == TaskStatus.QUEUED,
+                    ~unfinished_predecessor,
                     or_(
                         TaskRecord.next_attempt_at.is_(None),
                         TaskRecord.next_attempt_at <= current_time,

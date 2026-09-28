@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import select
 
 from evoagent.api.dependencies import DatabaseDependency
@@ -19,6 +19,7 @@ from evoagent.memory.extraction import extract_proposals
 from evoagent.memory.repository import source_message
 from evoagent.memory.schema import MemoryDecision, MemoryError, MemoryProposal
 from evoagent.memory.service import MemoryService
+from evoagent.providers.base import ProviderError
 
 router = APIRouter(tags=["memory"])
 
@@ -153,7 +154,10 @@ async def extract(
         generator = request.app.state.memory_generator
         proposals = extract_proposals(message) if generator is None else ()
     if generator is not None:
-        proposals = await generator.generate(message)
+        try:
+            proposals = await generator.generate(message)
+        except ProviderError as error:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, error.code) from error
     service = MemoryService(database.session_factory)
     return [
         memory_view(

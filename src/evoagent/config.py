@@ -136,7 +136,7 @@ class Settings(BaseSettings):
     search_provider: Literal["mock", "brave", "ddgs"] = "mock"
     search_api_key: SecretStr | None = None
 
-    # 阶段三 Skill 默认只使用低风险、非 Shell 能力。
+    # Skill 仍受项目授权、风险档位和工具审批约束；这里允许提炼项目任务所需的工具。
     code_version: str = Field(default="0.4.0.dev0", min_length=1, max_length=128)
     skill_schema_version: int = Field(default=1, ge=1)
     skill_max_steps: int = Field(default=20, ge=1, le=100)
@@ -148,6 +148,13 @@ class Settings(BaseSettings):
     skill_allowed_tools: tuple[str, ...] = (
         "calculator",
         "file_read",
+        "list_dir",
+        "find_files",
+        "search_text",
+        "extract_text",
+        "edit_file",
+        "apply_patch",
+        "run_command",
         "web_fetch",
         "web_search",
         "artifact_write",

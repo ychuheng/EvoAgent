@@ -126,6 +126,38 @@ async def test_concurrent_tasks_allocate_unique_sequences(env):
     assert sorted(t.task.history_before_sequence for t in tasks) == [1, 2, 3, 4]
 
 
+async def test_queued_session_tasks_wait_and_receive_predecessor_result(env):
+    db, service, sid, _ = env
+    first = await service.create_task(
+        session_id=sid, goal="先处理 A", provider="mock", model="mock"
+    )
+    second = await service.create_task(
+        session_id=sid, goal="接着处理 B", provider="mock", model="mock"
+    )
+    third = await service.create_task(
+        session_id=sid, goal="最后处理 C", provider="mock", model="mock"
+    )
+    manager = JobLeaseManager(db.session_factory, lease_seconds=60)
+
+    first_lease = await manager.claim_next("worker-1")
+    assert first_lease is not None and first_lease.task_id == first.task.id
+    assert await manager.claim_next("worker-2") is None
+    await manager.finalize(
+        first_lease,
+        TaskExecutionResult(status=PersistentRunStatus.COMPLETED, final_answer="A 已完成"),
+    )
+
+    second_lease = await manager.claim_next("worker-2")
+    assert second_lease is not None and second_lease.task_id == second.task.id
+    async with db.session_factory() as session:
+        history = await history_for_task(session, second.task)
+    assert [(message.task_id, message.kind) for message in history] == [
+        (first.task.id, "goal"),
+        (first.task.id, "terminal"),
+    ]
+    assert third.task.id not in {message.task_id for message in history}
+
+
 async def test_proposal_confirmation_conflict_and_source_hash(env):
     db, _, sid, _ = env
     service, entry, version, _, message = await proposed(env)
