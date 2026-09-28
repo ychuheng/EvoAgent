@@ -24,10 +24,14 @@ async def test_two_real_worker_processes_same_label(tmp_path):
         await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
     service = TaskService(database.session_factory)
-    session = await service.create_session("dual worker acceptance")
+    # 同一 Session 的任务现在必须依次执行。用两个独立 Session 检验两个
+    # 真实 Worker 进程能并行领取，而不是让测试与会话队列契约互相冲突。
+    sessions = [
+        await service.create_session(f"dual worker acceptance {index}") for index in range(2)
+    ]
     for index in range(8):
         await service.create_task(
-            session_id=session.id,
+            session_id=sessions[index % len(sessions)].id,
             goal=f"offline report {index}",
             provider="mock",
             model="mock-model",
