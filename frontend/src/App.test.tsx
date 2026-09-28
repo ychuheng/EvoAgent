@@ -91,3 +91,53 @@ test("执行详情区分已读正文、搜索摘要和未观察到的答复链�
   expect(screen.getByText(/未见检索或读取记录/)).toBeInTheDocument();
   expect(screen.getByText(/仍需人工判断网页内容是否支持答复/)).toBeInTheDocument();
 });
+
+test("项目编辑审批先显示实际文件差异再允许批准", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+    const path = new URL(url, "http://localhost").pathname;
+    const payload = path.endsWith("/tasks/task-edit") ? {
+      id: "task-edit", status: "waiting_user", cancel_requested: false, acceptance: null,
+      latest_run: { id: "run-edit", provider: "mock", model: "fixture" },
+    } : path.endsWith("/runs/run-edit/trace") ? {
+      run_id: "run-edit", task_id: "task-edit", status: "waiting_user", final_answer: null,
+      error_code: "approval_required", events: [], tool_effects: [], artifacts: [],
+      tool_calls: [{ id: "call-edit", tool_name: "edit_file", arguments: { path: "src/main.py" }, status: "pending", result_summary: null, error_code: null }],
+      approvals: [{ id: "approval-edit", tool_call_id: "call-edit", status: "pending", risk: "R1", reason: "修改项目文件" }],
+    } : path.endsWith("/tool-approvals/approval-edit/preview") ? {
+      approval_id: "approval-edit", file_count: 1, added_lines: 1, removed_lines: 1,
+      files: [{ path: "src/main.py", created: false, added_lines: 1, removed_lines: 1, diff: "-old\n+new", diff_truncated: false }],
+    } : {};
+    return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
+  }));
+  render(<TaskInspector taskId="task-edit" onOpenVersion={vi.fn()} onOpenContext={vi.fn()} />);
+  expect(await screen.findByText(/拟修改 1 个文件/)).toBeInTheDocument();
+  expect(screen.getByText("src/main.py · 修改 · +1/-1")).toBeInTheDocument();
+  expect(screen.getByText((_text, element) => element?.tagName === "PRE" && element.textContent === "-old\n+new")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "批准" })).toBeEnabled();
+});
+
+test("审批时文件差异变动会阻止提交批准", async () => {
+  let previews = 0;
+  const fetchMock = vi.fn().mockImplementation((url: string) => {
+    const path = new URL(url, "http://localhost").pathname;
+    const payload = path.endsWith("/tasks/task-edit") ? {
+      id: "task-edit", status: "waiting_user", cancel_requested: false, acceptance: null,
+      latest_run: { id: "run-edit", provider: "mock", model: "fixture" },
+    } : path.endsWith("/runs/run-edit/trace") ? {
+      run_id: "run-edit", task_id: "task-edit", status: "waiting_user", final_answer: null,
+      error_code: "approval_required", events: [], tool_effects: [], artifacts: [],
+      tool_calls: [{ id: "call-edit", tool_name: "edit_file", arguments: {}, status: "pending", result_summary: null, error_code: null }],
+      approvals: [{ id: "approval-edit", tool_call_id: "call-edit", status: "pending", risk: "R1", reason: "改文件" }],
+    } : path.endsWith("/preview") ? {
+      approval_id: "approval-edit", file_count: 1, added_lines: 1, removed_lines: 1,
+      files: [{ path: "src/main.py", created: false, added_lines: 1, removed_lines: 1, diff: previews++ ? "-old\n+changed" : "-old\n+new", diff_truncated: false }],
+    } : {};
+    return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<TaskInspector taskId="task-edit" onOpenVersion={vi.fn()} onOpenContext={vi.fn()} />);
+  await screen.findByText(/拟修改 1 个文件/);
+  fireEvent.click(screen.getByRole("button", { name: "批准" }));
+  expect(await screen.findByText(/文件差异已变化/)).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some((call: unknown[]) => String(call[0]).endsWith("/approve"))).toBe(false);
+});

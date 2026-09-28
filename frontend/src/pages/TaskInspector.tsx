@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { chat, type ChatTask, type TaskTrace } from "../api/chat";
+import { chat, type ApprovalPreview, type ChatTask, type TaskTrace } from "../api/chat";
 import { ApiError } from "../api/client";
 import { phase4, type RetrievalEvidence } from "../api/phase4";
 import { errorLabel, taskStatusLabel } from "./taskLabels";
@@ -26,6 +26,7 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
   const [trace, setTrace] = useState<TaskTrace | null>(null);
   const [retrieval, setRetrieval] = useState<RetrievalEvidence | null>(null);
   const [responses, setResponses] = useState<Record<string, string>>({});
+  const [previews, setPreviews] = useState<Record<string, { data?: ApprovalPreview; error?: string }>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -37,6 +38,7 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
     setRetrieval(null);
     setError("");
     setResponses({});
+    setPreviews({});
     const refresh = async () => {
       try {
         const current = await chat.task(taskId);
@@ -76,8 +78,45 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
     }
   }
 
+  async function approveWithPreview(approvalId: string, response: string) {
+    if (busy) return;
+    setBusy(true);
+    const shown = previews[approvalId]?.data;
+    if (shown) {
+      try {
+        const current = await chat.approvalPreview(approvalId);
+        if (JSON.stringify(current) !== JSON.stringify(shown)) {
+          setPreviews((values) => ({ ...values, [approvalId]: { data: current } }));
+          setError("文件差异已变化，请重新核对后再批准。");
+          setBusy(false);
+          return;
+        }
+      } catch (reason) {
+        setPreviews((values) => ({ ...values, [approvalId]: { error: String(reason) } }));
+        setError("文件差异已无法核对，不能批准。");
+        setBusy(false);
+        return;
+      }
+    }
+    await act(() => chat.decideApproval(approvalId, "approve", response), approvalId);
+  }
+
   const pendingApprovals = task && !TERMINAL.has(task.status)
     ? trace?.approvals.filter((approval) => approval.status === "pending") ?? [] : [];
+  const previewIds = pendingApprovals
+    .filter((approval) => trace?.tool_calls.some((call) => call.id === approval.tool_call_id && ["edit_file", "apply_patch"].includes(call.tool_name)))
+    .map((approval) => approval.id).join(",");
+  useEffect(() => {
+    let active = true;
+    for (const id of previewIds.split(",").filter(Boolean)) {
+      void chat.approvalPreview(id).then((data) => {
+        if (active) setPreviews((current) => ({ ...current, [id]: { data } }));
+      }).catch((reason) => {
+        if (active) setPreviews((current) => ({ ...current, [id]: { error: String(reason) } }));
+      });
+    }
+    return () => { active = false; };
+  }, [previewIds]);
   const lexicalSkills = (trace?.events ?? []).filter((event) => event.event_type === "skill.selected")
     .flatMap((event) => Array.isArray(event.payload.matches) ? event.payload.matches : [])
     .map((match) => typeof match === "object" && match !== null && "version_id" in match ? String(match.version_id) : "")
@@ -140,13 +179,23 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
       const call = trace?.tool_calls.find((item) => item.id === approval.tool_call_id);
       const unknown = trace?.tool_effects.some((effect) => effect.tool_call_id === approval.tool_call_id && effect.status === "unknown");
       const response = responses[approval.id] ?? "";
+      const needsPreview = call?.tool_name === "edit_file" || call?.tool_name === "apply_patch";
+      const preview = previews[approval.id];
       return <div className="chat-approval" key={approval.id}>
         <h4>需要人工决定：{call?.tool_name ?? "工具调用"}</h4>
         <p>风险 {approval.risk} · {approval.reason}</p>
+        {needsPreview && <div className="chat-evidence" aria-label="审批前文件差异">
+          {!preview && <p>正在核对当前文件并生成差异…</p>}
+          {preview?.error && <p role="alert" className="error">差异预览失败：{preview.error}。请刷新或拒绝，不能在未核对差异时批准。</p>}
+          {preview?.data && <>
+            <p>拟修改 {preview.data.file_count} 个文件 · +{preview.data.added_lines} / -{preview.data.removed_lines} 行。批准前会再次核对；执行时还会检查编辑定位与已给出的哈希前置条件。</p>
+            {preview.data.files.map((file) => <details key={file.path} open><summary>{file.path} · {file.created ? "新建" : "修改"} · +{file.added_lines}/-{file.removed_lines}</summary><pre>{file.diff || "（无差异）"}</pre>{file.diff_truncated && <p className="error">差异已截断，请拒绝并缩小改动范围。</p>}</details>)}
+          </>}
+        </div>}
         {unknown && <p>{call?.status === "failed" ? "外部操作结果不确定，且工具已失败，无法在本任务安全重试。若确认未提交，请取消后新建任务；若确认已提交，请输入 committed:实际结果。请先核对外部状态。" : "外部操作结果不确定。确认重试请输入 retry；确认已提交请输入 committed:实际结果。请先核对外部状态。"}</p>}
         <label>回复或确认依据<input value={response} onChange={(event) => setResponses((values) => ({ ...values, [approval.id]: event.target.value }))} placeholder={unknown ? (call?.status === "failed" ? "committed:实际结果" : "retry 或 committed:实际结果") : "ask_user 工具需要填写回复"} /></label>
         <div className="actions">
-          <button type="button" disabled={busy || (unknown && !response.trim()) || (call?.tool_name === "ask_user" && !response.trim())} onClick={() => { void act(() => chat.decideApproval(approval.id, "approve", response), approval.id); }}>批准</button>
+          <button type="button" disabled={busy || (needsPreview && (!preview?.data || preview.data.files.some((file) => file.diff_truncated))) || (unknown && !response.trim()) || (call?.tool_name === "ask_user" && !response.trim())} onClick={() => { void approveWithPreview(approval.id, response); }}>批准</button>
           {!unknown && <button type="button" className="danger" disabled={busy} onClick={() => { void act(() => chat.decideApproval(approval.id, "reject", response), approval.id); }}>拒绝</button>}
         </div>
       </div>;

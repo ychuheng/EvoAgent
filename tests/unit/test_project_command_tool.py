@@ -1,5 +1,6 @@
 """M3 命令工具与审批档位的单元测试（实施计划 §8 X-03）。"""
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -55,13 +56,18 @@ def test_network_command_is_escalated_to_explicit_approval(tmp_path: Path) -> No
     tool = make_tool(tmp_path)
     policy = PermissionPolicy()
 
-    offline = policy.evaluate(tool, RunCommandArguments(argv=("python", "-V"), allow_network=False))
-    online = policy.evaluate(tool, RunCommandArguments(argv=("python", "-V"), allow_network=True))
+    offline = policy.evaluate(tool, RunCommandArguments(argv=("pytest", "-q"), allow_network=False))
+    online = policy.evaluate(tool, RunCommandArguments(argv=("pytest", "-q"), allow_network=True))
+    install = policy.evaluate(
+        tool, RunCommandArguments(argv=("python", "-m", "pip", "install", "x"))
+    )
 
     assert offline.effective_risk is ToolRisk.R1
     assert offline.action is PolicyAction.ALLOW
     assert online.effective_risk is ToolRisk.R2
     assert online.action is PolicyAction.REQUIRE_APPROVAL
+    assert install.effective_risk is ToolRisk.R2
+    assert install.action is PolicyAction.REQUIRE_APPROVAL
 
 
 def test_command_binding_records_allowlist_and_environment_keys(tmp_path: Path) -> None:
@@ -82,11 +88,11 @@ def test_command_binding_records_allowlist_and_environment_keys(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="项目命令要求 Linux 内核隔离")
 async def test_run_command_returns_failure_evidence_instead_of_raising(tmp_path: Path) -> None:
     """退出码非 0 必须作为结构化证据返回，否则循环无法据失败修正。"""
 
     import json
-    import sys
 
     tool = ProjectCommandTool(
         tmp_path,
@@ -105,5 +111,5 @@ async def test_run_command_returns_failure_evidence_instead_of_raising(tmp_path:
 
     assert payload["return_code"] == 2
     assert payload["stderr"].strip() == "bad"
-    assert payload["network"] == "not_isolated"
+    assert payload["network"] == "isolated"
     assert payload["timed_out"] is False

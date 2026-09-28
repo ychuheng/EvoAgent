@@ -100,7 +100,7 @@ class PersistentToolMiddleware:
             )
             if approval is not None and (record.execution_binding or {}) != binding:
                 approval = None
-            if approval is None:
+            if approval is None and tool.dedupe_by_arguments:
                 # Worker 重新排队后，Provider 可能为同一语义调用生成新的 call_id。
                 # 审批决定因此按“任务 + 工具 + 参数”复用，call_id 只负责 Trace 关联。
                 approval = await self._find_semantic_approval(
@@ -164,7 +164,11 @@ class PersistentToolMiddleware:
 
             effect_id = None
             if tool.has_side_effects:
-                semantic_key = self.semantic_key(tool.name, tool.canonical_arguments(arguments))
+                semantic_key = self.semantic_key(
+                    tool.name,
+                    tool.canonical_arguments(arguments),
+                    call_id=None if tool.dedupe_by_arguments else call.call_id,
+                )
                 effect = await unit.effects.find(str(self._task_id), semantic_key)
                 if effect is not None and effect.status is ToolEffectStatus.COMMITTED:
                     origin = await unit.session.get(ToolCallRecord, effect.tool_call_id)
@@ -424,9 +428,14 @@ class PersistentToolMiddleware:
         return None
 
     @staticmethod
-    def semantic_key(tool_name: str, arguments: dict[str, Any]) -> str:
+    def semantic_key(
+        tool_name: str, arguments: dict[str, Any], *, call_id: str | None = None
+    ) -> str:
+        identity = {"tool": tool_name, "arguments": arguments}
+        if call_id is not None:
+            identity["call_id"] = call_id
         value = json.dumps(
-            {"tool": tool_name, "arguments": arguments},
+            identity,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

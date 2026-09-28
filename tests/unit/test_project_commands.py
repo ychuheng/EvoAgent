@@ -12,6 +12,7 @@ import pytest
 from evoagent.projects.commands import (
     CommandSpec,
     build_environment,
+    command_category,
     run_command,
     validate_argv,
     validate_cwd,
@@ -37,6 +38,16 @@ def test_validate_argv_rejects_shell_interpreters() -> None:
     for program in ("cmd.exe", "powershell", "pwsh", "bash", "sh"):
         with pytest.raises(ToolExecutionError, match="shell 解释器|不在允许列表"):
             validate_argv((program, "-c", "echo"), allowlist=(program,))
+
+
+def test_command_category_is_derived_from_argv_and_publish_is_blocked() -> None:
+    assert command_category(("pytest", "-q")) == "check"
+    assert command_category(("python", "-m", "pytest")) == "check"
+    assert command_category(("npm", "run", "build")) == "build"
+    assert command_category(("python", "-m", "pip", "install", "x")) == "install"
+    assert command_category(("python", "-c", "print(1)")) == "general"
+    with pytest.raises(ToolPermissionError, match="发布与 Git 远端"):
+        validate_argv(("git", "push"), allowlist=("git",))
 
 
 def test_validate_argv_requires_allowlist_membership() -> None:
@@ -82,11 +93,12 @@ def test_build_environment_excludes_secrets_and_proxies(monkeypatch: pytest.Monk
     assert "EVOAGENT_API_KEY" not in offline
     assert "HTTPS_PROXY" not in offline
     assert offline["PATH"] == "/usr/bin"
-    assert offline["EVOAGENT_COMMAND_NETWORK"] == "not_isolated"
+    assert offline["EVOAGENT_COMMAND_NETWORK"] == "isolated"
     assert online["EVOAGENT_COMMAND_NETWORK"] == "allowed"
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="项目命令要求 Linux 内核隔离")
 async def test_run_command_returns_structured_success(tmp_path: Path) -> None:
     outcome = await run_command(
         tmp_path,
@@ -105,6 +117,7 @@ async def test_run_command_returns_structured_success(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="项目命令要求 Linux 内核隔离")
 async def test_run_command_reports_nonzero_exit_as_evidence(tmp_path: Path) -> None:
     program = "import sys\nsys.stderr.write('boom')\nsys.exit(3)"
     outcome = await run_command(
@@ -121,6 +134,7 @@ async def test_run_command_reports_nonzero_exit_as_evidence(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="项目命令要求 Linux 内核隔离")
 async def test_run_command_truncates_output(tmp_path: Path) -> None:
     outcome = await run_command(
         tmp_path,
@@ -135,6 +149,7 @@ async def test_run_command_truncates_output(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="项目命令要求 Linux 内核隔离")
 async def test_run_command_times_out_and_kills(tmp_path: Path) -> None:
     program = "import time\ntime.sleep(30)"
     outcome = await run_command(
@@ -150,6 +165,7 @@ async def test_run_command_times_out_and_kills(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="项目命令要求 Linux 内核隔离")
 async def test_run_command_rejects_path_arguments_outside_root(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
@@ -165,6 +181,7 @@ async def test_run_command_rejects_path_arguments_outside_root(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="项目命令要求 Linux 内核隔离")
 async def test_run_command_uses_project_cwd(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     (root / "sub").mkdir(parents=True)

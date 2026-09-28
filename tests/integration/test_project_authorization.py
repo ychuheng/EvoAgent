@@ -29,9 +29,12 @@ from evoagent.db.models import (
     RunEventRecord,
     RunRecord,
     TaskRecord,
+    ToolApprovalRecord,
+    ToolCallRecord,
+    TurnRecord,
 )
 from evoagent.db.session import Database
-from evoagent.projects.schema import ProjectAuthorizationRevoked
+from evoagent.projects.schema import ProjectAuthorization, ProjectAuthorizationRevoked
 from evoagent.projects.service import ProjectService, resolve_active_project
 from evoagent.tasks.service import TaskService
 from evoagent.tools.builtin.list_dir import ListDirTool
@@ -65,6 +68,63 @@ def make_repo(root: Path) -> Path:
     (root / "src").mkdir(exist_ok=True)
     (root / "src" / "app.py").write_text("def main():\n    return 0\n", encoding="utf-8")
     return root
+
+
+@pytest.mark.asyncio
+async def test_edit_approval_preview_recomputes_diff_without_writing(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path / "repo")
+    target = repo / "src" / "app.py"
+    original = target.read_text(encoding="utf-8")
+    async with api_client(tmp_path) as (client, database):
+        project = await ProjectService(database.session_factory).register(
+            path=str(repo), authorization=ProjectAuthorization.READ_WRITE
+        )
+        tasks = TaskService(database.session_factory)
+        chat = await tasks.create_session("编辑预览", project_id=project.id)
+        aggregate = await tasks.create_task(
+            session_id=chat.id, goal="改返回值", provider="mock", model="mock-model"
+        )
+        async with database.session_factory() as session:
+            turn = TurnRecord(run_id=aggregate.run.id, sequence=1, status="running")
+            session.add(turn)
+            await session.flush()
+            call = ToolCallRecord(
+                run_id=aggregate.run.id,
+                turn_id=turn.id,
+                provider_call_id="edit-preview",
+                tool_name="edit_file",
+                arguments={
+                    "path": "src/app.py",
+                    "old_text": "return 0",
+                    "replacement": "return 1",
+                },
+                risk="R1",
+            )
+            session.add(call)
+            await session.flush()
+            approval = ToolApprovalRecord(
+                task_id=aggregate.task.id,
+                tool_call_id=call.id,
+                risk="R1",
+                reason="核对项目文件差异",
+            )
+            session.add(approval)
+            await session.commit()
+            approval_id = approval.id
+
+        preview = await client.get(f"/api/v1/tool-approvals/{approval_id}/preview")
+        assert preview.status_code == 200, preview.text
+        body = preview.json()
+        assert body["file_count"] == 1
+        assert body["added_lines"] == 1
+        assert body["removed_lines"] == 1
+        assert body["files"][0]["path"] == "src/app.py"
+        assert "+    return 1" in body["files"][0]["diff"]
+        assert target.read_text(encoding="utf-8") == original
+
+        target.write_text("def main():\n    return 2\n", encoding="utf-8")
+        changed = await client.get(f"/api/v1/tool-approvals/{approval_id}/preview")
+        assert changed.status_code == 409
 
 
 @pytest.mark.asyncio

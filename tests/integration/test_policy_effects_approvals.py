@@ -3,12 +3,13 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from evoagent.api.app import create_app
 from evoagent.config import Settings
 from evoagent.core.events import InMemoryEventSink
-from evoagent.core.models import ToolCall, ToolResultStatus
+from evoagent.core.models import ToolCall, ToolResultStatus, ToolRisk
 from evoagent.db.base import Base
 from evoagent.db.models import (
     ApprovalStatus,
@@ -25,6 +26,7 @@ from evoagent.tools.approvals import (
     ApprovalService,
     ApprovalServiceError,
 )
+from evoagent.tools.base import BaseTool
 from evoagent.tools.builtin.ask_user import AskUserTool
 from evoagent.tools.builtin.file_write import FileWriteTool
 from evoagent.tools.effects import PersistentToolMiddleware
@@ -32,6 +34,62 @@ from evoagent.tools.executor import ToolExecutor
 from evoagent.tools.policy import PermissionPolicy
 from evoagent.tools.registry import ToolRegistry
 from evoagent.tools.sandbox import RunSandbox
+
+
+class _RepeatableArguments(BaseModel):
+    value: str
+
+
+class _RepeatableEffectTool(BaseTool[_RepeatableArguments]):
+    name = "repeatable_effect"
+    description = "Test repeated invocations"
+    arguments_model = _RepeatableArguments
+    risk = ToolRisk.R1
+    has_side_effects = True
+    parallel_safe = False
+    dedupe_by_arguments = False
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    async def invoke(self, arguments: _RepeatableArguments) -> str:
+        self.count += 1
+        return f"{arguments.value}:{self.count}"
+
+
+@pytest.mark.asyncio
+async def test_repeatable_effect_reexecutes_new_call_but_replays_same_call(
+    tmp_path: Path,
+) -> None:
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'repeatable.db'}")
+    async with database.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    service = TaskService(database.session_factory)
+    session = await service.create_session("重复命令测试")
+    aggregate = await service.create_task(
+        session_id=session.id, goal="重复检查", provider="mock", model="mock-model"
+    )
+    tool = _RepeatableEffectTool()
+    middleware = PersistentToolMiddleware(
+        task_id=aggregate.task.id,
+        run_id=aggregate.run.id,
+        session_factory=database.session_factory,
+        policy=PermissionPolicy(),
+    )
+    executor = ToolExecutor(
+        ToolRegistry([tool]),
+        InMemoryEventSink(aggregate.run.id),
+        timeout_seconds=2,
+        max_result_chars=1_000,
+        middleware=middleware,
+    )
+    first = ToolCall(call_id="check-1", name=tool.name, arguments={"value": "same"})
+    second = ToolCall(call_id="check-2", name=tool.name, arguments={"value": "same"})
+    assert (await executor.execute(first)).content == "same:1"
+    assert (await executor.execute(first)).content == "same:1"
+    assert (await executor.execute(second)).content == "same:2"
+    assert tool.count == 2
+    await database.dispose()
 
 
 @pytest.mark.asyncio

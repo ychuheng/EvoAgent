@@ -2,7 +2,7 @@
 
 `run_command` 只接受结构化 argv：
 
-- 默认不继承代理，但尚未强制断网；`allow_network=true` 的风险被提升到 R2，
+- 默认使用 Linux seccomp 阻断网络；`allow_network=true` 的风险被提升到 R2，
   因此**必须**经过一次独立的人工审批（X-03：一次测试批准不带来安装或推送权）。
 - 输出按上限截断，超时强杀；stdout/stderr/退出码/耗时/截断标记都结构化返回，
   让模型能据失败继续修正（X-04）。
@@ -17,7 +17,7 @@ from pathlib import Path
 from pydantic import Field
 
 from evoagent.core.models import ContractModel, ToolRisk
-from evoagent.projects.commands import CommandSpec, run_command
+from evoagent.projects.commands import CommandSpec, command_category, run_command
 from evoagent.projects.schema import ProjectAuthorization
 from evoagent.tools.base import BaseTool
 
@@ -33,13 +33,14 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
     description = (
         "Run an allowlisted program inside the authorized project as a structured argv "
         "(no shell). Working directory must be inside the project. Proxy variables are "
-        "cleared by default, but direct network access is not isolated; "
+        "blocked by Linux seccomp by default; "
         "allow_network=true needs a separate approval."
     )
     arguments_model = RunCommandArguments
     risk = ToolRisk.R1
     has_side_effects = True
     parallel_safe = False
+    dedupe_by_arguments = False
 
     def __init__(
         self,
@@ -48,17 +49,21 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
         allowlist: tuple[str, ...],
         timeout_seconds: float,
         output_bytes: int,
+        memory_bytes: int = 1_073_741_824,
         environment: dict[str, str] | None = None,
     ) -> None:
         self._root = root
         self._allowlist = allowlist
         self._timeout_seconds = timeout_seconds
         self._output_bytes = output_bytes
+        self._memory_bytes = memory_bytes
         self._environment = dict(environment or {})
 
     def effective_risk(self, arguments: RunCommandArguments) -> ToolRisk:
-        # 显式联网仍需独立审批；默认档位目前只清代理，不保证直接连接被阻断。
-        return ToolRisk.R2 if arguments.allow_network else ToolRisk.R1
+        # Only recognizable offline checks are auto-approved. Build, install,
+        # arbitrary interpreters and networking require a decision per call.
+        category = command_category(arguments.argv)
+        return ToolRisk.R1 if category == "check" and not arguments.allow_network else ToolRisk.R2
 
     def execution_binding(self) -> dict[str, object]:
         return {
@@ -66,6 +71,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             "allowlist": sorted(self._allowlist),
             "environment": sorted(self._environment),
             "output_bytes": self._output_bytes,
+            "memory_bytes": self._memory_bytes,
             "timeout_seconds": self._timeout_seconds,
         }
 
@@ -80,13 +86,15 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             allowlist=self._allowlist,
             timeout_seconds=self._timeout_seconds,
             output_limit=self._output_bytes,
+            memory_limit_bytes=self._memory_bytes,
             environment_extra=self._environment,
         )
         payload = {
             "program": outcome.program,
             "argv": list(arguments.argv),
             "cwd": outcome.cwd,
-            "network": "allowed" if arguments.allow_network else "not_isolated",
+            "network": "allowed" if arguments.allow_network else "isolated",
+            "category": command_category(arguments.argv),
             "return_code": outcome.return_code,
             "timed_out": outcome.timed_out,
             "duration_seconds": outcome.duration_seconds,
@@ -107,6 +115,7 @@ def project_command_tools(
     allowlist: tuple[str, ...],
     timeout_seconds: float,
     output_bytes: int,
+    memory_bytes: int = 1_073_741_824,
     environment: dict[str, str] | None = None,
 ) -> list[BaseTool]:
     """装配命令工具；只读授权或空白名单时返回空列表。"""
@@ -119,6 +128,7 @@ def project_command_tools(
             allowlist=allowlist,
             timeout_seconds=timeout_seconds,
             output_bytes=output_bytes,
+            memory_bytes=memory_bytes,
             environment=environment,
         )
     ]

@@ -55,12 +55,30 @@ class _ReadableHTML(HTMLParser):
             self.main_text.append(data)
 
 
-def _model_visible_text(body: str, media_type: str) -> tuple[str, bool]:
+def _model_visible_text(
+    body: str, media_type: str, *, query: str | None = None
+) -> tuple[str, bool]:
     if media_type in {"text/html", "application/xhtml+xml"}:
         parser = _ReadableHTML()
         parser.feed(body)
         body = " ".join(parser.main_text or parser.all_text)
         body = re.sub(r"\s+", " ", body).strip()
+    if query:
+        # The final occurrence on documentation pages is often a footnote or
+        # comparison table; the first content hit is usually the definition.
+        location = body.casefold().find(query.casefold())
+        if location < 0:
+            return f"[网页正文未找到查询片段：{query}]", len(body) > _MODEL_TEXT_LIMIT
+        start = max(0, location - _MODEL_TEXT_LIMIT // 3)
+        end = min(len(body), start + _MODEL_TEXT_LIMIT)
+        excerpt = body[start:end]
+        if start or end < len(body):
+            return (
+                f"[查询片段：{query}；正文摘录位置 {start}–{end}/{len(body)}；"
+                "未显示部分不可作为证据]\n" + excerpt,
+                True,
+            )
+        return excerpt, False
     if len(body) > _MODEL_TEXT_LIMIT:
         return body[:_MODEL_TEXT_LIMIT] + "\n[网页正文已截断；请勿据此推断未显示的内容]", True
     return body, False
@@ -68,6 +86,7 @@ def _model_visible_text(body: str, media_type: str) -> tuple[str, bool]:
 
 class WebFetchArguments(ContractModel):
     url: str = Field(min_length=1, max_length=8_192)
+    query: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("url")
     @classmethod
@@ -82,7 +101,11 @@ class WebFetchTool(BaseTool[WebFetchArguments]):
     """逐跳校验 URL，并读取大小受限的文本响应。"""
 
     name = "web_fetch"
-    description = "Fetch public HTTP or HTTPS text content with SSRF protections."
+    description = (
+        "Fetch public HTTP or HTTPS text content with SSRF protections. "
+        "For long pages, pass query to read a matching excerpt from the fetched body "
+        "instead of only the beginning; a missing query is reported explicitly."
+    )
     arguments_model = WebFetchArguments
     risk = ToolRisk.R0
     has_side_effects = False
@@ -180,7 +203,9 @@ class WebFetchTool(BaseTool[WebFetchArguments]):
                     try:
                         body = bytes(content)
                         visible_text, text_truncated = _model_visible_text(
-                            body.decode(encoding, errors="replace"), media_type
+                            body.decode(encoding, errors="replace"),
+                            media_type,
+                            query=arguments.query,
                         )
                         return visible_text, {
                             "level": "fetched_text",
@@ -191,6 +216,7 @@ class WebFetchTool(BaseTool[WebFetchArguments]):
                             "content_bytes": len(body),
                             "content_sha256": hashlib.sha256(body).hexdigest(),
                             "text_truncated": text_truncated,
+                            "excerpt_query": arguments.query,
                             "redirects": redirect_count,
                         }
                     except LookupError as error:

@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     project_command_allowlist: tuple[str, ...] = ()
     project_command_timeout_seconds: float = Field(default=120.0, gt=0, le=1_800)
     project_command_output_bytes: int = Field(default=65_536, ge=1_024, le=1_048_576)
+    project_command_memory_bytes: int = Field(
+        default=1_073_741_824, ge=134_217_728, le=4_294_967_296
+    )
     # 命令契约允许显式设置的环境变量（例如 PYTHONPATH=src）；
     # 这是"部署者预先声明"的集合，模型不能自行指定环境变量。
     project_command_environment: dict[str, str] = Field(default_factory=dict)

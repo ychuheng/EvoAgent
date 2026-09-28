@@ -8,7 +8,8 @@
 - **可执行文件白名单**：只允许配置里显式列出的程序名（默认空 = 不能运行任何命令）。
 - **环境变量白名单**：只传出最小集合（PATH/SystemRoot/TEMP/…），不继承应用秘密与代理设置。
 - **输出上限与超时**：stdout/stderr 各自截断，超时后强杀并如实报告。
-- **网络边界尚未完成**：默认仅清代理变量，不能阻断直接连接；
+- **系统隔离**：命令子进程先安装 Landlock 文件视图、CPU/内存限制；
+  默认再由 seccomp 阻断非 Unix socket，缺少内核能力时拒绝启动。
   `allow_network=true` 仍需独立授权（R2 审批）。
 """
 
@@ -17,6 +18,9 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import signal
+import sys
+import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -80,6 +84,41 @@ class CommandOutcome:
     program: str
 
 
+def command_category(argv: Sequence[str]) -> str:
+    """Classify exact, common read/check forms; unknown argv never inherits test approval."""
+
+    if not argv:
+        return "general"
+    program = Path(argv[0]).name.lower().removesuffix(".exe")
+    args = tuple(item.lower() for item in argv[1:])
+    if program in {"pytest", "py.test", "mypy", "pyright"}:
+        return "check"
+    if program == "ruff" and args and args[0] == "check":
+        return "check"
+    if re.fullmatch(r"python(?:3(?:\.\d+)?)?", program) and len(args) >= 2 and args[0] == "-m":
+        if args[1] in {"pytest", "unittest", "mypy"}:
+            return "check"
+        if args[1] in {"pip", "ensurepip"}:
+            return "install"
+    if program in {"pip", "pip3"}:
+        return "install"
+    if program in {"npm", "pnpm"} and args:
+        if args[0] == "test" or args[:2] == ("run", "test"):
+            return "check"
+        if args[0] in {"install", "ci", "add", "update"}:
+            return "install"
+        if args[0] == "publish":
+            return "publish"
+        if args[:2] == ("run", "build"):
+            return "build"
+    if program == "git" and args:
+        if args[0] in {"status", "diff", "log", "show"}:
+            return "check"
+        if args[0] in {"push", "remote"}:
+            return "publish"
+    return "general"
+
+
 def validate_argv(argv: Sequence[str], *, allowlist: Sequence[str]) -> tuple[str, ...]:
     """校验 argv 的结构、长度与可执行文件白名单，返回规范化后的元组。"""
 
@@ -105,6 +144,8 @@ def validate_argv(argv: Sequence[str], *, allowlist: Sequence[str]) -> tuple[str
             raise ToolExecutionError("参数含 shell 元字符；请用结构化 argv，不要拼接命令")
 
     name = Path(program).name
+    if command_category(argv) == "publish":
+        raise ToolPermissionError("发布与 Git 远端操作需要独立工具授权，不能通过项目命令执行")
     if name.lower() in {"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "sh", "bash"}:
         raise ToolExecutionError("不允许通过 shell 解释器执行命令")
     if name not in allowlist:
@@ -162,7 +203,7 @@ def build_environment(
     extra: Mapping[str, str] | None = None,
     base: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """构造最小环境；默认不传代理变量，但这不是系统级断网。
+    """构造最小环境；网络隔离由子进程的 seccomp 过滤器执行。
 
     `extra` 是部署者在配置里显式声明的变量（例如 `PYTHONPATH=src`）；模型无法指定环境变量，
     因此这里不存在"用环境变量改行为"的通道。
@@ -174,8 +215,8 @@ def build_environment(
     environment.setdefault("PYTHONUTF8", "1")
     if extra:
         environment.update({str(key): str(value) for key, value in extra.items()})
-    # 这是执行状态提示，不是网络命名空间隔离；清代理无法阻断直接 socket 连接。
-    environment["EVOAGENT_COMMAND_NETWORK"] = "allowed" if allow_network else "not_isolated"
+    # 真实网络边界由 command_runner 安装；环境变量只供任务自检。
+    environment["EVOAGENT_COMMAND_NETWORK"] = "allowed" if allow_network else "isolated"
     if not allow_network:
         # 清掉代理变量，避免"以为离线其实走了代理"。
         for name in (
@@ -198,6 +239,7 @@ async def run_command(
     timeout_seconds: float,
     output_limit: int,
     environment_extra: Mapping[str, str] | None = None,
+    memory_limit_bytes: int = 1_073_741_824,
 ) -> CommandOutcome:
     """执行一次结构化命令并返回结构化结果；超时或越界都以异常或字段如实表达。"""
 
@@ -205,30 +247,53 @@ async def run_command(
     cwd, cwd_display = validate_cwd(root, spec.cwd)
     validate_arguments_inside_root(root, argv)
 
+    if not sys.platform.startswith("linux"):
+        raise ToolExecutionError("项目命令需要 Linux Landlock/seccomp 隔离执行环境")
+    if memory_limit_bytes < 134_217_728:
+        raise ToolExecutionError("项目命令内存上限不能低于 128 MiB")
+
     environment = build_environment(allow_network=spec.allow_network, extra=environment_extra)
     started = time.perf_counter()
-    try:
-        process = await asyncio.create_subprocess_exec(
+    with tempfile.TemporaryDirectory(prefix="evoagent-command-") as scratch:
+        environment["TMPDIR"] = scratch
+        environment["TEMP"] = scratch
+        environment["TMP"] = scratch
+        runner_argv = (
+            sys.executable,
+            "-m",
+            "evoagent.projects.command_runner",
+            str(root.resolve()),
+            scratch,
+            str(max(1, int(timeout_seconds) + 1)),
+            str(memory_limit_bytes),
+            "online" if spec.allow_network else "offline",
+            "--",
             *argv,
-            cwd=str(cwd),
-            env=environment,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-    except (OSError, ValueError) as error:
-        raise ToolExecutionError(f"命令无法启动：{error}") from error
-
-    timed_out = False
-    try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-    except TimeoutError:
-        timed_out = True
-        process.kill()
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
-        except (TimeoutError, ProcessLookupError):  # pragma: no cover - 强杀兜底
-            stdout, stderr = b"", b""
+            process = await asyncio.create_subprocess_exec(
+                *runner_argv,
+                cwd=str(cwd),
+                env=environment,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+        except (OSError, ValueError) as error:
+            raise ToolExecutionError(f"命令无法启动：{error}") from error
+        timed_out = False
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+        except TimeoutError:
+            timed_out = True
+            os.killpg(process.pid, signal.SIGKILL)
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
+            except (TimeoutError, ProcessLookupError):  # pragma: no cover - 强杀兜底
+                stdout, stderr = b"", b""
+        if process.returncode == 125 and b"EVOAGENT_COMMAND_SETUP_FAILED:" in stderr:
+            raise ToolExecutionError(stderr.decode("utf-8", errors="replace").strip())
     duration = time.perf_counter() - started
 
     text_out, out_truncated = _decode(stdout, output_limit)
@@ -259,6 +324,7 @@ __all__ = [
     "ENV_ALLOWLIST",
     "CommandOutcome",
     "CommandSpec",
+    "command_category",
     "build_environment",
     "run_command",
     "validate_argv",

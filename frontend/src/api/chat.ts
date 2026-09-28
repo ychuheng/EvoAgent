@@ -93,6 +93,14 @@ export type TaskTrace = {
   };
 };
 
+export type ApprovalPreview = {
+  approval_id: string;
+  file_count: number;
+  added_lines: number;
+  removed_lines: number;
+  files: Array<{ path: string; created: boolean; added_lines: number; removed_lines: number; diff: string; diff_truncated: boolean }>;
+};
+
 export const chat = {
   runtimeInfo: () => request<RuntimeInfo>("/runtime-info"),
   workspaces: () => request<ChatWorkspace[]>("/workspaces"),
@@ -144,4 +152,5 @@ export const chat = {
     request(`/tool-approvals/${encodeURIComponent(approvalId)}/${decision}`, {
       method: "POST", body: JSON.stringify({ response: response.trim() || null }),
     }),
+  approvalPreview: (approvalId: string) => request<ApprovalPreview>(`/tool-approvals/${encodeURIComponent(approvalId)}/preview`),
 };

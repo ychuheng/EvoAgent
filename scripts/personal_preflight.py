@@ -1,6 +1,7 @@
 """Validate the private personal-mode configuration without contacting paid services."""
 
 import argparse
+import json
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -44,6 +45,16 @@ def validate(path: Path) -> tuple[str, str]:
         and value is not None
         and value != ""
     }
+    for field in (
+        "project_command_allowlist",
+        "project_command_environment",
+        "budget_milestone_limits_micros",
+    ):
+        if field in values:
+            try:
+                values[field] = json.loads(values[field])
+            except json.JSONDecodeError:
+                raise ValueError(f"invalid settings: {field}") from None
     values["provider"] = "openai_compatible"
     try:
         settings = Settings.model_validate(values)

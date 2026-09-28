@@ -14,7 +14,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN addgroup --system evoagent && adduser --system --ingroup evoagent evoagent
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git libseccomp2 nodejs ripgrep \
+    && rm -rf /var/lib/apt/lists/* \
+    && addgroup --system evoagent && adduser --system --ingroup evoagent evoagent
 
 COPY pyproject.toml README.md ./
 COPY src ./src
@@ -22,8 +25,11 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 COPY evals ./evals
 COPY --from=frontend-build /frontend/dist ./frontend/dist
+COPY --from=frontend-build /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 
-RUN python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir . "pytest>=8.3,<9" "pytest-asyncio>=0.25,<2" \
+    && rm /app/pyproject.toml
 
 RUN mkdir -p /app/workspace && chown -R evoagent:evoagent /app/workspace
 USER evoagent

@@ -23,6 +23,9 @@ class BaseTool[ArgumentsT: BaseModel](ABC):
     has_side_effects: bool
     parallel_safe: bool
     implementation_version: str = "1"
+    # Most writes are idempotent by arguments. Commands may need to run again
+    # with identical argv after a file edit; their identity is the model call.
+    dedupe_by_arguments: bool = True
 
     def definition(self) -> ToolDefinition:
         """构建向模型公开的、与具体模型服务无关的工具定义。"""
