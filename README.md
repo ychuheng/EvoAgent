@@ -25,7 +25,7 @@ pnpm --dir frontend install --frozen-lockfile
 Copy-Item .env.personal.example .env.personal
 ```
 
-在 `.env.personal` 中填写模型连接、真实上下文窗口、`trial` 费用上限与价格假设，并显式设置 `EVOAGENT_PROJECT_COMMAND_ALLOWLIST`（例如 `python`、`git`；需要 PowerShell 时单独加入 `powershell`）。不要把密钥提交到仓库。随后执行：
+在 `.env.personal` 中填写模型连接、真实上下文窗口，并设置 `EVOAGENT_PROVIDER=openai_compatible`、`EVOAGENT_BUDGET_SCOPE=trial`、试跑额度上限、单任务上限与输入/输出价格假设。本机启动脚本要求 `trial` 预算上限；只填 API Key 不会把默认的 Mock Provider 切换为真实模型。还须显式设置 `EVOAGENT_PROJECT_COMMAND_ALLOWLIST`（例如 `python`、`git`；需要 PowerShell 时单独加入 `powershell`）。不要把密钥提交到仓库。随后执行：
 
 ```powershell
 pnpm --dir frontend run build
