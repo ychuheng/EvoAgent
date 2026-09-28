@@ -120,7 +120,10 @@ async def test_tampered_or_escaping_artifact_is_refused(tmp_path: Path) -> None:
         assert (await client.get(f"/api/v1/artifacts/{uuid4()}")).status_code == 404
 
         # 2) 存储内容被替换：哈希不一致，预览与下载都拒绝。
-        target = next((tmp_path / "workspace" / "artifacts").rglob("report.md"))
+        async with database.session_factory() as session_db:
+            record = await session_db.scalar(select(ArtifactRecord))
+            assert record is not None
+            target = tmp_path / "workspace" / "artifacts" / record.uri
         original = target.read_bytes()
         target.write_bytes("# 被替换的内容\n".encode())
         assert (await client.get(f"/api/v1/artifacts/{artifact_id}")).status_code == 409

@@ -8,7 +8,74 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from scripts.m7_release_run import evaluate_case, release_gates
+import httpx
+import pytest
+
+import scripts.m7_release_run as release_runner
+from scripts.m7_release_run import _check_environment, _wait_for_task, evaluate_case, release_gates
+
+
+def test_release_preflight_rejects_trial_budget_even_when_allowed() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/runtime-info":
+            return httpx.Response(200, json={"provider_mode": "real", "search_mode": "ddgs"})
+        return httpx.Response(200, json={"scope": "trial", "allowed": True, "reason": "ok"})
+
+    with (
+        httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond)) as client,
+        pytest.raises(SystemExit, match="scope=trial"),
+    ):
+        _check_environment(client, {"cases": []}, {})
+
+
+def test_wait_for_task_sleeps_between_polls_and_stops_at_deadline(monkeypatch) -> None:
+    clock = [0.0]
+    sleeps = []
+    requests = []
+
+    def advance(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        return httpx.Response(200, json={"status": "running"})
+
+    monkeypatch.setattr(release_runner, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(release_runner, "sleep", advance)
+    with httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond)) as client:
+        task, injected = _wait_for_task(
+            client,
+            task={"status": "running"},
+            task_id="task",
+            run_id="run",
+            instruction=None,
+            timeout=2.5,
+        )
+    assert task["status"] == "running"
+    assert not injected
+    assert sleeps == [1.0, 1.0, 0.5]
+    assert requests == ["/tasks/task"] * 3
+
+
+def test_wait_for_task_returns_immediately_on_approval_wait() -> None:
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        return httpx.Response(200, json={"status": "waiting_user"})
+
+    with httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond)) as client:
+        task, _ = _wait_for_task(
+            client,
+            task={"status": "running"},
+            task_id="task",
+            run_id="run",
+            instruction=None,
+            timeout=60,
+        )
+    assert task["status"] == "waiting_user"
+    assert requests == ["/tasks/task"]
 
 
 def case(

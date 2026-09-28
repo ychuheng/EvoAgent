@@ -171,19 +171,21 @@ class BudgetedProvider:
         limits = limits_from_settings(self.settings, self.scope)
 
         usage = None
-        async for event in self.provider.stream(request):
-            if event.type is ProviderEventType.USAGE and event.usage is not None:
-                usage = event.usage
-            yield event
-        if usage is not None:
-            await record_spend(
-                self.session_factory,
-                scope=self.scope,
-                task_id=self.task_id,
-                run_id=self.run_id,
-                provider=self.provider_name,
-                model=self.model,
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                limits=limits,
-            )
+        try:
+            async for event in self.provider.stream(request):
+                if event.type is ProviderEventType.USAGE and event.usage is not None:
+                    usage = event.usage
+                yield event
+        finally:
+            if usage is not None:
+                await record_spend(
+                    self.session_factory,
+                    scope=self.scope,
+                    task_id=self.task_id,
+                    run_id=self.run_id,
+                    provider=self.provider_name,
+                    model=self.model,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    limits=limits,
+                )

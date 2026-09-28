@@ -203,3 +203,57 @@ async def test_budgeted_provider_refuses_when_no_limit_is_configured():
                 pytest.fail("no event may be produced")
     finally:
         await database.dispose()
+
+
+@pytest.mark.parametrize("closed_early", [False, True])
+async def test_budgeted_provider_records_usage_when_stream_fails(tmp_path, closed_early):
+    from sqlalchemy import select
+
+    from evoagent.core.models import ProviderEvent, ProviderEventType, TokenUsage
+    from evoagent.db.base import Base
+    from evoagent.db.models import SpendRecord
+    from evoagent.db.session import Database
+    from evoagent.workers.rate_limit import BudgetedProvider
+
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'failed-stream.db'}")
+    async with database.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    class FailsAfterUsage:
+        async def stream(self, request):
+            yield ProviderEvent(
+                type=ProviderEventType.USAGE,
+                usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+            )
+            raise RuntimeError("stream disconnected")
+
+    provider = BudgetedProvider(
+        FailsAfterUsage(),
+        settings=Settings(
+            _env_file=None,
+            budget_trial_limit_micros=1_000_000,
+            budget_input_price_micros_per_million=1_000,
+            budget_output_price_micros_per_million=1_000,
+        ),
+        session_factory=database.session_factory,
+        scope=BudgetScope.TRIAL,
+        task_id=uuid4(),
+        run_id=uuid4(),
+        provider_name="test",
+        model="test-model",
+    )
+    try:
+        if closed_early:
+            stream = provider.stream(object())
+            await anext(stream)
+            await stream.aclose()
+        else:
+            with pytest.raises(RuntimeError, match="disconnected"):
+                async for _ in provider.stream(object()):
+                    pass
+        async with database.session_factory() as session:
+            records = tuple(await session.scalars(select(SpendRecord)))
+        assert len(records) == 1
+        assert (records[0].input_tokens, records[0].output_tokens) == (10, 5)
+    finally:
+        await database.dispose()

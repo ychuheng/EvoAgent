@@ -73,9 +73,9 @@ class FileWriteTool(BaseTool[FileWriteArguments]):
         return ToolRisk.R2 if arguments.overwrite else ToolRisk.R1
 
     async def invoke(self, arguments: FileWriteArguments) -> str:
-        target = await self._sandbox.write_text(
-            arguments.path, arguments.content, overwrite=arguments.overwrite
-        )
+        # 先验证路径与覆盖权限，再登记不可变快照。旧版登记可能还指向工作文件；
+        # 若先覆盖工作文件而数据库随后失败，旧登记的哈希就会失效。
+        target = self._sandbox.target_for_write(arguments.path, overwrite=arguments.overwrite)
         relative = target.relative_to(self._sandbox.root).as_posix()
         content = arguments.content.encode("utf-8")
         payload: dict[str, object] = {
@@ -84,6 +84,9 @@ class FileWriteTool(BaseTool[FileWriteArguments]):
             "downloadable": self._artifacts is not None,
         }
         if self._artifacts is None:
+            await self._sandbox.write_text(
+                arguments.path, arguments.content, overwrite=arguments.overwrite
+            )
             return json.dumps(payload, ensure_ascii=False)
         record = await self._artifacts.create_or_replace(
             run_id=self._sandbox.run_id,
@@ -91,6 +94,9 @@ class FileWriteTool(BaseTool[FileWriteArguments]):
             content=content,
             artifact_type=content_type_for(relative),
             attributes={"created_by": self.name, "content_type": content_type_for(relative)},
+        )
+        await self._sandbox.write_text(
+            arguments.path, arguments.content, overwrite=arguments.overwrite
         )
         payload["artifact_id"] = str(record.id)
         payload["content_hash"] = record.content_hash

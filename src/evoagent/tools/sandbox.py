@@ -20,15 +20,21 @@ class RunSandbox:
     async def write_text(self, path: str, content: str, *, overwrite: bool) -> Path:
         return await asyncio.to_thread(self._write_text, path, content, overwrite)
 
-    def _write_text(self, path: str, content: str, overwrite: bool) -> Path:
+    def target_for_write(self, path: str, *, overwrite: bool) -> Path:
         target = (self.root / path).resolve(strict=False)
         if not target.is_relative_to(self.root):
             raise ToolPermissionError("file write outside the run sandbox is not allowed")
         if target.exists() and not overwrite:
             raise ToolExecutionError("target file already exists")
+        return target
+
+    def _write_text(self, path: str, content: str, overwrite: bool) -> Path:
+        target = self.target_for_write(path, overwrite=overwrite)
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.parent / f".{target.name}.{uuid4().hex}.tmp"
-        temporary.write_text(content, encoding="utf-8")
+        # 用字节写入，避免 Windows 文本模式把 LF 变成 CRLF，导致工作文件
+        # 与已登记的 UTF-8 快照内容不同。
+        temporary.write_bytes(content.encode("utf-8"))
         os.replace(temporary, target)
         return target
 

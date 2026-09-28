@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import os
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -30,6 +31,8 @@ class ArtifactStore(Protocol):
     async def read(self, uri: str) -> bytes: ...
 
     async def write_unique(self, run_id: UUID, name: str, content: bytes) -> StoredArtifact: ...
+
+    async def erase(self, uri: str) -> None: ...
 
 
 class LocalArtifactStore:
@@ -204,11 +207,9 @@ class ArtifactService:
         artifact_type: str,
         attributes: dict[str, object] | None = None,
     ) -> ArtifactRecord:
-        """按路径写入并**就地更新**登记记录（同一 Run 内同名文件只有一条产物）。
+        """为同名工作文件保存不可变快照，并就地更新唯一登记记录。
 
-        这是 `file_write` 用的语义：它按路径覆盖写文件，因此登记记录必须跟着更新，
-        否则旧记录会指向新字节、下载时哈希校验必然失败（那是"记录与存储不一致"，
-        会被 F-04 的导出检查拒绝，但用户看到的是一条永远下载不了的产物）。
+        数据库更新失败时旧登记仍指向旧快照，避免覆盖工作文件后旧产物无法下载。
         """
 
         if self._lease_guard is not None:
@@ -216,36 +217,61 @@ class ArtifactService:
                 raise ValueError("artifact run does not match lease")
             async with self._session_factory() as session:
                 await self._lease_guard.check(session)
-        stored = await self._store.write(run_id, name, content)
-        async with UnitOfWork(self._session_factory) as unit:
-            if self._lease_guard is not None:
-                await self._lease_guard.check(unit.session)
-                await check_run_references(unit.session, run_id)
-            existing = await unit.session.scalar(
-                select(ArtifactRecord).where(
-                    ArtifactRecord.run_id == run_id,
-                    ArtifactRecord.uri == stored.uri,
+        # 每次覆盖产生独立字节快照，数据库提交失败或进程崩溃时旧 URI
+        # 仍指向旧内容；不能再把登记 URI 直接指向可编辑的 Run 工作文件。
+        stored = await self._store.write_unique(uuid4(), name, content)
+        previous_uri = None
+        committed = False
+        try:
+            async with UnitOfWork(self._session_factory) as unit:
+                if self._lease_guard is not None:
+                    await self._lease_guard.check(unit.session)
+                    await check_run_references(unit.session, run_id)
+                records = await unit.session.scalars(
+                    select(ArtifactRecord).where(ArtifactRecord.run_id == run_id)
                 )
-            )
-            if existing is None:
-                record = ArtifactRecord(
-                    run_id=run_id,
-                    type=artifact_type,
-                    uri=stored.uri,
-                    content_hash=stored.content_hash,
-                    size_bytes=stored.size_bytes,
-                    attributes=attributes or {},
+                existing = next(
+                    (
+                        record
+                        for record in records
+                        if record.attributes.get("logical_path") == name
+                        or record.uri == f"{run_id}/{name}"  # 旧版就地写入的记录
+                    ),
+                    None,
                 )
-                unit.session.add(record)
-            else:
-                record = existing
-                record.type = artifact_type
-                record.content_hash = stored.content_hash
-                record.size_bytes = stored.size_bytes
-                record.attributes = {**record.attributes, **(attributes or {})}
-            await unit.session.flush()
-            await unit.commit()
-            return record
+                merged_attributes = {**(attributes or {}), "logical_path": name}
+                if existing is None:
+                    record = ArtifactRecord(
+                        run_id=run_id,
+                        type=artifact_type,
+                        uri=stored.uri,
+                        content_hash=stored.content_hash,
+                        size_bytes=stored.size_bytes,
+                        attributes=merged_attributes,
+                    )
+                    unit.session.add(record)
+                else:
+                    record = existing
+                    previous_uri = record.uri
+                    record.type = artifact_type
+                    record.uri = stored.uri
+                    record.content_hash = stored.content_hash
+                    record.size_bytes = stored.size_bytes
+                    record.attributes = {**record.attributes, **merged_attributes}
+                await unit.session.flush()
+                await unit.commit()
+                committed = True
+        except BaseException:
+            # 登记未完成，新快照尚无有效引用；尽力清除，保留原异常。
+            if not committed:
+                with suppress(OSError):
+                    await self._store.erase(stored.uri)
+            raise
+        if previous_uri and previous_uri != f"{run_id}/{name}":
+            # 旧版 URI 就是工作文件，不能在覆盖前删除；新版旧快照已无登记引用。
+            with suppress(OSError):
+                await self._store.erase(previous_uri)
+        return record
 
     async def _register(
         self,
