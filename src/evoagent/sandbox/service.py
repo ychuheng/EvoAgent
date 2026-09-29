@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from evoagent.db.models import ArtifactRecord, SandboxExecutionRecord
+from evoagent.sandbox.cancellation import finish_on_cancel
 from evoagent.sandbox.docker import SandboxError, bounded_output
 from evoagent.sandbox.guest import MAX_FILE, MAX_FILES, MAX_TOTAL, safe_name
 from evoagent.skills.canonical import content_hash
@@ -98,13 +99,8 @@ class SandboxService:
             await session.commit()
 
     async def update(self, identity, **values):
-        operation = asyncio.create_task(self._update(identity, **values))
-        try:
-            await asyncio.shield(operation)
-        except asyncio.CancelledError:
-            # 等待短事务结束再关闭容器，避免取消 commit 留下未释放的连接/锁。
-            await operation
-            raise
+        # 取消时也等待短事务真正结束，不能让 SQLite/连接池写入悬在后台。
+        await finish_on_cancel(self._update(identity, **values))
 
     async def _update(self, identity, **values):
         # 可信控制器只更新执行证据，不提交 Task/Effect 业务状态。
@@ -264,7 +260,7 @@ class SandboxService:
                         await reader
                 try:
                     if not cleaned:
-                        await asyncio.shield(self.cleanup(request.execution_id, status, code))
+                        await finish_on_cancel(self.cleanup(request.execution_id, status, code))
                     else:
                         await self.update(request.execution_id, status=status, error_code=code)
                     self.erase_stage(request)

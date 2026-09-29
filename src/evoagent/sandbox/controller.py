@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from evoagent.config import Settings
 from evoagent.db.models import MCPServerRecord
 from evoagent.db.session import Database
+from evoagent.sandbox.cancellation import finish_on_cancel
 from evoagent.sandbox.docker import DockerDriver, SandboxError
 from evoagent.sandbox.ownership import ControllerLock
 from evoagent.sandbox.schema import SandboxRequest
@@ -158,7 +159,7 @@ async def stdio_session(channel, service):
                     )
         if created:
             try:
-                await asyncio.shield(service.cleanup(identity, status, code))
+                await finish_on_cancel(service.cleanup(identity, status, code))
             finally:
                 service.active.pop(identity, None)
 

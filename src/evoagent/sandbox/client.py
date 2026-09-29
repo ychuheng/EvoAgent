@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import httpx
 
+from evoagent.sandbox.cancellation import finish_on_cancel
 from evoagent.sandbox.docker import SandboxError
 from evoagent.sandbox.schema import SandboxRequest
 from evoagent.skills.canonical import content_hash
@@ -95,4 +96,4 @@ class ControllerExecutor:
             finally:
                 # HTTP 取消不等同于服务端任务取消；显式请求，失败仍有服务端租约/超时兜底。
                 with suppress(Exception, asyncio.CancelledError):
-                    await asyncio.shield(client.delete(f"/executions/{identity}", timeout=3))
+                    await finish_on_cancel(client.delete(f"/executions/{identity}", timeout=3))
