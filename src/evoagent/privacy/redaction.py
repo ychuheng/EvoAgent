@@ -52,12 +52,29 @@ _SENSITIVE_TEXT_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
 
 
 @dataclass(frozen=True, slots=True)
+class RedactionHit:
+    """一次实际发生的替换。
+
+    **仅进程内使用**：区间坐标相对于"执行该规则时的中间文本"，不用于回写原文件，
+    也绝不写进事件或发给模型（事件只允许出现规则名与计数）。
+    """
+
+    rule: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
 class RedactionResult:
     """一次文本脱敏的结果与依据。"""
 
     text: str
     categories: tuple[str, ...]
     policy_version: int = POLICY_VERSION
+    #: 是否**实际**改写了正文。命中检测不等于改写：规则可能命中已被占位符替代的区域。
+    changed: bool = False
+    #: 实际替换区间，仅进程内使用。
+    spans: tuple[RedactionHit, ...] = ()
 
     @property
     def redacted(self) -> bool:
@@ -84,9 +101,26 @@ def redact_text(text: str) -> str:
 
 
 def redact_text_result(text: str) -> RedactionResult:
-    """检测与脱敏一次完成，供需要记录依据（而非只改文本）的调用方使用。"""
+    """检测、脱敏与命中归因一次完成。
 
-    return RedactionResult(redact_text(text), detect_sensitive(text))
+    与 `redact_text` 保持**逐字节一致**的输出（同一组规则、同一替换顺序）；
+    额外只做归因：类别与区间都取"实际发生替换"的部分，而不是"检测命中"的部分。
+    """
+
+    result = text
+    hits: list[RedactionHit] = []
+    for name, pattern, replacement in _SENSITIVE_TEXT_RULES:
+        for match in pattern.finditer(result):
+            hits.append(RedactionHit(name, match.start(), match.end()))
+        result = pattern.sub(replacement, result)
+    categories = tuple(dict.fromkeys(hit.rule for hit in hits))
+    return RedactionResult(
+        text=result,
+        categories=categories,
+        policy_version=POLICY_VERSION,
+        changed=result != text,
+        spans=tuple(hits),
+    )
 
 
 def redact_value(value: Any) -> Any:

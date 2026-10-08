@@ -29,6 +29,7 @@ from evoagent.runtime.checkpoints import (
 from evoagent.tasks.service import TaskService
 from evoagent.tools.builtin.calculator import CalculatorTool
 from evoagent.tools.executor import ToolExecutor
+from evoagent.tools.output_view import split_view
 from evoagent.tools.registry import ToolRegistry
 from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
 
@@ -166,7 +167,9 @@ async def test_agent_loop_resumes_after_complete_tool_boundary() -> None:
     assert writer.states[0].completed_iterations == 0
     assert writer.states[0].messages[-1].tool_calls == (call,)
     assert writer.states[1].completed_iterations == 1
-    assert writer.states[1].messages[-1].content == "42"
+    metadata, body = split_view(writer.states[1].messages[-1].content)
+    assert metadata is not None and metadata.source_view == "verbatim"
+    assert body == "42"
 
     final_response = ModelResponse(
         message=Message(role=MessageRole.ASSISTANT, content="答案是 42"),
@@ -187,4 +190,5 @@ async def test_agent_loop_resumes_after_complete_tool_boundary() -> None:
         resume_state=writer.states[0],
     )
     assert replayed.status is AgentLoopStatus.COMPLETED
-    assert replay_provider.requests[0].messages[-1].content == "42"
+    replayed_metadata, replayed_body = split_view(replay_provider.requests[0].messages[-1].content)
+    assert replayed_metadata is not None and replayed_body == "42"

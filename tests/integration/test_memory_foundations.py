@@ -278,8 +278,11 @@ async def test_full_output_archived_before_preview_and_scope_hash_checked(env):
     task = await tasks.create_task(session_id=sid, goal="output", provider="mock", model="mock")
     artifacts = ArtifactService(store, db.session_factory)
     output = ToolOutputStore(task.run.id, artifacts, db.session_factory)
-    preview = await output.preserve("api_key=secret\n" + "内容" * 5000, 500)
-    ref = json.loads(preview.splitlines()[0])
+    prepared = await output.preserve("api_key=secret\n" + "内容" * 5000, 500)
+    ref = json.loads(prepared.content.splitlines()[0])
+    assert prepared.view_metadata.redacted is True
+    assert prepared.view_metadata.rule_categories == ("credential",)
+    assert prepared.view_metadata.truncated is True
     from uuid import UUID
 
     artifact_id = UUID(ref["artifact_id"])

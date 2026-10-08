@@ -24,6 +24,7 @@ from evoagent.providers.base import ProviderTimeoutError
 from evoagent.providers.mock import MockProvider
 from evoagent.tools.builtin.calculator import CalculatorTool
 from evoagent.tools.executor import ToolExecutor
+from evoagent.tools.output_view import split_view
 from evoagent.tools.registry import ToolRegistry
 
 
@@ -125,7 +126,9 @@ async def test_loop_executes_tool_and_feeds_result_back_to_model() -> None:
     assert second_messages[-2].tool_calls == (call,)
     assert second_messages[-1].role is MessageRole.TOOL
     assert second_messages[-1].tool_call_id == "call-1"
-    assert second_messages[-1].content == "36"
+    metadata, body = split_view(second_messages[-1].content)
+    assert metadata is not None and metadata.source_view == "verbatim"
+    assert body == "36"
 
 
 @pytest.mark.asyncio

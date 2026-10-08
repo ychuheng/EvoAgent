@@ -32,6 +32,7 @@ from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 from evoagent.tools.approvals import ApprovalService
 from evoagent.tools.builtin.ask_user import AskUserTool
 from evoagent.tools.builtin.calculator import CalculatorTool
+from evoagent.tools.output_view import split_view
 from evoagent.tools.registry import ToolRegistry
 from evoagent.workers.main import JobWorker
 
@@ -278,7 +279,9 @@ async def test_approved_tool_call_replays_frozen_request_after_worker_restart(
     assert await second_worker.run_once() is True
     assert (await service.get_task(aggregate.task.id)).task.status is TaskStatus.COMPLETED
     assert len(second_provider.requests) == 1
-    assert second_provider.requests[0].messages[-1].content == "继续"
+    replayed_view, replayed_body = split_view(second_provider.requests[0].messages[-1].content)
+    assert replayed_view is not None
+    assert replayed_body == "继续"
     async with database.session_factory() as session:
         approvals = tuple(
             await session.scalars(

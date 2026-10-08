@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Self
+from typing import Any, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -107,6 +107,34 @@ class ToolCall(ContractModel):
     arguments: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class ToolViewMetadata(ContractModel):
+    """宿主生成的"模型所见视图"元数据。
+
+    它必须**随正文一起进入模型真正收到的消息内容**（由
+    `tools/output_view.py::render_model_view` 渲染），只挂在 ToolResult 上、
+    只写日志或只推 SSE 都不算送达模型。放在 core 是因为 ToolResult 引用它，
+    而 tools 依赖 core，反向放置会形成循环导入。
+    """
+
+    schema_version: int = Field(default=1, ge=1, le=1)
+    #: 仅在**实际改写**了正文时为真；命中检测不算。
+    redacted: bool = False
+    rule_categories: tuple[str, ...] = ()
+    policy_version: int | None = Field(default=None, ge=1)
+    truncated: bool = False
+    #: redacted=确实隐藏过；verbatim=当前策略未改动它（不保证不存在未知秘密）；
+    #: unknown=旧记录或未经过投影，模型不得据此认为内容完整可信。
+    source_view: Literal["redacted", "verbatim", "unknown"] = "unknown"
+
+    @model_validator(mode="after")
+    def validate_consistency(self) -> Self:
+        if self.redacted and not self.rule_categories:
+            raise ValueError("a redacted view must report the rule categories")
+        if self.redacted != (self.source_view == "redacted"):
+            raise ValueError("source_view=redacted must match redacted=true exactly")
+        return self
+
+
 class ToolResult(ContractModel):
     """与某一次 ToolCall 一一对应的工具结果。"""
 
@@ -115,6 +143,8 @@ class ToolResult(ContractModel):
     status: ToolResultStatus
     content: str
     error_code: str | None = None
+    #: 旧记录缺这个字段时读为 None，渲染成 unknown 视图。
+    view_metadata: ToolViewMetadata | None = None
 
     @model_validator(mode="after")
     def validate_error_code(self) -> Self:

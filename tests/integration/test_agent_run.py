@@ -20,6 +20,7 @@ from evoagent.tools.builtin.calculator import CalculatorTool
 from evoagent.tools.builtin.file_read import FileReadTool
 from evoagent.tools.builtin.web_fetch import WebFetchTool
 from evoagent.tools.guards import URLGuard
+from evoagent.tools.output_view import split_view
 from evoagent.tools.registry import ToolRegistry
 
 
@@ -92,7 +93,11 @@ async def test_complete_run_uses_multiple_tools_and_returns_answer(tmp_path: Pat
         "read",
         "fetch",
     ]
-    assert [message.content for message in tool_messages] == [
+    # 工具消息必须带宿主生成的视图元数据（§2.3）：先钉住头部存在，再按正文断言。
+    views = [split_view(message.content) for message in tool_messages]
+    assert all(metadata is not None for metadata, _ in views)
+    assert all(metadata.schema_version == 1 for metadata, _ in views if metadata)
+    assert [body for _, body in views] == [
         "42",
         "local evidence",
         "web evidence",

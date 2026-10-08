@@ -6,10 +6,15 @@ from collections.abc import Iterable
 from pydantic import ValidationError
 
 from evoagent.core.events import RuntimeEventSink
-from evoagent.core.models import EventType, ToolCall, ToolResult, ToolResultStatus
+from evoagent.core.models import EventType, ToolCall, ToolResult, ToolResultStatus, ToolViewMetadata
+from evoagent.privacy.redaction import redact_text_result
 from evoagent.tools.base import ToolArgumentValidationError, ToolExecutionError, ToolPermissionError
 from evoagent.tools.execution import ToolExecutionMiddleware
+from evoagent.tools.output_view import VIEW_HEADER_RESERVE
 from evoagent.tools.registry import ToolNotFoundError, ToolRegistry
+
+#: 回读归档的工具：其正文在写入时已脱敏，无法证明是原文，投影时标 unknown。
+ARCHIVE_READ_TOOLS = frozenset({"artifact_read"})
 
 
 class ToolExecutor:
@@ -62,6 +67,44 @@ class ToolExecutor:
         return await self._execute(call)
 
     async def _execute(self, call: ToolCall) -> ToolResult:
+        """所有返回路径的统一出口：先执行，再做安全输出投影。"""
+
+        result = await self._execute_inner(call)
+        return self._project(call, result)
+
+    def _project(self, call: ToolCall, result: ToolResult) -> ToolResult:
+        """安全输出投影：保证每条返回路径都带视图元数据。
+
+        成功路径已由 `ToolOutputStore.preserve()` 投影（带 `view_metadata`），直接放行；
+        失败信息与**复用/旧缓存**结果在这里补做当前策略检查——只改 preserve 会漏掉
+        这些提前返回的分支（改造方案 §2.3）。
+        """
+
+        if result.view_metadata is not None:
+            return result
+        checked = redact_text_result(result.content)
+        content, truncated = self._truncate(checked.text)
+        source_view = (
+            "redacted"
+            if checked.changed
+            else "unknown"
+            if call.name in ARCHIVE_READ_TOOLS
+            else "verbatim"
+        )
+        return result.model_copy(
+            update={
+                "content": content,
+                "view_metadata": ToolViewMetadata(
+                    redacted=checked.changed,
+                    rule_categories=checked.categories,
+                    policy_version=checked.policy_version,
+                    truncated=truncated,
+                    source_view=source_view,
+                ),
+            }
+        )
+
+    async def _execute_inner(self, call: ToolCall) -> ToolResult:
 
         await self._event_sink.emit(
             EventType.TOOL_STARTED,
@@ -160,10 +203,18 @@ class ToolExecutor:
             raise TypeError(f"tool {call.name} returned a non-string result")
 
         original_size = len(content)
+        prepared = None
         if self._output_store is not None:
-            content = await self._output_store.preserve(content, self._max_result_chars)
+            # 头部要能放进模型可见的预算里，所以正文按"预算 − 头部预留"截断
+            body_limit = max(1, self._max_result_chars - VIEW_HEADER_RESERVE)
+            prepared = await self._output_store.preserve(content, body_limit)
+            content = prepared.content
         normalized, truncated = self._truncate(content)
-        truncated = truncated or original_size > self._max_result_chars
+        truncated = (
+            truncated
+            or original_size > self._max_result_chars
+            or (prepared is not None and prepared.view_metadata.truncated)
+        )
         if self._middleware is not None:
             await self._middleware.after_success(token, normalized)
         if evidence is not None:
@@ -176,6 +227,7 @@ class ToolExecutor:
             name=call.name,
             status=ToolResultStatus.SUCCESS,
             content=normalized,
+            view_metadata=prepared.view_metadata if prepared is not None else None,
         )
         await self._event_sink.emit(
             EventType.TOOL_COMPLETED,

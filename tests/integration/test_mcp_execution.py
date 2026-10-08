@@ -15,7 +15,7 @@ from test_mcp_catalogs import (
 )
 
 from evoagent.core.events import InMemoryEventSink
-from evoagent.core.models import ToolCall, ToolRisk
+from evoagent.core.models import ToolCall, ToolRisk, ToolViewMetadata
 from evoagent.db.models import (
     MCPToolReviewRecord,
     ToolCallRecord,
@@ -35,6 +35,7 @@ from evoagent.tasks.service import TaskService
 from evoagent.tools.approvals import ApprovalRequiredError, ApprovalService
 from evoagent.tools.effects import PersistentToolMiddleware
 from evoagent.tools.executor import ToolExecutor
+from evoagent.tools.output_view import PreparedToolOutput
 from evoagent.tools.policy import PermissionPolicy
 from evoagent.tools.registry import ToolRegistry
 
@@ -418,7 +419,7 @@ async def test_revocation_between_remote_success_and_commit_is_unknown(environme
                     expected_lock_version=0, expected_execution_version=1, state="disabled"
                 ),
             )
-            return content
+            return PreparedToolOutput(content, ToolViewMetadata(source_view="verbatim"))
 
     executor._output_store = RevokeBeforeCommit()
     with pytest.raises(MCPError, match="mcp_server_disabled"):

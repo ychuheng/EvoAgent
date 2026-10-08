@@ -26,6 +26,7 @@ from evoagent.core.models import (
 from evoagent.providers.base import ModelProvider, ProviderError, ProviderProtocolError
 from evoagent.runtime.retry import INFRASTRUCTURE_RETRY_CODES
 from evoagent.tools.executor import ToolExecutor
+from evoagent.tools.output_view import render_model_view, split_view
 from evoagent.tools.registry import ToolRegistry
 
 
@@ -546,10 +547,19 @@ class AgentLoop:
 
     @staticmethod
     def _tool_message(result: ToolResult) -> Message:
+        """工具消息必须带宿主生成的视图元数据（§2.3）。
+
+        只把元数据挂在 `ToolResult` 上、只写日志或只推 SSE 都不算送达模型：
+        模型真正收到的是这里的 content，所以渲染发生在这一层。
+        """
+
         if result.status is ToolResultStatus.SUCCESS:
-            content = result.content
+            content = render_model_view(result)
         else:
-            content = f"工具调用失败（{result.error_code}）：{result.content}"
+            failure = result.model_copy(
+                update={"content": f"工具调用失败（{result.error_code}）：{result.content}"}
+            )
+            content = render_model_view(failure)
         return Message(
             role=MessageRole.TOOL,
             content=content,
@@ -559,13 +569,16 @@ class AgentLoop:
     @staticmethod
     def _tool_fingerprint(calls: tuple[ToolCall, ...], results: tuple[ToolResult, ...]) -> str:
         def stable_content(content):
+            # 视图头占第一行，归档引用在其后：先拆掉头部再找引用，否则归一化会失效，
+            # 同一份归档的不同预览会被误判成"有新进展"。
+            _, body = split_view(content)
             try:
-                reference = json.loads(content.splitlines()[0])
+                reference = json.loads(body.splitlines()[0])
                 if isinstance(reference, dict) and reference.get("read_tool") == "artifact_read":
                     return reference["hash"]
             except (ValueError, KeyError, IndexError):
                 pass
-            return content
+            return body
 
         normalized = [
             {
