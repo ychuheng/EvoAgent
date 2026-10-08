@@ -15,6 +15,7 @@ from evoagent.memory.lifecycle import next_status
 from evoagent.memory.policy import validate_content
 from evoagent.memory.repository import source_message, verify_version
 from evoagent.memory.schema import MemoryError
+from evoagent.privacy.redaction import detect_sensitive
 from evoagent.sessions.service import text_hash
 
 
@@ -40,6 +41,11 @@ class MemoryService:
             validate_content(source.content)
             if proposal.content not in source.content:
                 raise MemoryError("unsupported_memory_claim")
+            # §2.1 第 3 条：命中共享规则的提议正文**直接拒绝**，而不是替换成占位符后
+            # 当成用户事实。顺序必须在来源/quote 核对**之后**——先脱敏会让正文不再
+            # 匹配原文来源，`unsupported_memory_claim` 会变成误导性的失败原因。
+            if detect_sensitive(proposal.content):
+                raise MemoryError("sensitive_memory_content")
             scope_key = "workspace" if proposal.scope == "workspace" else str(session_id)
             entry = await session.scalar(
                 select(MemoryEntryRecord)

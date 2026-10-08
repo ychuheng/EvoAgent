@@ -13,9 +13,11 @@ from evoagent.db.models import (
     EmbeddingProfileRecord,
     IndexGenerationRecord,
     MaintenanceJobRecord,
+    MemoryVersionRecord,
     RetrievalDocumentRecord,
     WorkspaceRecord,
 )
+from evoagent.privacy.redaction import detect_sensitive
 from evoagent.retrieval.embeddings import EmbeddingError, EmbeddingProfile, validate
 from evoagent.retrieval.sources import load_source, source_keys
 from evoagent.tasks.lease_guard import database_now
@@ -85,6 +87,27 @@ class IndexService:
             await session.commit()
             return row
 
+    async def _quarantine_nonconforming(self, session, key: str) -> bool:
+        """索引前复查：把"写入时合格、当前规则已判定不合格"的已确认版本就地隔离。
+
+        §2.1 第 3 条要求旧不合格版本隔离、**重新索引前不可注入**。注入本身已被
+        `verify_version` 的复查挡住（`load_source` 返回 None），这里补的是**持久状态**：
+        让它在页面与后续索引里表现为不可用，而不是每次静默跳过。
+
+        只在写事务里调用（重建清单循环）；`load_source` 与 `verify_version` 所在的
+        读取路径保持无写副作用。
+        """
+
+        if not key.startswith("memory:"):
+            return False
+        version = await session.get(MemoryVersionRecord, UUID(key.split(":", 1)[1]))
+        if version is None or version.status != "confirmed" or not version.content:
+            return False
+        if not detect_sensitive(version.content):
+            return False
+        version.status = "quarantined"
+        return True
+
     async def queue_rebuild(self):
         profile = await self.ensure_profile()
         async with self.factory() as session:
@@ -107,6 +130,8 @@ class IndexService:
                 source = await load_source(session, key)
                 if source:
                     manifest.append({"key": key, "hash": source.source_hash})
+                else:
+                    await self._quarantine_nonconforming(session, key)
             generation = profile.next_generation
             profile.next_generation += 1
             session.add(

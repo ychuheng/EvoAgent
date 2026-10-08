@@ -20,6 +20,7 @@ from evoagent.db.models import (
     ToolEffectRecord,
 )
 from evoagent.memory.schema import MemoryError
+from evoagent.privacy.redaction import detect_sensitive
 from evoagent.sessions.service import text_hash
 
 
@@ -77,6 +78,10 @@ async def verify_version(session, version, session_id):
         or text_hash(version.content) != version.content_hash
         or (expiry and expiry <= now)
     ):
+        raise MemoryError("context_source_revoked")
+    # §2.1 第 3 条：确认与检索前用**当前**共享规则复查。规则扩容后，用旧规则写入的
+    # 版本可能已经不合格，因此不能只信任写入时的结论——不合格即不可注入。
+    if detect_sensitive(version.content):
         raise MemoryError("context_source_revoked")
     sources = tuple(
         await session.scalars(

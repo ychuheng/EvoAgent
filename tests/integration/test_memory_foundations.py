@@ -88,6 +88,104 @@ async def confirm(service, sid, entry, version):
     )
 
 
+# --- §2.1 第 3 条：Memory 侧的敏感内容门禁 -------------------------------------
+
+
+async def test_proposal_containing_a_secret_is_refused_not_placeholder_substituted(env):
+    """命中共享规则的提议**直接拒绝**，不把秘密换成占位符后当成用户事实。
+
+    刻意用带凭据 DSN：它**通过**既有 `validate_content`（UNSAFE 只覆盖 `sk-`/Bearer/
+    PEM/`password:` 等形态，没有 DSN），只被共享检测规则命中——正好证明两者的判定
+    互不替代，新门禁不是旧门禁的重复。
+    """
+
+    db, _, sid, _ = env
+    dsn = "postgres://appuser:s3cr3t-pw@db.internal/app"
+    _task, message = await completed(env, goal=f"请记住：数据库连接是 {dsn}")
+    service = MemoryService(db.session_factory)
+
+    with pytest.raises(MemoryError, match="sensitive_memory_content"):
+        await service.propose(
+            sid,
+            MemoryProposal(
+                source_message_id=message.id,
+                fact_key="database_url",
+                content=f"数据库连接是 {dsn}",
+                scope="session",
+            ),
+        )
+
+    # 拒绝必须是"什么都没写"，而不是留下一个已脱敏的版本
+    async with db.session_factory() as session:
+        assert list(await session.scalars(select(MemoryVersionRecord))) == []
+    await db.dispose()
+
+
+async def test_version_written_under_older_rules_is_not_injectable_and_gets_quarantined(
+    env, monkeypatch
+):
+    """模拟"旧规则写入、当前规则已不合格"的已确认版本（§2.1 第 3 条）。
+
+    写入侧的门禁是后加的，历史版本仍然存在；因此**确认与检索前都要复查**，
+    并且要在重新索引前把它隔离，而不是每次静默跳过。
+    """
+
+    from evoagent.memory import service as memory_service
+    from evoagent.memory.repository import verify_version
+    from evoagent.retrieval.embeddings import MockEmbeddingProvider
+    from evoagent.retrieval.indexing import IndexService
+    from evoagent.retrieval.sources import load_source
+
+    db, _, sid, _ = env
+    dsn = "postgres://appuser:s3cr3t-pw@db.internal/app"
+    _task, message = await completed(env, goal=f"请记住：数据库连接是 {dsn}")
+    service = MemoryService(db.session_factory)
+
+    # 让写入时"规则还不认识 DSN"，从而造出一个历史版本
+    monkeypatch.setattr(memory_service, "detect_sensitive", lambda _text: ())
+    entry, version = await service.propose(
+        sid,
+        MemoryProposal(
+            source_message_id=message.id,
+            fact_key="database_url",
+            content=f"数据库连接是 {dsn}",
+            scope="session",
+        ),
+    )
+    monkeypatch.undo()
+    entry, version = await confirm(service, sid, entry, version)
+
+    async with db.session_factory() as session:
+        row = await session.get(MemoryVersionRecord, version.id)
+        assert row.status == "confirmed"  # 历史版本确实处于"可用"状态
+        with pytest.raises(MemoryError, match="context_source_revoked"):
+            await verify_version(session, row, sid)
+
+    # 检索/注入路径同样拿不到它（load_source 捕获后返回 None）
+    async with db.session_factory() as session:
+        assert await load_source(session, f"memory:{version.id}") is None
+
+    # 重新索引前把它隔离成持久状态
+    index = IndexService(db.session_factory, MockEmbeddingProvider())
+    await index.queue_rebuild()
+    async with db.session_factory() as session:
+        row = await session.get(MemoryVersionRecord, version.id)
+        assert row.status == "quarantined"
+    await db.dispose()
+
+
+async def test_clean_fact_still_proposes_and_confirms(env):
+    """对照：正常事实不受新门禁影响（避免"加了检测就都不能用"）。"""
+
+    db, _service, _sid, _ = env
+    service, entry, version, _task, _message = await proposed(env)
+
+    entry, version = await confirm(service, _sid, entry, version)
+
+    assert version.status == "confirmed"
+    await db.dispose()
+
+
 async def test_message_projection_is_ordered_idempotent_and_history_is_frozen(env):
     db, service, sid, _ = env
     first, _ = await completed(env)
