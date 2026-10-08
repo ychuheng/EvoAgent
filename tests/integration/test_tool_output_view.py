@@ -328,3 +328,59 @@ def test_settings_and_unknown_view_helpers_agree_on_schema_version() -> None:
     assert Settings(_env_file=None).context_policy == "bounded"
     assert unknown_view().schema_version == 1
     assert unknown_view().source_view == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_stale_metadata_result_is_reprojected_under_current_policy(tmp_path: Path) -> None:
+    """元数据**存在**不等于当前策略已通过：旧策略版本的正文必须重新脱敏。
+
+    复核复现：带 v1 `view_metadata` 的结果若直接放行，v2 才覆盖的 DSN 会原样进模型。
+    """
+
+    from evoagent.privacy.redaction import POLICY_VERSION
+
+    database, _aggregate, executor = await _environment(tmp_path, CLEAN_BODY)
+    stale = ToolResult(
+        tool_call_id="c1",
+        name="scripted",
+        status=ToolResultStatus.SUCCESS,
+        content="DATABASE_URL=postgres://user:secret-pw@db.internal/app",
+        view_metadata=ToolViewMetadata(
+            schema_version=1, redacted=False, source_view="verbatim", policy_version=1
+        ),
+    )
+
+    projected = executor._project(  # noqa: SLF001 - 直接验证投影出口
+        ToolCall(call_id="c1", name="scripted", arguments={}), stale
+    )
+
+    assert projected.view_metadata is not None
+    assert projected.view_metadata.policy_version == POLICY_VERSION
+    assert projected.view_metadata.source_view == "redacted"
+    assert "secret-pw" not in projected.content
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_current_policy_metadata_passes_through_unchanged(tmp_path: Path) -> None:
+    """已经是当前策略版本的结果不再重做投影（避免无谓的二次处理）。"""
+
+    from evoagent.privacy.redaction import POLICY_VERSION
+
+    database, _aggregate, executor = await _environment(tmp_path, CLEAN_BODY)
+    current = ToolResult(
+        tool_call_id="c1",
+        name="scripted",
+        status=ToolResultStatus.SUCCESS,
+        content=CLEAN_BODY,
+        view_metadata=ToolViewMetadata(
+            redacted=False, source_view="verbatim", policy_version=POLICY_VERSION
+        ),
+    )
+
+    projected = executor._project(  # noqa: SLF001
+        ToolCall(call_id="c1", name="scripted", arguments={}), current
+    )
+
+    assert projected is current
+    await database.dispose()

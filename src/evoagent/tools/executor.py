@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from evoagent.core.events import RuntimeEventSink
 from evoagent.core.models import EventType, ToolCall, ToolResult, ToolResultStatus, ToolViewMetadata
-from evoagent.privacy.redaction import redact_text_result
+from evoagent.privacy.redaction import POLICY_VERSION, redact_text_result
 from evoagent.tools.base import ToolArgumentValidationError, ToolExecutionError, ToolPermissionError
 from evoagent.tools.execution import ToolExecutionMiddleware
 from evoagent.tools.output_view import VIEW_HEADER_RESERVE
@@ -73,22 +73,27 @@ class ToolExecutor:
         return self._project(call, result)
 
     def _project(self, call: ToolCall, result: ToolResult) -> ToolResult:
-        """安全输出投影：保证每条返回路径都带视图元数据。
+        """安全输出投影：保证每条返回路径都带**当前策略**的视图元数据。
 
         成功路径已由 `ToolOutputStore.preserve()` 投影（带 `view_metadata`），直接放行；
         失败信息与**复用/旧缓存**结果在这里补做当前策略检查——只改 preserve 会漏掉
         这些提前返回的分支（改造方案 §2.3）。
+
+        **元数据存在不等于当前策略已通过**：策略版本升版后（v1 → v2），带旧版本元数据
+        的结果不能直接放行，否则旧规则漏掉的 DSN/JWT 会原样进模型。
         """
 
-        if result.view_metadata is not None:
+        metadata = result.view_metadata
+        if metadata is not None and metadata.policy_version == POLICY_VERSION:
             return result
         checked = redact_text_result(result.content)
         content, truncated = self._truncate(checked.text)
+        truncated = truncated or (metadata.truncated if metadata is not None else False)
         source_view = (
             "redacted"
             if checked.changed
             else "unknown"
-            if call.name in ARCHIVE_READ_TOOLS
+            if metadata is not None or call.name in ARCHIVE_READ_TOOLS
             else "verbatim"
         )
         return result.model_copy(

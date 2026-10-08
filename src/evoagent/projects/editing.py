@@ -20,7 +20,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from evoagent.privacy.redaction import detect_sensitive
+from evoagent.privacy.redaction import detect_sensitive, detect_sensitive_spans, spans_intersect
 from evoagent.projects.encoding import DetectedText, count_line_endings, read_text
 from evoagent.projects.schema import resolve_inside_root
 from evoagent.tools.base import ToolExecutionError, ToolPermissionError
@@ -195,15 +195,33 @@ def _redaction_hint(text: str) -> str:
     )
 
 
-def check_sensitive_edit(snapshot: FileSnapshot, request: EditRequest, located_span: str) -> None:
+def check_sensitive_edit(
+    snapshot: FileSnapshot,
+    request: EditRequest,
+    located_span: str,
+    *,
+    text: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
+) -> None:
     """写盘前用当前规则检查**实际被替换的区间**（改造方案 §2.3）。
 
-    为什么不能只靠 old_text 失败：`line_range` 直接定位真实行，根本不需要模型持有
-    原文；`expected_sha256` 匹配也只说明文件没被改过，不证明模型见过完整内容。
-    因此这里检查真正会被覆盖的那段磁盘文本——命中即拒绝，不靠模型自觉。
+    两道检查都要过，缺一不可：
+
+    1. **片段自身**是否命中规则——覆盖"模型给出的 old_text 里就带着秘密"；
+    2. 该区间是否与**原文中的隐藏区间相交**——只查片段会漏掉"部分覆盖"：原文
+       `password: FAKE_ONLY_FOR_REVIEW` 被隐藏，而模型只取出值的子串
+       `FAKE_ONLY_FOR_REVIEW` 作为 old_text 时，片段本身不匹配
+       `password\\s*[:=：]\\s*\\S+` 这条规则，只查片段就会误放行。
+
+    坐标必须用**原文坐标**（`detect_sensitive_spans`）：`RedactionResult.spans`
+    是逐规则替换后中间文本的坐标，前面的替换会让它整体移位，用在这里会错判。
     """
 
     hits = detect_sensitive(located_span)
+    if text is not None and start is not None and end is not None:
+        overlapped = spans_intersect(detect_sensitive_spans(text), start, end)
+        hits = tuple(dict.fromkeys((*hits, *overlapped)))
     if not hits:
         return
     raise RedactedEditError(
@@ -213,14 +231,20 @@ def check_sensitive_edit(snapshot: FileSnapshot, request: EditRequest, located_s
     )
 
 
-def _apply_to_text(text: str, request: EditRequest, *, newline: str) -> tuple[str, str, str]:
-    """返回 `(原内容, 新内容, 被替换区间的原文)`。"""
+def _apply_to_text(
+    text: str, request: EditRequest, *, newline: str
+) -> tuple[str, str, str, int | None, int | None]:
+    """返回 `(原内容, 新内容, 被替换区间的原文, start, end)`。
+
+    新建文件没有可相交的原文区间，start/end 为 `None`：那种情况下不存在"写回隐藏
+    区间"的问题，只做片段自身的规则检查。
+    """
 
     if request.create and text == "" and request.old_text is None and request.line_range is None:
-        return "", normalize_line_endings(request.replacement, newline), ""
+        return "", normalize_line_endings(request.replacement, newline), "", None, None
     start, end, original = _locate(text, request, newline=newline)
     replacement = normalize_line_endings(request.replacement, newline)
-    return original, f"{text[:start]}{replacement}{text[end:]}", original
+    return original, f"{text[:start]}{replacement}{text[end:]}", original, start, end
 
 
 def _atomic_write(path: Path, raw: bytes, *, mode: int | None) -> None:
@@ -331,10 +355,10 @@ def apply_edits(
         else:
             text = snapshot.detected.text
             newline = snapshot.detected.newline
-        original, updated, located = _apply_to_text(text, request, newline=newline)
+        original, updated, located, start, end = _apply_to_text(text, request, newline=newline)
         # 写盘前检查真正会被覆盖的区间；这一步在写入循环之前，因此批量补丁里
         # 任一项被拒绝时整批都不会写（改造方案 §2.3）。
-        check_sensitive_edit(snapshot, request, located)
+        check_sensitive_edit(snapshot, request, located, text=text, start=start, end=end)
         if original == request.replacement and request.old_text is not None:
             raise ToolExecutionError(f"{display} 的替换内容与原内容相同，没有可应用的改动")
 

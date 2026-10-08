@@ -732,3 +732,185 @@ async def test_review_requires_actor_and_reason(tmp_path: Path) -> None:
             actor="local-user", reason="复核", **{**common, "client_request_id": " "}
         )
     await database.dispose()
+
+
+# --- 复核复现转成的回归用例（F2/F3/F4）-----------------------------------------
+
+
+class _MutatingStore:
+    """读盘成功后再改数据库状态的存储包装器，用于复现"读取期间被改"的窗口。"""
+
+    def __init__(self, inner, database, artifact_id, mutate) -> None:
+        self._inner = inner
+        self._database = database
+        self._artifact_id = artifact_id
+        self._mutate = mutate
+
+    async def read(self, uri: str) -> bytes:
+        data = await self._inner.read(uri)
+        async with self._database.session_factory() as session:
+            row = await session.get(ArtifactRecord, self._artifact_id)
+            self._mutate(row)
+            await session.commit()
+        return data
+
+
+class _RefusingStore:
+    """任何读取都直接失败：用于证明超预算时**根本没有读盘**。"""
+
+    async def read(self, uri: str) -> bytes:  # pragma: no cover - 走到这里就是失败
+        raise AssertionError(f"超预算的 artifact 不得被读取：{uri}")
+
+
+@pytest.mark.asyncio
+async def test_artifact_erased_during_read_is_refused(tmp_path: Path) -> None:
+    """F2：读盘与返回之间被擦除时，已经读进内存的正文也不得交出去。"""
+
+    database, aggregate, artifacts, store, _guard = await _environment(tmp_path)
+    record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
+
+    def erase(row) -> None:
+        row.attributes = {**row.attributes, "erased": True}
+
+    guard = ArtifactInjectionGuard(
+        session_factory=database.session_factory,
+        artifact_store=_MutatingStore(store, database, record.id, erase),
+    )
+
+    with pytest.raises(ToolPermissionError):
+        await guard.read_verified_text(
+            artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+        )
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_artifact_quarantined_during_read_is_refused_and_not_overwritten(
+    tmp_path: Path,
+) -> None:
+    """F2：读盘期间被隔离时拒绝注入，且 `mark_verified` 不得把隔离覆盖回 verified。"""
+
+    from evoagent.privacy.redaction import POLICY_VERSION
+
+    database, aggregate, artifacts, store, _guard = await _environment(tmp_path)
+    record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
+
+    def quarantine(row) -> None:
+        row.redaction_status = "quarantined"
+        row.redaction_policy_version = POLICY_VERSION
+        row.redaction_checked_hash = row.content_hash
+
+    guard = ArtifactInjectionGuard(
+        session_factory=database.session_factory,
+        artifact_store=_MutatingStore(store, database, record.id, quarantine),
+    )
+
+    with pytest.raises(ArtifactSensitiveContent):
+        await guard.read_verified_text(
+            artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+        )
+
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, record.id)
+    assert stored.redaction_status == "quarantined"
+
+    # 单独的 mark_verified 也不得覆盖并发隔离
+    await guard.mark_verified(
+        artifact_id=record.id, run_id=aggregate.run.id, source_hash=record.content_hash
+    )
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, record.id)
+    assert stored.redaction_status == "quarantined"
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_oversize_artifact_is_refused_without_reading_it(tmp_path: Path) -> None:
+    """F3：超预算时按**登记尺寸**先拒绝，正文根本不进内存。"""
+
+    database, aggregate, artifacts, _store, _guard = await _environment(tmp_path)
+    record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
+    guard = ArtifactInjectionGuard(
+        session_factory=database.session_factory,
+        artifact_store=_RefusingStore(),
+        max_scan_bytes=4,
+    )
+
+    with pytest.raises(ArtifactCheckUnavailable):
+        await guard.read_verified_text(
+            artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+        )
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_scan_budget_is_a_deadline_not_a_post_hoc_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F3：预算作为真实截止时间执行——慢检测器到点即判超时，而不是跑完再看耗时。"""
+
+    import time as _time
+
+    from evoagent.privacy import artifact_access
+
+    database, aggregate, artifacts, store, _guard = await _environment(tmp_path)
+    record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
+
+    def slow_scan(text):
+        _time.sleep(0.05)
+        raise AssertionError("超时后不应使用该结果")
+
+    monkeypatch.setattr(artifact_access, "redact_text_result", slow_scan)
+    guard = ArtifactInjectionGuard(
+        session_factory=database.session_factory, artifact_store=store, scan_budget_ms=5
+    )
+
+    started = _time.perf_counter()
+    with pytest.raises(ArtifactCheckUnavailable) as error:
+        await guard.read_verified_text(
+            artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+        )
+    elapsed = _time.perf_counter() - started
+
+    assert error.value.code == "artifact_check_unavailable"
+    # 到点即返回（留出线程调度余量），而不是等满 50ms 的检测
+    assert elapsed < 0.045, elapsed
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_review_replay_is_bound_to_the_artifact(tmp_path: Path) -> None:
+    """F4：同一 Run 的两个 artifact 用同一个请求 ID 时不得互相串结果。"""
+
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    first = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+    second = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+    common = {
+        "actor": "local-user",
+        "reason": "复核",
+        "expected_policy_version": POLICY_VERSION - 1,
+        "client_request_id": "same-request-id",
+    }
+
+    a = await guard.clear_quarantine(
+        artifact_id=first.id, expected_content_hash=first.content_hash, **common
+    )
+    b = await guard.clear_quarantine(
+        artifact_id=second.id, expected_content_hash=second.content_hash, **common
+    )
+
+    assert a.outcome == OUTCOME_CLEARED and a.replayed is False
+    assert b.outcome == OUTCOME_CLEARED and b.replayed is False
+    assert b.checked_hash == second.content_hash
+    # 第二个必须真的被处理过，而不是回放第一个的结论
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, second.id)
+    assert stored.redaction_status == "verified"
+
+    # 成功回放必须带回 checked_hash（F4 第二半）
+    replay = await guard.clear_quarantine(
+        artifact_id=first.id, expected_content_hash=first.content_hash, **common
+    )
+    assert replay.replayed is True
+    assert replay.checked_hash == first.content_hash
+    await database.dispose()

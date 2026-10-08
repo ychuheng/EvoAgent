@@ -447,6 +447,53 @@ def test_old_text_matching_a_hidden_span_is_refused(tmp_path: Path) -> None:
         )
 
 
+def test_partial_overlap_with_hidden_span_is_refused(tmp_path: Path) -> None:
+    """F1 回归：old_text 只取被隐藏值的**子串**时也必须拒绝。
+
+    片段本身（`sk-…`）不含 `password:` 前缀，单查片段不匹配任何规则；命中隐藏在
+    **原文区间**里。修复前这条会放行并改写磁盘。
+    """
+
+    root = make_secret_repo(tmp_path)
+    target = root / "config" / "app.yml"
+    before = target.read_bytes()
+
+    with pytest.raises(RedactedEditError):
+        apply_edits(
+            root,
+            [
+                EditRequest(
+                    path="config/app.yml",
+                    old_text="sk-abcdefghijklmnopqrst",
+                    replacement="已轮换",
+                )
+            ],
+        )
+
+    assert target.read_bytes() == before
+
+
+def test_overlap_with_only_part_of_the_match_is_refused(tmp_path: Path) -> None:
+    """只覆盖敏感命中区间的一段同样算相交（左半、右半各测一次）。"""
+
+    root = make_secret_repo(tmp_path)
+    target = root / "config" / "app.yml"
+    before = target.read_bytes()
+    for fragment in ("  token: sk-abc", "klmnopqrst"):
+        with pytest.raises(RedactedEditError):
+            apply_edits(
+                root,
+                [
+                    EditRequest(
+                        path="config/app.yml",
+                        old_text=fragment,
+                        replacement="已轮换",
+                    )
+                ],
+            )
+        assert target.read_bytes() == before
+
+
 def test_adjacent_edit_still_succeeds_and_keeps_the_hidden_line(tmp_path: Path) -> None:
     root = make_secret_repo(tmp_path)
     target = root / "config" / "app.yml"

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -105,6 +106,30 @@ def detect_sensitive(text: str) -> tuple[str, ...]:
         if pattern.search(text) and name not in seen:
             seen.append(name)
     return tuple(seen)
+
+
+def detect_sensitive_spans(text: str) -> tuple[RedactionHit, ...]:
+    """返回**原始文本坐标**下的命中区间，供"是否与隐藏区间相交"判断使用。
+
+    与 `redact_text_result(...).spans` 的区别很重要：后者的坐标相对"执行该规则时的
+    中间文本"，前面的规则替换会让后面的坐标整体移位，**不能当成原文坐标**。这里每条
+    规则都直接在原文上定位。
+
+    代价是可能比实际替换多报：前一条规则可能已经把后一条的匹配区域替换掉了。对
+    "编辑区间是否碰到隐藏内容"这类安全判断，多报是安全方向，因此可以接受。
+    """
+
+    hits: list[RedactionHit] = []
+    for name, pattern, _ in _SENSITIVE_TEXT_RULES:
+        for match in pattern.finditer(text):
+            hits.append(RedactionHit(name, match.start(), match.end()))
+    return tuple(hits)
+
+
+def spans_intersect(hits: Iterable[RedactionHit], start: int, end: int) -> tuple[str, ...]:
+    """返回与 `[start, end)` 相交的规则类别（去重，保持命中顺序）。"""
+
+    return tuple(dict.fromkeys(hit.rule for hit in hits if hit.start < end and start < hit.end))
 
 
 def redact_text(text: str) -> str:
