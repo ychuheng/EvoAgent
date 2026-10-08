@@ -689,7 +689,16 @@ class ToolApprovalRecord(Base):
 
 class ArtifactRecord(Base):
     __tablename__ = "artifacts"
-    __table_args__ = (CheckConstraint("size_bytes >= 0", name="size_bytes_non_negative"),)
+    __table_args__ = (
+        CheckConstraint("size_bytes >= 0", name="size_bytes_non_negative"),
+        # 注入门禁的复用前提：只有"当前策略版本 + 当前正文 hash 都记全了"才允许标
+        # verified。缺任一字段的 verified 是自相矛盾的，直接在库层面拒绝。
+        CheckConstraint(
+            "redaction_status <> 'verified' OR "
+            "(redaction_policy_version IS NOT NULL AND redaction_checked_hash IS NOT NULL)",
+            name="redaction_verified_requires_metadata",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), index=True)
@@ -699,6 +708,11 @@ class ArtifactRecord(Base):
     size_bytes: Mapped[int] = mapped_column(Integer)
     attributes: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    # M-A0 注入门禁的检查元数据。**不做回填**：字段为空表示"未按当前策略检查过"，
+    # 旧行保持 NULL/unchecked，绝不批量标成 verified（那是伪造检查结论）。
+    redaction_policy_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    redaction_checked_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    redaction_status: Mapped[str] = mapped_column(String(16), nullable=False, default="unchecked")
 
 
 class SkillRecord(Base):

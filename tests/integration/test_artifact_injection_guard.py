@@ -1,11 +1,12 @@
-"""注入门禁（S0b / M-A0 第一步）：授权 → hash → 当前策略复查 → 复用或隔离。
+"""注入门禁（S0b / M-A0）：授权 → hash → 当前策略复查 → 复用或隔离。
 
 注意 fixture 的构造方式：**不能用 `ToolOutputStore.preserve()` 造敏感样本**——它自己
 就会先脱敏。这里用 `ArtifactService.create_unique()` 直接写入明文，模拟"旧规则或旧
 writer 写下的归档"，正是本门禁要拦的场景。
 
-第一步（不加列、不改 ORM）下检查结果无法持久化，因此每次注入都会复查；这一点由
-`test_clean_artifact_is_rescanned_before_columns_exist` 显式钉住，等第二步加列后再改。
+M-A0 第二步（加列 + 迁移）之后，检查结果可以持久化：`verified` + 当前策略版本 +
+当前 hash 三者齐备才复用，否则重新复查。跨阶段契约由
+`test_check_metadata_contract_holds_before_and_after_migration` 保证同一份测试两阶段都能跑。
 """
 
 from pathlib import Path
@@ -263,4 +264,117 @@ async def test_check_metadata_contract_holds_before_and_after_migration(tmp_path
         assert not hasattr(stored, "redaction_status")
     # 两种情况下都要保证正文与 hash 未被改动
     assert stored.content_hash == record.content_hash
+    await database.dispose()
+
+
+def _counting_scanner(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """替换门禁里的复查原语，记录每次真正发生的扫描。"""
+
+    calls: list[str] = []
+    from evoagent.privacy import artifact_access
+    from evoagent.privacy.redaction import redact_text_result as real
+
+    def counted(text: str):
+        calls.append(text[:16])
+        return real(text)
+
+    monkeypatch.setattr(artifact_access, "redact_text_result", counted)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_verified_artifact_is_reused_without_rescan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """复用条件齐备时不得再扫一遍——这是 M-A0 的收益本身。"""
+
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
+    await guard.mark_verified(
+        artifact_id=record.id, run_id=aggregate.run.id, source_hash=record.content_hash
+    )
+    calls = _counting_scanner(monkeypatch)
+
+    text = await guard.read_verified_text(
+        artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+    )
+
+    assert text == CLEAN_TEXT
+    assert calls == []
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stale_policy_version_forces_rescan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """策略升版后旧检查结论作废：必须重新复查，不能沿用。"""
+
+    from evoagent.privacy.redaction import POLICY_VERSION
+
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
+    await guard.mark_verified(
+        artifact_id=record.id, run_id=aggregate.run.id, source_hash=record.content_hash
+    )
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, record.id)
+        stored.redaction_policy_version = POLICY_VERSION - 1
+        await session.commit()
+    calls = _counting_scanner(monkeypatch)
+
+    await guard.read_verified_text(
+        artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+    )
+
+    assert len(calls) == 1
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_changed_checked_hash_forces_rescan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """检查 hash 与当前正文不一致时同样作废检查结论。"""
+
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
+    await guard.mark_verified(
+        artifact_id=record.id, run_id=aggregate.run.id, source_hash=record.content_hash
+    )
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, record.id)
+        stored.redaction_checked_hash = "sha256:" + "0" * 64
+        await session.commit()
+    calls = _counting_scanner(monkeypatch)
+
+    await guard.read_verified_text(
+        artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+    )
+
+    assert len(calls) == 1
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_database_rejects_verified_without_metadata(tmp_path: Path) -> None:
+    """库层面的自相矛盾拦截：verified 必须带策略版本与检查 hash。"""
+
+    from sqlalchemy.exc import IntegrityError
+
+    database, aggregate, artifacts, _store, _guard = await _environment(tmp_path)
+    async with database.session_factory() as session:
+        session.add(
+            ArtifactRecord(
+                run_id=aggregate.run.id,
+                type="tool_output",
+                uri="x.txt",
+                content_hash="sha256:" + "1" * 64,
+                size_bytes=1,
+                attributes={},
+                redaction_status="verified",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()
     await database.dispose()
