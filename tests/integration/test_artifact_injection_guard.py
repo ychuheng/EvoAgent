@@ -857,7 +857,7 @@ async def test_scan_budget_is_a_deadline_not_a_post_hoc_check(
     record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
 
     def slow_scan(text):
-        _time.sleep(0.05)
+        _time.sleep(0.5)
         raise AssertionError("超时后不应使用该结果")
 
     monkeypatch.setattr(artifact_access, "redact_text_result", slow_scan)
@@ -873,8 +873,9 @@ async def test_scan_budget_is_a_deadline_not_a_post_hoc_check(
     elapsed = _time.perf_counter() - started
 
     assert error.value.code == "artifact_check_unavailable"
-    # 到点即返回（留出线程调度余量），而不是等满 50ms 的检测
-    assert elapsed < 0.045, elapsed
+    # 检测器要跑 0.5 秒；如果预算是"跑完再看耗时"，这里必然 ≥0.5 秒。
+    # 阈值取 0.25 秒是为了容忍线程调度与慢机器，同时仍能区分两种实现。
+    assert elapsed < 0.25, elapsed
     await database.dispose()
 
 

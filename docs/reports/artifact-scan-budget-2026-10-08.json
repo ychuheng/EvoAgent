@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-10-08T11:52:33.240350+00:00",
+  "generated_at": "2026-10-08T13:59:24.774268+00:00",
   "environment": {
-    "revision": "be8cec0d1a11174f1227a94e15a74876fe1c2175",
+    "revision": "7b4b29b2fe1262358db119be51f02aeb6206ecc6",
     "branch": "c3",
     "python": "3.13.5",
-    "policy_version": 1
+    "policy_version": 2
   },
   "scope": "合成正文 + 真实写入/存储/读取路径；不是验收库的产物分布",
   "archive_threshold_chars": 20000,
@@ -15,10 +15,10 @@
       "chars": 24000,
       "bytes": 24000,
       "artifact_bytes": 24000,
-      "detect_ms": 1.064,
-      "redact_ms": 0.981,
-      "detect_ms_per_mb": 46.47,
-      "redact_ms_per_mb": 42.87
+      "detect_ms": 1.114,
+      "redact_ms": 1.082,
+      "detect_ms_per_mb": 48.65,
+      "redact_ms_per_mb": 47.28
     },
     {
       "kind": "ascii_log",
@@ -26,10 +26,10 @@
       "chars": 65536,
       "bytes": 65536,
       "artifact_bytes": 65536,
-      "detect_ms": 2.953,
-      "redact_ms": 2.746,
-      "detect_ms_per_mb": 47.24,
-      "redact_ms_per_mb": 43.93
+      "detect_ms": 2.664,
+      "redact_ms": 2.666,
+      "detect_ms_per_mb": 42.62,
+      "redact_ms_per_mb": 42.65
     },
     {
       "kind": "ascii_log",
@@ -37,10 +37,10 @@
       "chars": 262144,
       "bytes": 262144,
       "artifact_bytes": 262144,
-      "detect_ms": 14.513,
-      "redact_ms": 10.609,
-      "detect_ms_per_mb": 58.05,
-      "redact_ms_per_mb": 42.44
+      "detect_ms": 11.348,
+      "redact_ms": 12.768,
+      "detect_ms_per_mb": 45.39,
+      "redact_ms_per_mb": 51.07
     },
     {
       "kind": "ascii_log",
@@ -48,10 +48,10 @@
       "chars": 1048576,
       "bytes": 1048576,
       "artifact_bytes": 1048576,
-      "detect_ms": 43.085,
-      "redact_ms": 44.219,
-      "detect_ms_per_mb": 43.09,
-      "redact_ms_per_mb": 44.22
+      "detect_ms": 46.923,
+      "redact_ms": 51.967,
+      "detect_ms_per_mb": 46.92,
+      "redact_ms_per_mb": 51.97
     },
     {
       "kind": "chinese_prose",
@@ -59,10 +59,10 @@
       "chars": 24000,
       "bytes": 70346,
       "artifact_bytes": 70346,
-      "detect_ms": 1.062,
-      "redact_ms": 1.078,
-      "detect_ms_per_mb": 46.41,
-      "redact_ms_per_mb": 47.08
+      "detect_ms": 1.135,
+      "redact_ms": 1.14,
+      "detect_ms_per_mb": 49.57,
+      "redact_ms_per_mb": 49.79
     },
     {
       "kind": "chinese_prose",
@@ -70,10 +70,10 @@
       "chars": 65536,
       "bytes": 192090,
       "artifact_bytes": 192090,
-      "detect_ms": 2.917,
-      "redact_ms": 2.922,
-      "detect_ms_per_mb": 46.67,
-      "redact_ms_per_mb": 46.76
+      "detect_ms": 4.64,
+      "redact_ms": 4.044,
+      "detect_ms_per_mb": 74.24,
+      "redact_ms_per_mb": 64.7
     },
     {
       "kind": "chinese_prose",
@@ -81,10 +81,10 @@
       "chars": 262144,
       "bytes": 768354,
       "artifact_bytes": 768354,
-      "detect_ms": 11.679,
-      "redact_ms": 11.945,
-      "detect_ms_per_mb": 46.71,
-      "redact_ms_per_mb": 47.78
+      "detect_ms": 17.503,
+      "redact_ms": 17.51,
+      "detect_ms_per_mb": 70.01,
+      "redact_ms_per_mb": 70.04
     },
     {
       "kind": "chinese_prose",
@@ -92,10 +92,10 @@
       "chars": 1048576,
       "bytes": 3073414,
       "artifact_bytes": 3073414,
-      "detect_ms": 54.293,
-      "redact_ms": 48.233,
-      "detect_ms_per_mb": 54.29,
-      "redact_ms_per_mb": 48.23
+      "detect_ms": 51.948,
+      "redact_ms": 52.458,
+      "detect_ms_per_mb": 51.95,
+      "redact_ms_per_mb": 52.46
     },
     {
       "kind": "code",
@@ -103,10 +103,10 @@
       "chars": 24000,
       "bytes": 24000,
       "artifact_bytes": 24000,
-      "detect_ms": 1.022,
-      "redact_ms": 1.026,
-      "detect_ms_per_mb": 44.66,
-      "redact_ms_per_mb": 44.84
+      "detect_ms": 1.179,
+      "redact_ms": 1.019,
+      "detect_ms_per_mb": 51.51,
+      "redact_ms_per_mb": 44.51
     },
     {
       "kind": "code",
@@ -114,10 +114,10 @@
       "chars": 65536,
       "bytes": 65536,
       "artifact_bytes": 65536,
-      "detect_ms": 2.727,
-      "redact_ms": 4.473,
-      "detect_ms_per_mb": 43.63,
-      "redact_ms_per_mb": 71.56
+      "detect_ms": 3.97,
+      "redact_ms": 2.762,
+      "detect_ms_per_mb": 63.52,
+      "redact_ms_per_mb": 44.19
     },
     {
       "kind": "code",
@@ -125,10 +125,10 @@
       "chars": 262144,
       "bytes": 262144,
       "artifact_bytes": 262144,
-      "detect_ms": 11.599,
-      "redact_ms": 12.161,
-      "detect_ms_per_mb": 46.4,
-      "redact_ms_per_mb": 48.65
+      "detect_ms": 11.581,
+      "redact_ms": 11.741,
+      "detect_ms_per_mb": 46.32,
+      "redact_ms_per_mb": 46.97
     },
     {
       "kind": "code",
@@ -136,10 +136,10 @@
       "chars": 1048576,
       "bytes": 1048576,
       "artifact_bytes": 1048576,
-      "detect_ms": 44.869,
-      "redact_ms": 48.443,
-      "detect_ms_per_mb": 44.87,
-      "redact_ms_per_mb": 48.44
+      "detect_ms": 47.34,
+      "redact_ms": 51.829,
+      "detect_ms_per_mb": 47.34,
+      "redact_ms_per_mb": 51.83
     },
     {
       "kind": "secret_dense",
@@ -147,10 +147,10 @@
       "chars": 1048576,
       "bytes": 1048576,
       "artifact_bytes": 1048576,
-      "detect_ms": 45.377,
-      "redact_ms": 59.769,
-      "detect_ms_per_mb": 45.38,
-      "redact_ms_per_mb": 59.77
+      "detect_ms": 47.322,
+      "redact_ms": 45.806,
+      "detect_ms_per_mb": 47.32,
+      "redact_ms_per_mb": 45.81
     },
     {
       "kind": "secret_dense",
@@ -158,10 +158,10 @@
       "chars": 37609,
       "bytes": 37609,
       "artifact_bytes": 37609,
-      "detect_ms": 1.585,
-      "redact_ms": 1.519,
-      "detect_ms_per_mb": 44.18,
-      "redact_ms_per_mb": 42.34
+      "detect_ms": 1.608,
+      "redact_ms": 1.514,
+      "detect_ms_per_mb": 44.84,
+      "redact_ms_per_mb": 42.21
     },
     {
       "kind": "secret_dense",
@@ -169,10 +169,10 @@
       "chars": 149959,
       "bytes": 149959,
       "artifact_bytes": 149959,
-      "detect_ms": 6.002,
-      "redact_ms": 5.998,
-      "detect_ms_per_mb": 41.97,
-      "redact_ms_per_mb": 41.94
+      "detect_ms": 6.104,
+      "redact_ms": 6.206,
+      "detect_ms_per_mb": 42.68,
+      "redact_ms_per_mb": 43.39
     },
     {
       "kind": "secret_dense",
@@ -180,24 +180,24 @@
       "chars": 596646,
       "bytes": 596646,
       "artifact_bytes": 596646,
-      "detect_ms": 26.545,
-      "redact_ms": 25.351,
-      "detect_ms_per_mb": 46.65,
-      "redact_ms_per_mb": 44.55
+      "detect_ms": 27.118,
+      "redact_ms": 25.553,
+      "detect_ms_per_mb": 47.66,
+      "redact_ms_per_mb": 44.91
     }
   ],
   "derived": {
-    "median_redact_ms_per_mb": 48.0,
-    "worst_redact_ms_per_mb": 59.77,
+    "median_redact_ms_per_mb": 51.45,
+    "worst_redact_ms_per_mb": 70.04,
     "stable_sample_min_chars": 262144,
     "stable_sample_count": 8,
     "smallest_archived_bytes": 24000,
     "note": "归档正文的下限由归档阈值决定：小于阈值的输出不落盘。因此任何扫描预算都必须显著大于该下限，否则等于拒绝注入全部归档。",
     "budget_examples": {
-      "100_ms_covers_mb": 2.08,
-      "250_ms_covers_mb": 5.21,
-      "500_ms_covers_mb": 10.42,
-      "1000_ms_covers_mb": 20.83
+      "100_ms_covers_mb": 1.94,
+      "250_ms_covers_mb": 4.86,
+      "500_ms_covers_mb": 9.72,
+      "1000_ms_covers_mb": 19.44
     }
   },
   "limits": [

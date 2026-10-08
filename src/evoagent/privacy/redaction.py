@@ -44,6 +44,23 @@ _DSN_PATTERN = re.compile(
 #: 这样普通的 `a.b.c` 点分标识符不会被误伤。
 _JWT_PATTERN = re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{8,}")
 
+#: 每条规则的**必需字面量**：文本里没有它，该规则就不可能命中。
+#: 用于昂贵规则的快速预筛（DSN/JWT 的正则在长文本上验证代价明显高于 V1：
+#: v2 实测 118.85 ms/MB vs v1 48.0 ms/MB）。预筛是**语义等价**的加速：
+#: `://` 是 DSN 正则的必需子串，`eyJ` 是 JWT 正则的必需子串，少跑一次正则不会
+#: 改变任何命中结果——由 S0a 的等价对照与 v2 的差异登记共同保证。
+_RULE_PREFILTER: dict[str, bytes] = {
+    "private_key": b"PRIVATE KEY",
+    "dsn_credentials": b"://",
+    "jwt": b"eyJ",
+}
+
+
+def _rule_applies(name: str, raw: bytes) -> bool:
+    needle = _RULE_PREFILTER.get(name)
+    return needle is None or needle in raw
+
+
 #: （类别, 正则, 替换文本）。**元组顺序就是替换顺序**，改动会改变输出字节。
 #: 新增类别只能追加在末尾，并在 `expected_changes.json` 登记逐例差异（§2.1 第 10 条）。
 _SENSITIVE_TEXT_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
@@ -101,8 +118,11 @@ class RedactionResult:
 def detect_sensitive(text: str) -> tuple[str, ...]:
     """返回在**原始文本**上命中的类别，按规则顺序去重。"""
 
+    raw = text.encode("utf-8")
     seen: list[str] = []
     for name, pattern, _ in _SENSITIVE_TEXT_RULES:
+        if not _rule_applies(name, raw):
+            continue
         if pattern.search(text) and name not in seen:
             seen.append(name)
     return tuple(seen)
@@ -119,8 +139,11 @@ def detect_sensitive_spans(text: str) -> tuple[RedactionHit, ...]:
     "编辑区间是否碰到隐藏内容"这类安全判断，多报是安全方向，因此可以接受。
     """
 
+    raw = text.encode("utf-8")
     hits: list[RedactionHit] = []
     for name, pattern, _ in _SENSITIVE_TEXT_RULES:
+        if not _rule_applies(name, raw):
+            continue
         for match in pattern.finditer(text):
             hits.append(RedactionHit(name, match.start(), match.end()))
     return tuple(hits)
@@ -136,7 +159,10 @@ def redact_text(text: str) -> str:
     """按固定顺序替换敏感片段；不改变其它字节。"""
 
     result = text
-    for _, pattern, replacement in _SENSITIVE_TEXT_RULES:
+    raw = text.encode("utf-8")
+    for name, pattern, replacement in _SENSITIVE_TEXT_RULES:
+        if not _rule_applies(name, raw):
+            continue
         result = pattern.sub(replacement, result)
     return result
 
@@ -149,8 +175,11 @@ def redact_text_result(text: str) -> RedactionResult:
     """
 
     result = text
+    raw = text.encode("utf-8")
     hits: list[RedactionHit] = []
     for name, pattern, replacement in _SENSITIVE_TEXT_RULES:
+        if not _rule_applies(name, raw):
+            continue
         for match in pattern.finditer(result):
             hits.append(RedactionHit(name, match.start(), match.end()))
         result = pattern.sub(replacement, result)

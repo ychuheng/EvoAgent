@@ -38,11 +38,13 @@ from evoagent.tools.base import ToolExecutionError, ToolPermissionError
 #: 没有"重新注入模型"的用途，一律不因门禁通过而获得注入权限。
 INJECTABLE_ARTIFACT_TYPES = frozenset({"tool_output", "context_source"})
 
-#: 扫描预算来自实测：现有原语中位 48.0 ms/MB、最差 59.8 ms/MB，见
-#: docs/reports/artifact-scan-budget-2026-10-08.json。10 MB ≈ 480 ms，取 500 ms 上限。
-#: 超过上限**拒绝注入**而不是降级放行（§2.1 第 8 条）。
+#: 扫描预算来自实测：现有原语中位 51.45 ms/MB、**最差 70.04 ms/MB**（规则 v2 + 字面量
+#: 预筛），见 docs/reports/artifact-scan-budget-2026-10-08.json。
+#: 6 MiB（6.29 MB）× 70.04 ms/MB ≈ 441 ms，**最差档也在 500 ms 预算内**（留约 12% 余量），
+#: 因此这对参数自洽：低于尺寸上限的正文预期都能在时间预算内扫完。
+#: 超过尺寸上限的按 §2.1 第 8 条**拒绝注入**，另排受限离线扫描；不降级放行。
 SCAN_BUDGET_MS = 500
-MAX_SCAN_BYTES = 10 * 1024 * 1024
+MAX_SCAN_BYTES = 6 * 1024 * 1024
 
 BLOCK_EVENT_TYPE = "artifact.injection_blocked"
 
