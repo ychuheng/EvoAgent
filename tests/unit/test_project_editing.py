@@ -11,13 +11,17 @@
 
 import codecs
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
+from evoagent.core.events import InMemoryEventSink
+from evoagent.core.models import ToolCall, ToolResultStatus
 from evoagent.projects.editing import (
     EditConflictError,
     EditRequest,
     LineRange,
+    RedactedEditError,
     apply_edits,
     delete_path,
     move_path,
@@ -37,6 +41,8 @@ from evoagent.tools.builtin.project_edit import (
     PatchFileSpec,
     project_edit_tools,
 )
+from evoagent.tools.executor import ToolExecutor
+from evoagent.tools.registry import ToolRegistry
 
 
 def make_repo(root: Path) -> Path:
@@ -386,3 +392,176 @@ def test_edit_rejects_symlink_target(tmp_path: Path) -> None:
 
     with pytest.raises((ToolPermissionError, ToolExecutionError)):
         apply_edits(root, [EditRequest(path="linked.py", old_text="value = 1", replacement="v=2")])
+
+
+# --- §2.3 编辑门禁：不能用有损视图回写原文 ---------------------------------------
+
+SECRET_CONFIG = "service:\n  token: sk-abcdefghijklmnopqrst\n  retries: 3\n"
+
+
+def make_secret_repo(root: Path) -> Path:
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "app.yml").write_text(SECRET_CONFIG, encoding="utf-8")
+    return root
+
+
+def test_line_range_covering_hidden_span_is_refused(tmp_path: Path) -> None:
+    root = make_secret_repo(tmp_path)
+    target = root / "config" / "app.yml"
+    before = target.read_bytes()
+
+    with pytest.raises(RedactedEditError) as error:
+        apply_edits(
+            root,
+            [
+                EditRequest(
+                    path="config/app.yml",
+                    line_range=LineRange(start=2, end=2),
+                    replacement="  token: 已轮换",
+                )
+            ],
+        )
+
+    assert error.value.code == "redacted_edit_requires_review"
+    # 失败前后磁盘 bytes 必须完全相同
+    assert target.read_bytes() == before
+    # 错误信息不得泄露命中的原值
+    assert "sk-abcdefghijklmnopqrst" not in str(error.value)
+
+
+def test_old_text_matching_a_hidden_span_is_refused(tmp_path: Path) -> None:
+    """不靠模型自觉：即使它给出的 old_text 真的匹配，命中隐藏区间也拒绝。"""
+
+    root = make_secret_repo(tmp_path)
+
+    with pytest.raises(RedactedEditError):
+        apply_edits(
+            root,
+            [
+                EditRequest(
+                    path="config/app.yml",
+                    old_text="  token: sk-abcdefghijklmnopqrst",
+                    replacement="  token: 已轮换",
+                )
+            ],
+        )
+
+
+def test_adjacent_edit_still_succeeds_and_keeps_the_hidden_line(tmp_path: Path) -> None:
+    root = make_secret_repo(tmp_path)
+    target = root / "config" / "app.yml"
+
+    outcome = apply_edits(
+        root,
+        [
+            EditRequest(
+                path="config/app.yml",
+                line_range=LineRange(start=3, end=3),
+                replacement="  retries: 5",
+            )
+        ],
+    )
+
+    assert outcome.outcomes[0].added_lines == 1
+    text = target.read_text(encoding="utf-8")
+    assert "  retries: 5" in text
+    assert "  token: sk-abcdefghijklmnopqrst" in text
+
+
+def test_conflict_hint_only_appears_when_the_file_really_has_hits(tmp_path: Path) -> None:
+    """不要把冲突都归咎脱敏：没有命中时保持中性提示。"""
+
+    secret_root = make_secret_repo(tmp_path / "secret")
+
+    with pytest.raises(EditConflictError) as polluted:
+        apply_edits(
+            secret_root,
+            [
+                EditRequest(
+                    path="config/app.yml",
+                    old_text="  token: [REDACTED]",
+                    replacement="  token: 已轮换",
+                )
+            ],
+        )
+    assert polluted.value.code == "edit_conflict"
+    assert "脱敏" in str(polluted.value)
+
+    clean_root = make_repo(tmp_path / "clean")
+
+    with pytest.raises(EditConflictError) as clean:
+        apply_edits(
+            clean_root,
+            [EditRequest(path="src/store.py", old_text="不存在的原文", replacement="x")],
+        )
+    assert clean.value.code == "edit_conflict"
+    assert "脱敏" not in str(clean.value)
+
+
+def test_batch_with_one_refused_edit_writes_nothing(tmp_path: Path) -> None:
+    """批量补丁任一项拒绝则整批不写——干净的那一项即使排在前面也不得落盘。"""
+
+    root = make_secret_repo(tmp_path)
+    clean = root / "config" / "other.yml"
+    clean.write_text("retries: 1\n", encoding="utf-8")
+    secret_file = root / "config" / "app.yml"
+    clean_before = clean.read_bytes()
+    secret_before = secret_file.read_bytes()
+
+    with pytest.raises(RedactedEditError):
+        apply_edits(
+            root,
+            [
+                EditRequest(
+                    path="config/other.yml", old_text="retries: 1", replacement="retries: 2"
+                ),
+                EditRequest(
+                    path="config/app.yml",
+                    line_range=LineRange(start=2, end=2),
+                    replacement="  token: 已轮换",
+                ),
+            ],
+        )
+
+    assert clean.read_bytes() == clean_before
+    assert secret_file.read_bytes() == secret_before
+
+
+@pytest.mark.asyncio
+async def test_model_visible_edit_output_hides_the_nearby_secret(tmp_path: Path) -> None:
+    """diff 带 3 行上下文，会把隐藏行带进工具输出；模型看到的那一份必须已脱敏。
+
+    这条把 §2.3 的两半连起来：编辑门禁拦住"写回隐藏区间"，而邻近编辑的 diff
+    仍然可能**读到**隐藏行，因此必须靠工具输出的安全投影兜住。
+    """
+
+    root = make_secret_repo(tmp_path)
+    tool = EditFileTool(root, authorization=ProjectAuthorization.READ_WRITE)
+    executor = ToolExecutor(
+        ToolRegistry([tool]),
+        InMemoryEventSink(uuid4()),
+        timeout_seconds=5,
+        max_result_chars=20_000,
+    )
+
+    result = await executor.execute(
+        ToolCall(
+            call_id="c1",
+            name="edit_file",
+            arguments={
+                "path": "config/app.yml",
+                "start_line": 3,
+                "end_line": 3,
+                "replacement": "  retries: 5",
+            },
+        )
+    )
+
+    assert result.status is ToolResultStatus.SUCCESS
+    assert "sk-abcdefghijklmnopqrst" not in result.content
+    assert result.view_metadata is not None
+    assert result.view_metadata.source_view == "redacted"
+    # 未涉及的隐藏行仍在磁盘上原样保留（有损视图不修改源文件）
+    assert "  token: sk-abcdefghijklmnopqrst" in (root / "config" / "app.yml").read_text(
+        encoding="utf-8"
+    )

@@ -20,6 +20,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from evoagent.privacy.redaction import detect_sensitive
 from evoagent.projects.encoding import DetectedText, count_line_endings, read_text
 from evoagent.projects.schema import resolve_inside_root
 from evoagent.tools.base import ToolExecutionError, ToolPermissionError
@@ -32,6 +33,12 @@ class EditConflictError(ToolExecutionError):
     """文件在读取之后被改动，或定位文本不唯一/不存在。"""
 
     code = "edit_conflict"
+
+
+class RedactedEditError(ToolExecutionError):
+    """待替换的区间命中当前敏感规则：模型多半在照有损视图写回。"""
+
+    code = "redacted_edit_requires_review"
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,7 +154,9 @@ def _locate(text: str, request: EditRequest, *, newline: str) -> tuple[int, int,
                     f"old_text 在文件中出现 {occurrences} 次，无法唯一定位；"
                     "请给出更长的上下文或改用 line_range"
                 )
-        raise EditConflictError("old_text 在文件中不存在；文件可能已被他人修改")
+        raise EditConflictError(
+            "old_text 在文件中不存在；文件可能已被他人修改" + _redaction_hint(text)
+        )
 
     assert request.line_range is not None
     lines = text.splitlines(keepends=True)
@@ -171,12 +180,47 @@ def normalize_line_endings(text: str, newline: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", newline)
 
 
-def _apply_to_text(text: str, request: EditRequest, *, newline: str) -> tuple[str, str]:
+def _redaction_hint(text: str) -> str:
+    """只在文件当前**确有**敏感命中时提示可能是脱敏视图。
+
+    "不要把冲突都归咎脱敏"：没有命中就保持原来的中性提示，否则模型会误判原因。
+    """
+
+    hits = detect_sensitive(text)
+    if not hits:
+        return ""
+    return (
+        f"；注意该文件当前确有敏感片段命中（{'、'.join(hits)}），"
+        "你可能读到的是脱敏视图，请不要反复换参数重试"
+    )
+
+
+def check_sensitive_edit(snapshot: FileSnapshot, request: EditRequest, located_span: str) -> None:
+    """写盘前用当前规则检查**实际被替换的区间**（改造方案 §2.3）。
+
+    为什么不能只靠 old_text 失败：`line_range` 直接定位真实行，根本不需要模型持有
+    原文；`expected_sha256` 匹配也只说明文件没被改过，不证明模型见过完整内容。
+    因此这里检查真正会被覆盖的那段磁盘文本——命中即拒绝，不靠模型自觉。
+    """
+
+    hits = detect_sensitive(located_span)
+    if not hits:
+        return
+    raise RedactedEditError(
+        f"{snapshot.display} 中待替换的区间命中当前敏感规则（{'、'.join(hits)}）；"
+        "该区间在模型视图里是隐藏的，写回会破坏原文。"
+        "请停止该编辑并请用户本地处理，或先纠正规则误报后重新读取。"
+    )
+
+
+def _apply_to_text(text: str, request: EditRequest, *, newline: str) -> tuple[str, str, str]:
+    """返回 `(原内容, 新内容, 被替换区间的原文)`。"""
+
     if request.create and text == "" and request.old_text is None and request.line_range is None:
-        return "", normalize_line_endings(request.replacement, newline)
+        return "", normalize_line_endings(request.replacement, newline), ""
     start, end, original = _locate(text, request, newline=newline)
     replacement = normalize_line_endings(request.replacement, newline)
-    return original, f"{text[:start]}{replacement}{text[end:]}"
+    return original, f"{text[:start]}{replacement}{text[end:]}", original
 
 
 def _atomic_write(path: Path, raw: bytes, *, mode: int | None) -> None:
@@ -287,7 +331,10 @@ def apply_edits(
         else:
             text = snapshot.detected.text
             newline = snapshot.detected.newline
-        original, updated = _apply_to_text(text, request, newline=newline)
+        original, updated, located = _apply_to_text(text, request, newline=newline)
+        # 写盘前检查真正会被覆盖的区间；这一步在写入循环之前，因此批量补丁里
+        # 任一项被拒绝时整批都不会写（改造方案 §2.3）。
+        check_sensitive_edit(snapshot, request, located)
         if original == request.replacement and request.old_text is not None:
             raise ToolExecutionError(f"{display} 的替换内容与原内容相同，没有可应用的改动")
 
