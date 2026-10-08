@@ -49,6 +49,17 @@ _PROCESS_POLL_SECONDS = 0.05
 SHELL_METACHARACTERS = (";", "&&", "||", "|", ">", "<", "`", "$(")
 _SHELL_METACHARACTER_PATTERN = re.compile(r"[;&|<>`]|\$\(")
 
+
+class CommandUnobservableError(ToolExecutionError):
+    """无法观测这条会话的进程树（K2 / §13.4）。
+
+    进程数配额靠 `/proc` 计数实施；看不见就不能假装健康——发起前与运行中都是如此。
+    这**不**声称补齐了内核 pids/cgroup 硬配额或后代会话逃逸的完整验证。
+    """
+
+    code = "project_command_unobservable"
+
+
 # 子进程需要的系统变量白名单；不含任何密钥、代理或应用配置。
 ENV_ALLOWLIST = (
     "PATH",
@@ -328,6 +339,10 @@ async def run_command(
     if not sys.platform.startswith("linux"):
         raise ToolExecutionError("项目命令需要 Linux Landlock/seccomp 隔离执行环境")
 
+    # 发起前检查可观测性（K2 / §13.4）：启动时通过一次不能替代运行中的复查，
+    # 但发起前必须先确认这条路现在真的能看见进程树。
+    ensure_observable_session(os.getpid())
+
     environment = build_environment(allow_network=spec.allow_network, extra=environment_extra)
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="evoagent-command-") as scratch:
@@ -360,6 +375,7 @@ async def run_command(
             raise ToolExecutionError(f"命令无法启动：{error}") from error
         timed_out = False
         process_limit_exceeded = False
+        watcher_reason: str | None = None
         drain = asyncio.ensure_future(process.communicate())
         watcher = asyncio.ensure_future(_watch_process_tree(process, max_processes, drain))
         try:
@@ -372,10 +388,16 @@ async def run_command(
             except (TimeoutError, ProcessLookupError):  # pragma: no cover - 强杀兜底
                 stdout, stderr = b"", b""
         finally:
-            process_limit_exceeded = watcher.done() and not watcher.cancelled() and watcher.result()
+            if watcher.done() and not watcher.cancelled():
+                watcher_reason = watcher.result()
             watcher.cancel()
             with suppress(asyncio.CancelledError):
                 await watcher
+        process_limit_exceeded = watcher_reason == "process_limit"
+        if watcher_reason == "unobservable":
+            # 监控期间失去可观测性：进程组已被终止，这里如实报不可观测，
+            # 不把"看不见"当成"没超限"。
+            raise CommandUnobservableError("运行期间失去进程树可观测性，已终止该命令的进程组")
         if process.returncode == 125 and b"EVOAGENT_COMMAND_SETUP_FAILED:" in stderr:
             raise ToolExecutionError(stderr.decode("utf-8", errors="replace").strip())
     duration = time.perf_counter() - started
@@ -496,8 +518,12 @@ async def _run_trusted_windows_command(
 
 async def _watch_process_tree(
     process: asyncio.subprocess.Process, max_processes: int, drain: asyncio.Future
-) -> bool:
-    """盯住这条会话的进程数；超限即杀掉整个进程组，返回 `True`。
+) -> str | None:
+    """盯住这条会话的进程数；返回终止原因或 `None`（正常结束）。
+
+    - `process_limit`：超限，整组被 SIGKILL；
+    - `unobservable`：**监控期间失去可观测性**（`/proc` 读不了/解析不了）。这时也杀掉
+      所控进程组并如实返回原因——不能因为"看不见"就当没超限（K2 / §13.4）。
 
     为什么不用内核的 `RLIMIT_NPROC`（试过，撤了）：它的计数是**整个 user namespace 里
     该 UID 的进程数**，不是某棵进程树，也不是某个容器的。本机实测同一个应用镜像里
@@ -512,35 +538,92 @@ async def _watch_process_tree(
     """
 
     while True:
-        if _session_process_count(process.pid) > max_processes:
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            return True
+        try:
+            count = _session_process_count(process.pid)
+        except CommandUnobservableError:
+            _kill_session(process)
+            return "unobservable"
+        if count > max_processes:
+            _kill_session(process)
+            return "process_limit"
         if drain.done():
-            return False
+            return None
         await asyncio.sleep(_PROCESS_POLL_SECONDS)
 
 
-def _session_process_count(session_id: int) -> int:
-    """统计 `/proc` 里会话号等于 `session_id` 的进程数（Linux；读不到就跳过该条）。"""
+def _kill_session(process: asyncio.subprocess.Process) -> None:
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
 
-    total = 0
+
+def ensure_observable_session(pid: int) -> int:
+    """核对 `/proc` 现在真的可观测，返回该进程的会话号；不可观测即抛错。
+
+    三件事一起查（K2 / §13.4）：`self/stat` 能读且关键字段能解析、`/proc` 能枚举、
+    会话计数至少包含自己。任何一项不成立都说明"进程树配额"这条路当前不成立——
+    返回 0 或跳过都会让配额形同虚设。
+    """
+
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as handle:
+            raw = handle.read()
+    except OSError as error:
+        raise CommandUnobservableError(f"无法读取 /proc/{pid}/stat：{error}") from error
+    try:
+        # `pid (comm) state ppid pgrp session …`：comm 可能含空格与括号，因此按**最后**
+        # 一个 `") "` 切开。注意切开后的第一段是 state、不是 pid——pid 在前缀里，
+        # 拿它跟请求的 pid 对一下，才能证明读到的确实是这个进程的记录。
+        head, separator, tail = raw.rpartition(b") ")
+        if not separator:
+            raise ValueError("missing command terminator")
+        stat_pid = int(head.split(b" ", 1)[0])
+        fields = tail.split()
+        session = int(fields[3])
+    except (IndexError, ValueError) as error:
+        raise CommandUnobservableError(f"/proc/{pid}/stat 的关键字段无法解析") from error
+    if stat_pid != pid:
+        raise CommandUnobservableError(f"/proc/{pid}/stat 报告的 pid 是 {stat_pid}，与请求不一致")
+    if _session_process_count(session) < 1:
+        raise CommandUnobservableError("会话计数为 0：/proc 枚举结果不可信")
+    return session
+
+
+def _session_process_count(session_id: int) -> int:
+    """统计 `/proc` 里会话号等于 `session_id` 的进程数。
+
+    要么给出数字，要么抛"不可观测"——**不用 0 假装健康**（K2 / §13.4）：
+
+    - 恰好在读取瞬间退出的条目允许跳过（`FileNotFoundError`）；
+    - `/proc` 目录不可读、权限拒绝，或**仍存活**条目的关键字段读不到/解析不了，
+      一律抛 `CommandUnobservableError`，不得静默忽略。
+    """
+
     try:
         entries = os.listdir("/proc")
-    except OSError:  # pragma: no cover - 非 Linux 或 /proc 不可读
-        return 0
+    except OSError as error:
+        raise CommandUnobservableError(f"无法枚举 /proc：{error}") from error
+    total = 0
     for entry in entries:
         if not entry.isdigit():
             continue
         try:
             with open(f"/proc/{entry}/stat", "rb") as handle:
-                # 格式：`pid (comm) state ppid pgrp session …`；comm 可能含空格与括号，
-                # 因此按最后一个 `) ` 切开，之后的第 4 个字段才是 session（从 0 数起）。
-                fields = handle.read().rsplit(b") ", 1)[1].split()
-            if int(fields[3]) == session_id:
-                total += 1
-        except (OSError, IndexError, ValueError):
+                raw = handle.read()
+        except FileNotFoundError:
+            # 条目在 listdir 与 open 之间退出：这是允许跳过的竞态。
             continue
+        except OSError as error:
+            raise CommandUnobservableError(f"无法读取 /proc/{entry}/stat：{error}") from error
+        try:
+            # 格式：`pid (comm) state ppid pgrp session …`；comm 可能含空格与括号，
+            # 因此按最后一个 `) ` 切开，之后的第 4 个字段才是 session（从 0 数起）。
+            fields = raw.rsplit(b") ", 1)[1].split()
+            session = int(fields[3])
+        except (IndexError, ValueError) as error:
+            # 条目还在（不是 FileNotFoundError）却解析不了：不得当作"没有这个进程"。
+            raise CommandUnobservableError(f"/proc/{entry}/stat 的关键字段无法解析") from error
+        if session == session_id:
+            total += 1
     return total
 
 

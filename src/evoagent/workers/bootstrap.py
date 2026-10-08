@@ -21,6 +21,7 @@ from evoagent.db.models import RunRecord, TaskRecord
 from evoagent.db.session import Database
 from evoagent.memory.maintenance import MaintenanceWorker
 from evoagent.projects.inputs import InputChangedError
+from evoagent.projects.readiness import REASON_UNOBSERVABLE, ProjectCommandReadinessProbe
 from evoagent.projects.schema import ProjectAuthorizationRevoked
 from evoagent.providers.base import ModelProvider
 from evoagent.providers.mock import MockProvider
@@ -272,6 +273,25 @@ class ConfiguredTaskHandler:
         from evoagent.tools.builtin.search_text import SearchTextTool
 
         root = project.root
+        # 命令工具只在**本环境真的能观测进程树**时注册（K2 / §13.4）：
+        # 看不见会话进程数就没法实施配额，此时"不登记就绪、不接项目命令"，
+        # 而不是让命令在无配额的情况下跑。宿主上的预检不能替代这里的判断。
+        readiness = ProjectCommandReadinessProbe().check(self._settings)
+        command_tools = (
+            []
+            if readiness.reason == REASON_UNOBSERVABLE
+            else project_command_tools(
+                root,
+                authorization=project.authorization,
+                allowlist=self._settings.project_command_allowlist,
+                timeout_seconds=self._settings.project_command_timeout_seconds,
+                output_bytes=self._settings.project_command_output_bytes,
+                memory_bytes=self._settings.project_command_memory_bytes,
+                max_processes=self._settings.project_command_max_processes,
+                environment=self._settings.project_command_environment,
+                trusted_host_mode=self._settings.trusted_host_mode,
+            )
+        )
         return [
             ListDirTool(root),
             FindFilesTool(root),
@@ -282,17 +302,7 @@ class ConfiguredTaskHandler:
             *project_edit_tools(root, authorization=project.authorization),
             # F-05：目录整理是写操作，只读授权下不注册（删除仍走 delete_file 单独审批）。
             *project_organize_tools(root, authorization=project.authorization),
-            *project_command_tools(
-                root,
-                authorization=project.authorization,
-                allowlist=self._settings.project_command_allowlist,
-                timeout_seconds=self._settings.project_command_timeout_seconds,
-                output_bytes=self._settings.project_command_output_bytes,
-                memory_bytes=self._settings.project_command_memory_bytes,
-                max_processes=self._settings.project_command_max_processes,
-                environment=self._settings.project_command_environment,
-                trusted_host_mode=self._settings.trusted_host_mode,
-            ),
+            *command_tools,
         ]
 
     def _provider(self, run_id: UUID) -> ModelProvider:

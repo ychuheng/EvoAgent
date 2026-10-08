@@ -8,6 +8,7 @@ from dotenv import dotenv_values
 from pydantic import ValidationError
 
 from evoagent.config import Settings
+from evoagent.projects.readiness import REASON_UNOBSERVABLE, ProjectCommandReadinessProbe
 
 REQUIRED = (
     "EVOAGENT_API_KEY",
@@ -18,6 +19,15 @@ REQUIRED = (
 
 
 def validate(path: Path) -> tuple[str, str]:
+    """配置校验的公开入口；返回 `(model, search_provider)`，行为保持不变。"""
+
+    settings = _settings_from_env_file(path)
+    return settings.model or "", settings.search_provider
+
+
+def _settings_from_env_file(path: Path) -> Settings:
+    """解析并校验配置文件；`validate()` 与宿主就绪预检共用这一条路径。"""
+
     if not path.is_file():
         raise ValueError(f"configuration file not found: {path}")
     raw = dotenv_values(path)
@@ -70,7 +80,7 @@ def validate(path: Path) -> tuple[str, str]:
         # Model validators have hand-written messages that mention setting names,
         # but never include the secret values supplied in this file.
         raise
-    return settings.model or "", settings.search_provider
+    return settings
 
 
 def main() -> int:
@@ -78,10 +88,21 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, default=Path(".env.personal"))
     args = parser.parse_args()
     try:
-        model, search = validate(args.env_file)
+        _model, _search = validate(args.env_file)
+        settings = _settings_from_env_file(args.env_file)
     except ValueError as error:
         parser.exit(2, f"personal configuration error: {error}\n")
-    print(f"configuration valid: model={model}, search={search}; remote services not checked")
+    print(f"configuration valid: model={_model}, search={_search}; remote services not checked")
+    # K2 / §13.4：这里跑的是**宿主**可观测性检查，它**不能替代**实际 Worker 容器、
+    # UID 与命名空间里的预检；两者共用同一个 probe，结论不互为证明。
+    result = ProjectCommandReadinessProbe().check(settings)
+    print(f"host command readiness: {result.reason} — {result.detail}")
+    if result.reason == REASON_UNOBSERVABLE:
+        print(
+            "host check failed: 该宿主上无法观测会话进程数，项目命令不会在 Worker 中注册；"
+            "若在容器里运行，请在实际 Worker 环境重跑本预检"
+        )
+        return 2
     return 0
 
 
