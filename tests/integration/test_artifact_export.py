@@ -160,3 +160,102 @@ async def test_artifact_download_detects_tampered_content(tmp_path: Path) -> Non
         response = await client.get(f"/api/v1/artifacts/{artifact_id}/download")
         assert response.status_code == 409
         assert "不一致" in response.json()["detail"]
+
+
+async def _quarantine(database: Database, artifact_id: str) -> str:
+    """把产物置为"隔离中"（上一版策略），返回其 content_hash。"""
+
+    from uuid import UUID
+
+    from evoagent.db.models import ArtifactRecord
+    from evoagent.privacy.redaction import POLICY_VERSION
+
+    async with database.session_factory() as session:
+        record = await session.get(ArtifactRecord, UUID(artifact_id))
+        record.redaction_status = "quarantined"
+        record.redaction_policy_version = POLICY_VERSION - 1
+        record.redaction_checked_hash = None
+        await session.commit()
+        return record.content_hash
+
+
+@pytest.mark.asyncio
+async def test_quarantine_review_endpoint_clears_idempotently_and_maps_conflicts(
+    tmp_path: Path,
+) -> None:
+    """§2.4 的 HTTP 出口：通过才解封、重试幂等、过期条件 409、身份不可伪造。"""
+
+    from uuid import UUID
+
+    from sqlalchemy import select
+
+    from evoagent.db.models import ArtifactRecord, RunEventRecord
+    from evoagent.privacy.artifact_access import REVIEW_CLEARED_EVENT, REVIEW_REQUESTED_EVENT
+    from evoagent.privacy.redaction import POLICY_VERSION
+
+    async with artifact_client(tmp_path) as (client, database, artifact_id):
+        content_hash = await _quarantine(database, artifact_id)
+        body = {
+            "reason": "本地核对后确认是误报，规则已修正并升版",
+            "expected_policy_version": POLICY_VERSION - 1,
+            "expected_content_hash": content_hash,
+            "client_request_id": "req-api-1",
+            # 伪造身份：请求体里的 actor 必须被忽略
+            "actor": "attacker",
+        }
+
+        cleared = await client.post(f"/api/v1/artifacts/{artifact_id}/quarantine-review", json=body)
+        assert cleared.status_code == 200
+        assert cleared.json()["outcome"] == "cleared"
+        assert cleared.json()["policy_version"] == POLICY_VERSION
+        assert cleared.json()["replayed"] is False
+
+        again = await client.post(f"/api/v1/artifacts/{artifact_id}/quarantine-review", json=body)
+        assert again.status_code == 200
+        assert again.json()["replayed"] is True
+
+        async with database.session_factory() as session:
+            events = tuple(
+                await session.scalars(
+                    select(RunEventRecord)
+                    .where(
+                        RunEventRecord.event_type.in_(
+                            (REVIEW_REQUESTED_EVENT, REVIEW_CLEARED_EVENT)
+                        )
+                    )
+                    .order_by(RunEventRecord.sequence)
+                )
+            )
+        assert [event.event_type for event in events] == [
+            REVIEW_REQUESTED_EVENT,
+            REVIEW_CLEARED_EVENT,
+        ]
+        assert {event.payload["actor"] for event in events} == {"human"}
+
+        stale = await client.post(
+            f"/api/v1/artifacts/{artifact_id}/quarantine-review",
+            json={
+                **body,
+                "expected_content_hash": "sha256:" + "0" * 64,
+                "client_request_id": "req-api-2",
+            },
+        )
+        assert stale.status_code == 409
+
+        missing = await client.post(f"/api/v1/artifacts/{uuid4()}/quarantine-review", json=body)
+        assert missing.status_code == 404
+
+        incomplete = await client.post(
+            f"/api/v1/artifacts/{artifact_id}/quarantine-review",
+            json={
+                "expected_policy_version": 0,
+                "expected_content_hash": "sha256:" + "0" * 64,
+                "client_request_id": "req-api-3",
+            },
+        )
+        assert incomplete.status_code == 422
+
+        async with database.session_factory() as session:
+            record = await session.get(ArtifactRecord, UUID(artifact_id))
+        assert record.redaction_status == "verified"
+        assert record.content_hash == content_hash  # bytes/hash 不因解封重算

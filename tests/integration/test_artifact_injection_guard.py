@@ -23,11 +23,18 @@ from evoagent.db.models import ArtifactRecord, ContextRevisionRecord, RunEventRe
 from evoagent.db.session import Database
 from evoagent.privacy.artifact_access import (
     BLOCK_EVENT_TYPE,
+    OUTCOME_CLEARED,
+    OUTCOME_REJECTED,
+    REVIEW_CLEARED_EVENT,
+    REVIEW_REJECTED_EVENT,
+    REVIEW_REQUESTED_EVENT,
     ArtifactCheckUnavailable,
     ArtifactInjectionGuard,
     ArtifactNotInjectable,
     ArtifactSensitiveContent,
+    QuarantineReviewStale,
 )
+from evoagent.privacy.redaction import POLICY_VERSION
 from evoagent.runtime.context_store import ContextStore
 from evoagent.tasks.service import TaskService
 from evoagent.tools.base import ToolExecutionError, ToolPermissionError
@@ -484,4 +491,242 @@ async def test_deleted_context_artifact_reports_corrupt(tmp_path: Path) -> None:
     with pytest.raises(ContextPolicyError) as error:
         await _prepare_context_revision(database, aggregate, artifact.id, store, content="继续任务")
     assert error.value.code == "context_artifact_invalid"
+    await database.dispose()
+
+
+# --- §2.4 单件人工复核：通过才解除隔离 -------------------------------------------
+
+
+async def _quarantined_artifact(database, aggregate, artifacts, content, *, policy_version=None):
+    """造一个"隔离中"的 artifact；默认记的是**上一版**策略，模拟规则误报。"""
+
+    record = await _add_artifact(artifacts, aggregate, content, artifact_type="tool_output")
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, record.id)
+        stored.redaction_status = "quarantined"
+        stored.redaction_policy_version = (
+            POLICY_VERSION - 1 if policy_version is None else policy_version
+        )
+        stored.redaction_checked_hash = None
+        await session.commit()
+    return record
+
+
+async def _review_events(database, *types: str) -> tuple[RunEventRecord, ...]:
+    async with database.session_factory() as session:
+        return tuple(
+            await session.scalars(
+                select(RunEventRecord)
+                .where(RunEventRecord.event_type.in_(types))
+                .order_by(RunEventRecord.sequence)
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_review_clears_when_current_policy_no_longer_matches(tmp_path: Path) -> None:
+    """规则误报被纠正并升版之后，复核才通过——这才是解封的正常路径。"""
+
+    database, aggregate, artifacts, store, guard = await _environment(tmp_path)
+    record = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+
+    outcome = await guard.clear_quarantine(
+        artifact_id=record.id,
+        actor="local-user",
+        reason="核对后确认是误报，规则已修正并升版",
+        expected_policy_version=POLICY_VERSION - 1,
+        expected_content_hash=record.content_hash,
+        client_request_id="req-1",
+    )
+
+    assert outcome.outcome == OUTCOME_CLEARED
+    assert outcome.policy_version == POLICY_VERSION
+    assert outcome.checked_hash == record.content_hash
+
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, record.id)
+    assert stored.redaction_status == "verified"
+    assert stored.redaction_policy_version == POLICY_VERSION
+    # bytes 与 content_hash 永不因解封重算
+    assert stored.content_hash == record.content_hash
+
+    events = await _review_events(database, REVIEW_REQUESTED_EVENT, REVIEW_CLEARED_EVENT)
+    assert [event.event_type for event in events] == [
+        REVIEW_REQUESTED_EVENT,
+        REVIEW_CLEARED_EVENT,
+    ]
+    # 解封之后可以正常注入
+    text = await guard.read_verified_text(
+        artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+    )
+    assert text == CLEAN_TEXT
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_review_cannot_override_a_still_matching_rule(tmp_path: Path) -> None:
+    """人工按钮不能消除仍命中的规则：同规则同正文仍被拒，继续隔离。"""
+
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    record = await _quarantined_artifact(database, aggregate, artifacts, SENSITIVE_TEXT)
+
+    outcome = await guard.clear_quarantine(
+        artifact_id=record.id,
+        actor="local-user",
+        reason="我确认这是我的密钥，放行吧",
+        expected_policy_version=POLICY_VERSION - 1,
+        expected_content_hash=record.content_hash,
+        client_request_id="req-2",
+    )
+
+    assert outcome.outcome == OUTCOME_REJECTED
+    assert outcome.reason == "sensitive_content"
+    assert outcome.categories == ("credential",)
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, record.id)
+    assert stored.redaction_status == "quarantined"
+
+    events = await _review_events(
+        database, REVIEW_REQUESTED_EVENT, REVIEW_REJECTED_EVENT, REVIEW_CLEARED_EVENT
+    )
+    assert [event.event_type for event in events] == [
+        REVIEW_REQUESTED_EVENT,
+        REVIEW_REJECTED_EVENT,
+    ]
+    assert "fake-value" not in str(events[-1].payload)
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_review_budget_exceeded_keeps_it_quarantined(tmp_path: Path) -> None:
+    database, aggregate, artifacts, store, _guard = await _environment(tmp_path)
+    record = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+    guard = ArtifactInjectionGuard(
+        session_factory=database.session_factory, artifact_store=store, max_scan_bytes=8
+    )
+
+    outcome = await guard.clear_quarantine(
+        artifact_id=record.id,
+        actor="local-user",
+        reason="复核",
+        expected_policy_version=POLICY_VERSION - 1,
+        expected_content_hash=record.content_hash,
+        client_request_id="req-3",
+    )
+
+    assert outcome.outcome == OUTCOME_REJECTED
+    assert outcome.reason == "scan_budget_exceeded"
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, record.id)
+    assert stored.redaction_status == "quarantined"
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_review_is_idempotent_per_client_request_id(tmp_path: Path) -> None:
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    record = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+    arguments = {
+        "artifact_id": record.id,
+        "actor": "local-user",
+        "reason": "复核",
+        "expected_policy_version": POLICY_VERSION - 1,
+        "expected_content_hash": record.content_hash,
+        "client_request_id": "req-4",
+    }
+
+    first = await guard.clear_quarantine(**arguments)
+    second = await guard.clear_quarantine(**arguments)
+
+    assert first.outcome == OUTCOME_CLEARED and first.replayed is False
+    assert second.outcome == OUTCOME_CLEARED and second.replayed is True
+    events = await _review_events(database, REVIEW_REQUESTED_EVENT, REVIEW_CLEARED_EVENT)
+    assert len(events) == 2  # 请求 + 解封各一次，重试不追加
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_review_rejects_stale_conditions(tmp_path: Path) -> None:
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    record = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+
+    with pytest.raises(QuarantineReviewStale):
+        await guard.clear_quarantine(
+            artifact_id=record.id,
+            actor="local-user",
+            reason="复核",
+            expected_policy_version=POLICY_VERSION - 1,
+            expected_content_hash="sha256:" + "0" * 64,
+            client_request_id="req-5",
+        )
+    with pytest.raises(QuarantineReviewStale):
+        await guard.clear_quarantine(
+            artifact_id=record.id,
+            actor="local-user",
+            reason="复核",
+            expected_policy_version=POLICY_VERSION + 5,
+            expected_content_hash=record.content_hash,
+            client_request_id="req-6",
+        )
+    # 只有"已隔离"的产物才需要复核
+    async with database.session_factory() as session:
+        stored = await session.get(ArtifactRecord, record.id)
+        stored.redaction_status = "verified"
+        stored.redaction_policy_version = POLICY_VERSION
+        # verified 必须同时带检查 hash，否则被 ck_artifacts_redaction_verified_requires_metadata
+        # 拦下（M-A0 的一致性约束）
+        stored.redaction_checked_hash = record.content_hash
+        await session.commit()
+    with pytest.raises(QuarantineReviewStale):
+        await guard.clear_quarantine(
+            artifact_id=record.id,
+            actor="local-user",
+            reason="复核",
+            expected_policy_version=POLICY_VERSION,
+            expected_content_hash=record.content_hash,
+            client_request_id="req-7",
+        )
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_review_reason_is_redacted_before_storing(tmp_path: Path) -> None:
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    record = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+
+    await guard.clear_quarantine(
+        artifact_id=record.id,
+        actor="local-user",
+        reason="理由是 password: fake-value 这一行",
+        expected_policy_version=POLICY_VERSION - 1,
+        expected_content_hash=record.content_hash,
+        client_request_id="req-8",
+    )
+
+    events = await _review_events(database, REVIEW_REQUESTED_EVENT)
+    payload = events[0].payload
+    assert "fake-value" not in str(payload)
+    assert "[REDACTED]" in payload["reason"]
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_review_requires_actor_and_reason(tmp_path: Path) -> None:
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    record = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+    common = {
+        "artifact_id": record.id,
+        "expected_policy_version": POLICY_VERSION - 1,
+        "expected_content_hash": record.content_hash,
+        "client_request_id": "req-9",
+    }
+
+    with pytest.raises(ValueError, match="reason"):
+        await guard.clear_quarantine(actor="local-user", reason="   ", **common)
+    with pytest.raises(ValueError, match="actor"):
+        await guard.clear_quarantine(actor="", reason="复核", **common)
+    with pytest.raises(ValueError, match="client_request_id"):
+        await guard.clear_quarantine(
+            actor="local-user", reason="复核", **{**common, "client_request_id": " "}
+        )
     await database.dispose()

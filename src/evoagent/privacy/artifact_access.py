@@ -26,7 +26,12 @@ from sqlalchemy import select
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.repository import check_run_references
 from evoagent.memory.schema import MemoryError
-from evoagent.privacy.redaction import POLICY_VERSION, RedactionResult, redact_text_result
+from evoagent.privacy.redaction import (
+    POLICY_VERSION,
+    RedactionResult,
+    redact_text,
+    redact_text_result,
+)
 from evoagent.tools.base import ToolExecutionError, ToolPermissionError
 
 #: 允许注入模型的 artifact 类型白名单。其余类型（评测报告、skill 来源、下载产物等）
@@ -40,6 +45,15 @@ SCAN_BUDGET_MS = 500
 MAX_SCAN_BYTES = 10 * 1024 * 1024
 
 BLOCK_EVENT_TYPE = "artifact.injection_blocked"
+
+#: 单件人工复核（§2.4）的三个事件类型。
+REVIEW_REQUESTED_EVENT = "artifact.quarantine_review_requested"
+REVIEW_CLEARED_EVENT = "artifact.quarantine_cleared"
+REVIEW_REJECTED_EVENT = "artifact.quarantine_review_rejected"
+REVIEW_EVENT_TYPES = (REVIEW_REQUESTED_EVENT, REVIEW_CLEARED_EVENT, REVIEW_REJECTED_EVENT)
+
+OUTCOME_CLEARED = "cleared"
+OUTCOME_REJECTED = "rejected"
 
 STATUS_UNCHECKED = "unchecked"
 STATUS_VERIFIED = "verified"
@@ -63,6 +77,25 @@ class ArtifactNotInjectable(ToolPermissionError):
     """该 artifact 类型不在注入白名单内。"""
 
     code = "artifact_not_injectable"
+
+
+class QuarantineReviewStale(ToolPermissionError):
+    """复核条件已过期：内容 hash、策略版本或隔离状态在复核期间变了（路由映射 409）。"""
+
+    code = "quarantine_review_stale"
+
+
+@dataclass(frozen=True, slots=True)
+class QuarantineReviewOutcome:
+    """一次人工复核的结果；`rejected` 表示**继续隔离**，不是接口失败。"""
+
+    artifact_id: UUID
+    outcome: str
+    policy_version: int | None = None
+    checked_hash: str | None = None
+    reason: str | None = None
+    categories: tuple[str, ...] = ()
+    replayed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +263,22 @@ class ArtifactInjectionGuard:
             raise ArtifactSensitiveContent("derived text matched the current sensitive policy")
         return text
 
+    def _rescan(self, text: str) -> tuple[RedactionResult | None, str | None]:
+        """在预算内复查整份正文；返回 `(结果, 拒绝原因)`，不抛错、不写事件。
+
+        调用方各自决定拒绝的表现形式：注入路径抛错并记阻断事件，隔离复核路径记
+        `artifact.quarantine_review_rejected`。
+        """
+
+        encoded = len(text.encode("utf-8"))
+        if encoded > self._max_scan_bytes:
+            return None, "scan_budget_exceeded"
+        started = time.perf_counter()
+        result = redact_text_result(text)
+        if (time.perf_counter() - started) * 1000 > self._scan_budget_ms:
+            return result, "scan_timeout"
+        return result, None
+
     async def _scan(
         self,
         *,
@@ -241,34 +290,26 @@ class ArtifactInjectionGuard:
     ) -> RedactionResult:
         """在扫描预算内复查整份正文；超预算或检查不可用一律拒绝注入。"""
 
-        encoded = len(text.encode("utf-8"))
-        if encoded > self._max_scan_bytes:
+        result, reason = self._rescan(text)
+        if reason is not None:
             await self._ensure_block_event(
                 run_id=run_id,
                 source_id=source_id,
                 source_hash=source_hash,
-                categories=(),
+                categories=result.categories if result is not None else (),
                 purpose=purpose,
-                reason="scan_budget_exceeded",
+                reason=reason,
             )
+            if reason == "scan_budget_exceeded":
+                encoded = len(text.encode("utf-8"))
+                raise ArtifactCheckUnavailable(
+                    f"artifact is larger than the scan budget: "
+                    f"{encoded} > {self._max_scan_bytes} bytes"
+                )
             raise ArtifactCheckUnavailable(
-                f"artifact is larger than the scan budget: {encoded} > {self._max_scan_bytes} bytes"
+                f"sensitive scan exceeded the budget of {self._scan_budget_ms}ms"
             )
-        started = time.perf_counter()
-        result = redact_text_result(text)
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        if elapsed_ms > self._scan_budget_ms:
-            await self._ensure_block_event(
-                run_id=run_id,
-                source_id=source_id,
-                source_hash=source_hash,
-                categories=result.categories,
-                purpose=purpose,
-                reason="scan_timeout",
-            )
-            raise ArtifactCheckUnavailable(
-                f"sensitive scan exceeded the budget: {elapsed_ms:.0f}ms > {self._scan_budget_ms}ms"
-            )
+        assert result is not None
         return result
 
     async def mark_verified(self, *, artifact_id: UUID, run_id: UUID, source_hash: str) -> None:
@@ -306,6 +347,194 @@ class ArtifactInjectionGuard:
             record.redaction_checked_hash = source_hash
             record.redaction_status = STATUS_QUARANTINED
             await unit.commit()
+
+    async def clear_quarantine(
+        self,
+        *,
+        artifact_id: UUID,
+        actor: str,
+        reason: str,
+        expected_policy_version: int,
+        expected_content_hash: str,
+        client_request_id: str,
+    ) -> QuarantineReviewOutcome:
+        """单件人工复核：**通过才解除隔离**（改造方案 §2.4）。
+
+        首版没有"忽略此秘密"的通用白名单：复核只按**当前**规则做全量复查，规则仍命中
+        就继续隔离。所以它解决的是"误报已被纠正、规则包已升版"之后的解封，而不是让
+        用户点一下就绕过检测。
+
+        顺序按 §2.4：短事务里核对条件并落 `quarantine_review_requested` → 释放长事务
+        后在扫描预算内全量复查 → 再加锁复验同一条件并提交结果。幂等键是
+        `client_request_id`：重试不重复解封、不重复追加事件。
+        """
+
+        if self._store is None:
+            raise RuntimeError("artifact store is required for clear_quarantine")
+        if not actor.strip():
+            raise ValueError("actor is required")
+        if not client_request_id.strip():
+            raise ValueError("client_request_id is required")
+        # reason 必填，且**脱敏后**保存：理由里也可能被粘进真实凭据。
+        safe_reason = redact_text(reason).strip()
+        if not safe_reason:
+            raise ValueError("reason is required")
+
+        from evoagent.db.models import ArtifactRecord
+
+        replayed = await self._find_review(artifact_id, client_request_id)
+        if replayed is not None:
+            return replayed
+
+        async with UnitOfWork(self._session_factory) as unit:
+            record = await unit.session.get(ArtifactRecord, artifact_id, with_for_update=True)
+            await self._require_reviewable(
+                unit.session, record, expected_content_hash, expected_policy_version
+            )
+            assert record is not None
+            run_id, uri = record.run_id, record.uri
+            await unit.events.append(
+                run_id=run_id,
+                event_type=REVIEW_REQUESTED_EVENT,
+                payload={
+                    "artifact_id": str(artifact_id),
+                    "actor": actor,
+                    "reason": safe_reason,
+                    "expected_content_hash": expected_content_hash,
+                    "expected_policy_version": expected_policy_version,
+                    "client_request_id": client_request_id,
+                },
+                created_at=datetime.now(UTC),
+            )
+            await unit.commit()
+
+        # 复查在事务之外完成：长扫描不持有行锁（§2.4 明确要求先释放长事务）。
+        data = await self._store.read(uri)
+        text = data.decode("utf-8")
+        actual_hash = _text_hash(text)
+        if actual_hash != expected_content_hash:
+            raise QuarantineReviewStale("artifact content changed during review")
+        result, reject_reason = self._rescan(text)
+        if reject_reason is not None:
+            outcome = OUTCOME_REJECTED
+            categories: tuple[str, ...] = ()
+        elif result is not None and result.redacted:
+            outcome = OUTCOME_REJECTED
+            reject_reason = "sensitive_content"
+            categories = result.categories
+        else:
+            outcome = OUTCOME_CLEARED
+            categories = ()
+
+        async with UnitOfWork(self._session_factory) as unit:
+            record = await unit.session.get(ArtifactRecord, artifact_id, with_for_update=True)
+            # 加锁复验同一条件：复查期间被撤销/擦除/改动都不允许解封。
+            await self._require_reviewable(
+                unit.session, record, expected_content_hash, expected_policy_version
+            )
+            assert record is not None
+            if outcome == OUTCOME_CLEARED:
+                # 只更新"绑定原内容的检查结论"；bytes/content_hash 永不因解封重算。
+                record.redaction_status = STATUS_VERIFIED
+                record.redaction_policy_version = POLICY_VERSION
+                record.redaction_checked_hash = actual_hash
+                event_type = REVIEW_CLEARED_EVENT
+            else:
+                event_type = REVIEW_REJECTED_EVENT
+            await unit.events.append(
+                run_id=run_id,
+                event_type=event_type,
+                payload={
+                    "artifact_id": str(artifact_id),
+                    "actor": actor,
+                    "client_request_id": client_request_id,
+                    "outcome": outcome,
+                    "reason": reject_reason,
+                    "rule_categories": list(categories),
+                    "policy_version": POLICY_VERSION,
+                },
+                created_at=datetime.now(UTC),
+            )
+            await unit.commit()
+
+        return QuarantineReviewOutcome(
+            artifact_id=artifact_id,
+            outcome=outcome,
+            policy_version=POLICY_VERSION if outcome == OUTCOME_CLEARED else None,
+            checked_hash=actual_hash if outcome == OUTCOME_CLEARED else None,
+            reason=reject_reason,
+            categories=categories,
+        )
+
+    async def _require_reviewable(
+        self,
+        session,
+        record,
+        expected_content_hash: str,
+        expected_policy_version: int,
+    ) -> None:
+        """复核的前置条件；任一过期即 `QuarantineReviewStale`（路由映射 409）。"""
+
+        if record is None or record.attributes.get("erased"):
+            raise ToolPermissionError("artifact is unknown or erased")
+        try:
+            await check_run_references(session, record.run_id)
+        except MemoryError as error:
+            # 解封**不恢复**已撤销的授权：被撤销的来源仍然不可用。
+            raise ToolPermissionError("context source revoked") from error
+        if record.content_hash != expected_content_hash:
+            raise QuarantineReviewStale("artifact content hash changed")
+        state = _check_state(record)
+        if state.policy_version != expected_policy_version:
+            raise QuarantineReviewStale("artifact policy version changed")
+        if state.status != STATUS_QUARANTINED:
+            raise QuarantineReviewStale("artifact is not quarantined")
+
+    async def _find_review(
+        self, artifact_id: UUID, client_request_id: str
+    ) -> QuarantineReviewOutcome | None:
+        """按 `client_request_id` 回放已结算的复核结果；未结算返回 None。"""
+
+        from evoagent.db.models import ArtifactRecord
+
+        async with self._session_factory() as session:
+            record = await session.get(ArtifactRecord, artifact_id)
+            if record is None:
+                return None
+            events = tuple(
+                await session.scalars(
+                    select(_event_model())
+                    .where(
+                        _event_model().run_id == record.run_id,
+                        _event_model().event_type.in_(REVIEW_EVENT_TYPES),
+                    )
+                    .order_by(_event_model().sequence.desc())
+                    .limit(200)
+                )
+            )
+        for event in events:
+            payload = event.payload or {}
+            if payload.get("client_request_id") != client_request_id:
+                continue
+            if event.event_type == REVIEW_CLEARED_EVENT:
+                return QuarantineReviewOutcome(
+                    artifact_id=artifact_id,
+                    outcome=OUTCOME_CLEARED,
+                    policy_version=payload.get("policy_version"),
+                    checked_hash=payload.get("checked_hash"),
+                    replayed=True,
+                )
+            if event.event_type == REVIEW_REJECTED_EVENT:
+                return QuarantineReviewOutcome(
+                    artifact_id=artifact_id,
+                    outcome=OUTCOME_REJECTED,
+                    reason=payload.get("reason"),
+                    categories=tuple(payload.get("rule_categories") or ()),
+                    replayed=True,
+                )
+            # 只有 requested：上次复核中途失败，允许按同一请求 ID 重跑。
+            return None
+        return None
 
     async def _ensure_block_event(
         self,

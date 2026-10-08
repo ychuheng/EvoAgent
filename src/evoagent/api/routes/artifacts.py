@@ -17,14 +17,25 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from evoagent.api.dependencies import DatabaseDependency, SettingsDependency
 from evoagent.db.models import ArtifactRecord
+from evoagent.privacy.artifact_access import (
+    OUTCOME_CLEARED,
+    ArtifactInjectionGuard,
+    QuarantineReviewStale,
+)
+from evoagent.tools.base import ToolPermissionError
 from evoagent.trace.artifacts import LocalArtifactStore
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
 MAX_PREVIEW_BYTES = 200_000
+
+#: 服务端可信用户上下文里的操作者身份。单用户本机部署里人工操作统一记成 `human`
+#: （与 `memory/service.py` 的决策路径一致）；它**不由请求体提供**。
+TRUSTED_LOCAL_ACTOR = "human"
 
 _PREVIEWABLE_SUFFIXES = (
     ".md",
@@ -114,6 +125,74 @@ async def get_artifact(
             "预览已截断，完整内容请下载；下载响应头带 SHA-256，可与 content_hash 核对。"
             if truncated
             else "内容为二进制或未启用预览时 preview 为空；下载响应头带 SHA-256 供核对。"
+        ),
+    }
+
+
+class QuarantineReviewRequest(BaseModel):
+    """产物详情页发起的单件复核请求。
+
+    **刻意没有 actor 字段**：身份只能来自服务端可信用户上下文，不接受请求体伪造。
+    模型工具与后台学习任务也没有到这里的路径。
+    """
+
+    reason: str = Field(min_length=1, max_length=2_000)
+    expected_policy_version: int = Field(ge=0)
+    expected_content_hash: str = Field(min_length=8, max_length=128)
+    client_request_id: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/{artifact_id}/quarantine-review")
+async def review_quarantine(
+    artifact_id: UUID,
+    body: QuarantineReviewRequest,
+    database: DatabaseDependency,
+    settings: SettingsDependency,
+):
+    """单件人工复核：按**当前**规则全量复查，通过才解除隔离（§2.4）。
+
+    首版没有"忽略此秘密"的白名单：规则仍命中就继续隔离并返回 rejected，
+    这不是接口失败，而是复核结论。
+    """
+
+    async with database.session_factory() as session:
+        record = await session.get(ArtifactRecord, artifact_id)
+    if record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "产物不存在")
+
+    guard = ArtifactInjectionGuard(
+        session_factory=database.session_factory,
+        artifact_store=LocalArtifactStore(settings.artifact_root),
+    )
+    try:
+        outcome = await guard.clear_quarantine(
+            artifact_id=artifact_id,
+            actor=TRUSTED_LOCAL_ACTOR,
+            reason=body.reason,
+            expected_policy_version=body.expected_policy_version,
+            expected_content_hash=body.expected_content_hash,
+            client_request_id=body.client_request_id,
+        )
+    except QuarantineReviewStale as error:
+        # 过期条件：内容 hash、策略版本或隔离状态在复核期间变了。
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except ToolPermissionError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+    return {
+        "artifact_id": str(outcome.artifact_id),
+        "outcome": outcome.outcome,
+        "reason": outcome.reason,
+        "rule_categories": list(outcome.categories),
+        "policy_version": outcome.policy_version,
+        "checked_hash": outcome.checked_hash,
+        "replayed": outcome.replayed,
+        "note": (
+            "已解除隔离；历史 bytes 与 content_hash 未变，只更新了检查结论。"
+            if outcome.outcome == OUTCOME_CLEARED
+            else "仍保持隔离：当前规则依然命中该正文。纠正误报需要改规则并升策略版本，"
+            "而不是绕过检测。"
         ),
     }
 
