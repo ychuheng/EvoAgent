@@ -1,0 +1,30 @@
+{"id": "tp-pem-rsa", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "合成假私钥；结构合法但不是可用密钥", "input": "-----BEGIN RSA PRIVATE KEY-----\nMIIEfakefakefake\n-----END RSA PRIVATE KEY-----"}
+{"id": "tp-pem-multiline-gap", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "首尾标记之间跨多行，验证 DOTALL 生效", "input": "before\n-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\nCCCC\n-----END PRIVATE KEY-----\nafter"}
+{"id": "tp-sk-openai-shape", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "sk- 前缀 + 20 位字符，模拟真实 key 形状", "input": "api_key = sk-abcdefghijklmnopqrst"}
+{"id": "tp-password-ascii", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "ASCII 键名 + 半角冒号", "input": "password: hunter2"}
+{"id": "tp-password-equals", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "等号形式", "input": "DB_PASSWORD=not-a-real-password"}
+{"id": "tp-chinese-colon", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "中文键名 + 全角冒号", "input": "密码：这是假的密码值"}
+{"id": "tp-chinese-equals", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "中文键名 + 半角等号", "input": "密钥 = fake-key-value"}
+{"id": "tp-bearer", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "Bearer 后跟单个 token 片段", "input": "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.fake.token"}
+{"id": "tp-api-key-space-dash", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "api-key 与 api key 两种分隔写法都在规则内", "input": "api-key: abcdef123456"}
+{"id": "tp-multiple-hits", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "同一行多处命中，验证替换计数与顺序", "input": "password: one 和 api_key: two"}
+{"id": "tp-dollar-and-braces", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "命中片段周围含 $ 与花括号，验证替换按字面量而非分组引用", "input": "cost = $100 (approx) password: fake-value ${HOME}"}
+{"id": "tp-very-long-line", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "超长单行中的尾部命中，验证不改动其余字节", "input": "header-padding-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa password: tail-value"}
+
+{"id": "ctl-plain-prose", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "普通中文句子，不应被改写", "input": "这段文字讲的是如何汇总实验数据，并核对编号字段的唯一性。"}
+{"id": "ctl-python-function", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "普通代码，不应被改写", "input": "def add(a, b):\n    return a + b"}
+{"id": "ctl-json-record", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "普通 JSON 文本，键名不在敏感集合内", "input": "{\"name\": \"alice\", \"count\": 3, \"note\": \"ok\"}"}
+{"id": "ctl-url-without-credentials", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "无凭据 URL；S0a 规则不含 DSN 类别，因此不应改写", "input": "https://example.com/docs/path?query=1"}
+{"id": "ctl-token-identifier", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "token 不是 S0a 的敏感键名，不应被改写（S0b 若扩展需登记差异）", "input": "token = settings.sandbox_controller_token"}
+{"id": "ctl-private-key-as-text", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "仅出现关键词、没有首尾标记，不应被 PEM 规则改写", "input": "文档说明如何生成 PRIVATE KEY，但这条文本里没有标记块。"}
+
+{"id": "fp-type-annotation", "kind": "known_false_positive", "expect_change": true, "origin": "本仓库真实代码（config.py 形状）", "assumption": "类型标注不是秘密；当前规则仍会改写，属已测量的误报，S0a 不修", "input": "api_key: SecretStr | None = Field(default=None)"}
+{"id": "fp-keyword-argument", "kind": "known_false_positive", "expect_change": true, "origin": "本仓库真实代码（app.py 形状）", "assumption": "传参不是秘密；当前规则仍会改写", "input": "provider = build_provider(api_key=settings.api_key, model=model)"}
+{"id": "fp-sk-prefixed-identifier", "kind": "known_false_positive", "expect_change": true, "origin": "本仓库符号形状", "assumption": "sk- 前缀规则会吃掉普通标识符，属已测量误报", "input": "workspace/sk-artifacts/run-1"}
+{"id": "fp-bearer-in-code", "kind": "known_false_positive", "expect_change": true, "origin": "本仓库代码形状", "assumption": "构造请求头的代码；Bearer\\s+\\S+ 只吃掉紧随的一个片段", "input": "headers = {\"Authorization\": \"Bearer \"}"}
+
+{"id": "edge-empty", "kind": "edge", "expect_change": false, "origin": "synthetic", "assumption": "空字符串", "input": ""}
+{"id": "edge-backslash", "kind": "edge", "expect_change": false, "origin": "synthetic", "assumption": "输入含反斜杠与分组引用字面量，验证替换不展开", "input": "path = C:\\temp\\new\\file and regex \\g<0> literal"}
+{"id": "edge-fullwidth-equals", "kind": "edge", "expect_change": false, "origin": "synthetic", "assumption": "全角等号 U+FF1D 不在分隔符字符类内（只有 :=：），当前规则**不覆盖**，属现状空白，S0b 若扩需登记", "input": "密钥　＝　fake"}
+{"id": "edge-newline-only", "kind": "edge", "expect_change": false, "origin": "synthetic", "assumption": "仅换行", "input": "\n\n"}
+{"id": "edge-tab-separator", "kind": "edge", "expect_change": true, "origin": "synthetic", "assumption": "制表符属于 \\s，分隔符前后用 tab 仍会命中", "input": "password\t:\thunter2"}

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "val-sensitive-keys",
+    "origin": "synthetic",
+    "assumption": "五种敏感键名都按字段名整体替换，值不参与文本规则",
+    "value": {"password": "x", "api-key": "y", "authorization": "z", "密钥": "k", "密码": "m", "name": "keep"}
+  },
+  {
+    "id": "val-nested",
+    "origin": "synthetic",
+    "assumption": "嵌套 dict/list 递归处理，非字符串标量原样保留",
+    "value": {"outer": {"api_key": "a", "list": [1, true, null]}, "count": 3}
+  },
+  {
+    "id": "val-secret-in-value",
+    "origin": "synthetic",
+    "assumption": "键名不敏感但值含敏感文本时，由文本规则改写",
+    "value": {"note": "password: fake-value", "url": "https://example.com"}
+  },
+  {
+    "id": "val-sensitive-key-hides-subtree",
+    "origin": "synthetic",
+    "assumption": "敏感键名整棵子树被替换，不递归保留内部结构",
+    "value": {"api_key": {"nested": "value", "list": [1, 2]}}
+  },
+  {
+    "id": "val-scalar-list",
+    "origin": "synthetic",
+    "assumption": "列表内的标量原样返回，不做类型转换",
+    "value": [1, 1.5, true, false, 0]
+  },
+  {
+    "id": "val-list-of-strings",
+    "origin": "synthetic",
+    "assumption": "列表内的字符串逐个过文本规则",
+    "value": ["clean text", "api_key: fake", "another clean"]
+  },
+  {
+    "id": "val-empty",
+    "origin": "synthetic",
+    "assumption": "空容器与空字符串",
+    "value": {"empty_dict": {}, "empty_list": [], "empty_str": ""}
+  }
+]
