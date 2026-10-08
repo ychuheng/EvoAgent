@@ -34,6 +34,21 @@ class RunCommandArguments(ContractModel):
 
 
 class ProjectCommandTool(BaseTool[RunCommandArguments]):
+    """在授权项目内以结构化 argv 执行白名单程序。
+
+    身份契约（改造方案 §10.4）：`dedupe_by_arguments=False`，副作用语义键包含
+    Provider 的 call_id，因此**只提供调用级身份**：
+
+    - 同一 call_id 在恢复时命中同一条副作用账本项；
+    - Provider 重新生成 call_id 时，即使 argv/cwd 完全相同也算新调用，
+      **不保证**命中已提交结果，也不保证不重复执行；
+    - "跑测试 → 改文件 → 同命令复测"依赖的正是这一点（新调用必须真的再执行一次）。
+
+    结果未知时由 `RecoveryService` 转入 UNKNOWN 并等待人工确认，不自动重试；
+    需要更强的"同一动作重放"保证时，应由宿主生成稳定 operation_id 并绑定输入与环境，
+    不通过参数去重实现。
+    """
+
     name = "run_command"
     description = (
         "Run an allowlisted program inside the authorized project as a structured argv "

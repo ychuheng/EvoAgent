@@ -82,6 +82,13 @@ class RecoveryService:
         return count
 
     async def recover(self, task_id: UUID) -> RecoveryDecision:
+        """对 RECOVERING 任务做恢复决策，副作用结果不明时转人工确认。
+
+        契约（改造方案 §10.4）：这里只处理**原 Run 已存在**的未决副作用
+        （PREPARED/EXECUTING/UNKNOWN）。调用级身份的工具（如 `run_command`）在
+        Provider 生成新 call_id 时属于新调用，不在本函数保护范围内——恢复不会
+        替新调用判断"是否重复执行"，也不会因为参数相同就复用旧结果。
+        """
         async with UnitOfWork(self._session_factory) as unit:
             task = await unit.session.scalar(
                 select(TaskRecord).where(TaskRecord.id == task_id).with_for_update()

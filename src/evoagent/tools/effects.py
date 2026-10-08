@@ -431,6 +431,19 @@ class PersistentToolMiddleware:
     def semantic_key(
         tool_name: str, arguments: dict[str, Any], *, call_id: str | None = None
     ) -> str:
+        """按工具声明的身份粒度生成副作用语义键。
+
+        契约（改造方案 §10.4）：`call_id` 只在工具**要求调用级身份**时传入，即
+        `dedupe_by_arguments=False`（例如 `run_command`）。此时 Provider 若为同一语义
+        调用重新生成了 call_id，它会被当作**新调用**，不保证命中已存在的
+        COMMITTED/UNKNOWN 账本项。
+
+        这是刻意的，不是缺陷：`运行测试 → 改文件 → 用同一命令复测`是合法重复，
+        参数级复用旧结果会吞掉第二次测试，还可能复用不适合新环境的审批。
+        需要"同一动作重放"时，应由宿主生成稳定的 operation_id 并把输入/环境绑定进去，
+        而不是靠参数去重；调用级身份下"结果未知"仍由 `RecoveryService` 转入
+        UNKNOWN + 人工确认处理，不自动重试。
+        """
         identity = {"tool": tool_name, "arguments": arguments}
         if call_id is not None:
             identity["call_id"] = call_id

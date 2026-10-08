@@ -252,6 +252,19 @@ class Settings(BaseSettings):
                 "context_window_tokens" not in self.model_fields_set
             ):
                 raise ValueError("bounded real provider requires EVOAGENT_CONTEXT_WINDOW_TOKENS")
+            # K1：strict 只接受被证实过的计数（`context_policy.prepare` 要求
+            # exact/exact_mock/verified_upper_bound）。`policy_from_settings` 只为 Mock 提供
+            # MockCounter("exact_mock")；真实 Provider 拿到的是
+            # ConservativeTokenCounter("estimated")，于是**每一次**请求都会以
+            # context_count_unverified 被拒，Agent 完全不可用。这里在启动时拒绝该组合。
+            # 保留运行时的 strict 闸门不放松；将来有了 verified counter 再改成能力校验，
+            # 不能为了可用性把估算标成 verified。legacy 模式不走该判断，不受影响。
+            if self.context_strict and self.provider is not ProviderName.MOCK:
+                raise ValueError(
+                    "context_strict requires a verified token counter, but "
+                    f"{self.provider.value} can only provide an estimated count; every request "
+                    "would be rejected with context_count_unverified"
+                )
         self.workspace = self.workspace.expanduser().resolve(strict=False)
         if "artifact_root" not in self.model_fields_set:
             self.artifact_root = self.workspace / "artifacts"
