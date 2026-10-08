@@ -103,6 +103,10 @@ def _iter_files(roots: Iterable[str]) -> Iterable[Path]:
                 continue
             if any(part in SKIP_DIR_PARTS for part in path.parts):
                 continue
+            # 扫描器不能扫自己的输出：报告里存着 `match_shape` 样例，再扫一遍会把
+            # 上一轮的命中当成新命中，数字自我放大（实测会从 88 虚增到 259）。
+            if path.name.startswith("redaction-fp-") and "reports" in path.parts:
+                continue
             yield path
 
 

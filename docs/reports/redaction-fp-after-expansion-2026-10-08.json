@@ -1,0 +1,1116 @@
+{
+  "generated_at": "2026-10-08T13:08:36.431064+00:00",
+  "environment": {
+    "revision": "5b7a771efb129f4224c4d30f1afcfb2b7b47bb9d",
+    "branch": "c3",
+    "worktree_clean": false,
+    "python": "3.13.5",
+    "policy_version": 2
+  },
+  "scope": "工作树文本扫描（不含 .env*），不是模型实际看到的工具输出",
+  "roots": [
+    "src",
+    "tests",
+    "scripts",
+    "docs",
+    "evals",
+    "deploy",
+    "frontend/src"
+  ],
+  "scan": {
+    "files": 570,
+    "lines": 108405,
+    "unreadable_files": 0,
+    "hits": 114,
+    "rewriting_hits": 114
+  },
+  "by_category": {
+    "credential": 103,
+    "private_key": 2,
+    "dsn_credentials": 9,
+    "jwt": 1
+  },
+  "by_label": {
+    "unknown": 33,
+    "declaration_or_annotation": 10,
+    "literal_assignment": 65,
+    "identifier_only": 7
+  },
+  "match_shapes": {
+    "sk-a…": 16,
+    "api_key=\"test-key\",": 7,
+    "api_key: SecretStr": 6,
+    "Bearer \"": 4,
+    "api_key=\"test\",": 3,
+    "api_key=reso….api_key,": 2,
+    "api_key=settings.api_key,": 2,
+    "password: fake-value": 2,
+    "password: fake-value\"": 2,
+    "api_key=secret,": 2,
+    "api_key=\"loca…\",": 2,
+    "API_KEY=\",": 2,
+    "API_KEY=not-…\",": 2,
+    "PASSWORD: evoagent": 2,
+    "Bearer {secret}\"}": 1,
+    "api_key = secret": 1,
+    "Bearer {self._api_key}\",": 1,
+    "api_key: str,": 1,
+    "Bearer {self.key}\"},": 1,
+    "api_key=settings.embe….get_…(),": 1
+  },
+  "hits": [
+    {
+      "path": "src\\evoagent\\api\\app.py",
+      "line": 72,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key=reso….api_key,",
+      "line_shape": "api_key=reso….api_key,"
+    },
+    {
+      "path": "src\\evoagent\\api\\app.py",
+      "line": 97,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key=reso….api_key,",
+      "line_shape": "api_key=reso….api_key,"
+    },
+    {
+      "path": "src\\evoagent\\cli.py",
+      "line": 145,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key=settings.api_key,",
+      "line_shape": "api_key=settings.api_key,"
+    },
+    {
+      "path": "src\\evoagent\\config.py",
+      "line": 49,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "api_key: SecretStr",
+      "line_shape": "api_key: SecretStr | None = None"
+    },
+    {
+      "path": "src\\evoagent\\config.py",
+      "line": 141,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "api_key: SecretStr",
+      "line_shape": "sear…: SecretStr | None = None"
+    },
+    {
+      "path": "src\\evoagent\\config.py",
+      "line": 175,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "api_key: SecretStr",
+      "line_shape": "embe…: SecretStr | None = None"
+    },
+    {
+      "path": "src\\evoagent\\mcp\\transports.py",
+      "line": 138,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "Bearer {secret}\"}",
+      "line_shape": "**({\"Auth…\": f\"Bearer {secret}\"} if secret else "
+    },
+    {
+      "path": "src\\evoagent\\providers\\openai_compatible.py",
+      "line": 40,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "api_key: SecretStr",
+      "line_shape": "api_key: SecretStr | str,"
+    },
+    {
+      "path": "src\\evoagent\\providers\\openai_compatible.py",
+      "line": 55,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key = secret",
+      "line_shape": "self._api_key = secret"
+    },
+    {
+      "path": "src\\evoagent\\providers\\openai_compatible.py",
+      "line": 87,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "Bearer {self._api_key}\",",
+      "line_shape": "\"Auth…\": f\"Bearer {self._api_key}\","
+    },
+    {
+      "path": "src\\evoagent\\retrieval\\embeddings.py",
+      "line": 89,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key: str,",
+      "line_shape": "def __init__(self, *, api_key: str, base_url: st"
+    },
+    {
+      "path": "src\\evoagent\\retrieval\\embeddings.py",
+      "line": 100,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "Bearer {self.key}\"},",
+      "line_shape": "headers={\"Auth…\": f\"Bearer {self.key}\"},"
+    },
+    {
+      "path": "src\\evoagent\\retrieval\\embeddings.py",
+      "line": 133,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key=settings.embe….get_…(),",
+      "line_shape": "api_key=settings.embe….get_…(),"
+    },
+    {
+      "path": "src\\evoagent\\sandbox\\client.py",
+      "line": 38,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "Bearer \"",
+      "line_shape": "return {\"Auth…\": \"Bearer \" + token.get_…()}"
+    },
+    {
+      "path": "src\\evoagent\\sandbox\\controller.py",
+      "line": 30,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "Bearer \"",
+      "line_shape": "headers.get(\"auth…\", \"\"), \"Bearer \" + expected"
+    },
+    {
+      "path": "src\\evoagent\\sandbox\\controller.py",
+      "line": 181,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "Bearer \"",
+      "line_shape": "\"auth…\": \"Bearer \""
+    },
+    {
+      "path": "src\\evoagent\\tools\\builtin\\web_search.py",
+      "line": 110,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "api_key: SecretStr",
+      "line_shape": "api_key: SecretStr | str,"
+    },
+    {
+      "path": "src\\evoagent\\tools\\builtin\\web_search.py",
+      "line": 115,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key = api_key.get_…()",
+      "line_shape": "self._api_key = api_key.get_…() if isinstance(ap"
+    },
+    {
+      "path": "src\\evoagent\\workers\\bootstrap.py",
+      "line": 314,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key=self._settings.api_key,",
+      "line_shape": "api_key=self._settings.api_key,"
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 1,
+      "category": "private_key",
+      "rule_index": 0,
+      "label": "literal_assignment",
+      "match_shape": "-----BEGIN RSA PRIVATE KEY-----\\nMII…\\n-----END ",
+      "line_shape": "{\"id\": \"tp-pem-rsa\", \"kind\": \"true…\", \"expe…\": t"
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 2,
+      "category": "private_key",
+      "rule_index": 0,
+      "label": "literal_assignment",
+      "match_shape": "-----BEGIN PRIVATE KEY-----\\nAAAA\\nBBBB\\nCCCC\\n-",
+      "line_shape": "{\"id\": \"tp-p…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 3,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-o…",
+      "line_shape": "{\"id\": \"tp-s…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 4,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: hunter2\"}",
+      "line_shape": "{\"id\": \"tp-p…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 5,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "PASSWORD=not-…\"}",
+      "line_shape": "{\"id\": \"tp-p…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 6,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "密码：这是假的密码值\"}",
+      "line_shape": "{\"id\": \"tp-c…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 7,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "密钥 = fake…\"}",
+      "line_shape": "{\"id\": \"tp-c…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 8,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "Bearer 后跟单个",
+      "line_shape": "{\"id\": \"tp-bearer\", \"kind\": \"true…\", \"expe…\": tr"
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 9,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api-key: abcd…\"}",
+      "line_shape": "{\"id\": \"tp-a…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 10,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: one",
+      "line_shape": "{\"id\": \"tp-m…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 11,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: fake-value",
+      "line_shape": "{\"id\": \"tp-d…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 12,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: tail-value\"}",
+      "line_shape": "{\"id\": \"tp-v…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 21,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key: SecretStr",
+      "line_shape": "{\"id\": \"fp-t…\", \"kind\": \"know…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 22,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=settings.api_key,",
+      "line_shape": "{\"id\": \"fp-k…\", \"kind\": \"know…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 23,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-p…",
+      "line_shape": "{\"id\": \"fp-s…\", \"kind\": \"know…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 24,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "Bearer \\\"}\"}",
+      "line_shape": "{\"id\": \"fp-b…\", \"kind\": \"know…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 31,
+      "category": "dsn_credentials",
+      "rule_index": 2,
+      "label": "literal_assignment",
+      "match_shape": "postgres://appuser:s3cr3t-pw@db.internal:5432",
+      "line_shape": "{\"id\": \"tp-d…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 32,
+      "category": "dsn_credentials",
+      "rule_index": 2,
+      "label": "literal_assignment",
+      "match_shape": "mysql://root:hunter2@127.0.0.1:3306",
+      "line_shape": "{\"id\": \"tp-d…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 33,
+      "category": "dsn_credentials",
+      "rule_index": 2,
+      "label": "literal_assignment",
+      "match_shape": "mongodb+srv://svc:pa55w0rd@cluster0.example.net",
+      "line_shape": "{\"id\": \"tp-d…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 34,
+      "category": "dsn_credentials",
+      "rule_index": 2,
+      "label": "literal_assignment",
+      "match_shape": "https://ci-bot:tok3n-value@build.example.com",
+      "line_shape": "{\"id\": \"tp-u…\", \"kind\": \"true…\", \"expe…\": true, "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\corpus.jsonl",
+      "line": 35,
+      "category": "jwt",
+      "rule_index": 3,
+      "label": "literal_assignment",
+      "match_shape": "eyJh….eyJz….dBjf…",
+      "line_shape": "{\"id\": \"tp-jwt-bare\", \"kind\": \"true…\", \"expe…\": "
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\structured.json",
+      "line": 18,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: fake-value\",",
+      "line_shape": "\"value\": {\"note\": \"password: fake-value\", \"url\":"
+    },
+    {
+      "path": "tests\\fixtures\\redaction\\structured.json",
+      "line": 36,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key: fake\",",
+      "line_shape": "\"value\": [\"clean text\", \"api_key: fake\", \"anothe"
+    },
+    {
+      "path": "tests\\integration\\test_artifact_injection_guard.py",
+      "line": 44,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: fake-value\\n\"",
+      "line_shape": "SENS… = \"连接串：postgres://user:secret@db.internal/"
+    },
+    {
+      "path": "tests\\integration\\test_artifact_injection_guard.py",
+      "line": 44,
+      "category": "dsn_credentials",
+      "rule_index": 2,
+      "label": "literal_assignment",
+      "match_shape": "postgres://user:secret@db.internal",
+      "line_shape": "SENS… = \"连接串：postgres://user:secret@db.internal/"
+    },
+    {
+      "path": "tests\\integration\\test_artifact_injection_guard.py",
+      "line": 700,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: fake-value",
+      "line_shape": "reason=\"理由是 password: fake-value 这一行\","
+    },
+    {
+      "path": "tests\\integration\\test_hybrid_retrieval.py",
+      "line": 397,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: fake-value\"",
+      "line_shape": "archive.summary = \"会话历史摘要：password: fake-value\""
+    },
+    {
+      "path": "tests\\integration\\test_hybrid_retrieval.py",
+      "line": 441,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: fake-value\"",
+      "line_shape": "row.text = \"会话历史摘要：password: fake-value\""
+    },
+    {
+      "path": "tests\\integration\\test_memory_foundations.py",
+      "line": 183,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key=supe…\",",
+      "line_shape": "(\"api_key=supe…\", \"unsa…\"),"
+    },
+    {
+      "path": "tests\\integration\\test_memory_foundations.py",
+      "line": 281,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key=secret\\n\"",
+      "line_shape": "prepared = await output.preserve(\"api_key=secret"
+    },
+    {
+      "path": "tests\\integration\\test_policy_effects_approvals.py",
+      "line": 249,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-b…",
+      "line_shape": "call_id=\"ask-…\","
+    },
+    {
+      "path": "tests\\integration\\test_policy_effects_approvals.py",
+      "line": 262,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-a…",
+      "line_shape": "call_id=\"ask-…\","
+    },
+    {
+      "path": "tests\\integration\\test_sandbox_controller.py",
+      "line": 137,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "Bearer \"",
+      "line_shape": "\"/executions\", json=body, headers={\"Auth…\": \"Bea"
+    },
+    {
+      "path": "tests\\integration\\test_skill_management_api.py",
+      "line": 76,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test…\",",
+      "line_shape": "api_key=\"test…\","
+    },
+    {
+      "path": "tests\\integration\\test_tool_output_view.py",
+      "line": 47,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key = sk-a…\\n其余内容正常。\"",
+      "line_shape": "SECRET_BODY = \"配置如下：api_key = sk-a…\\n其余内容正常。\""
+    },
+    {
+      "path": "tests\\integration\\test_tool_output_view.py",
+      "line": 105,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "identifier_only",
+      "match_shape": "sk-a…",
+      "line_shape": "assert \"sk-a…\" not in result.content"
+    },
+    {
+      "path": "tests\\integration\\test_tool_output_view.py",
+      "line": 157,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "identifier_only",
+      "match_shape": "sk-a…",
+      "line_shape": "assert \"sk-a…\" not in content"
+    },
+    {
+      "path": "tests\\integration\\test_tool_output_view.py",
+      "line": 288,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "identifier_only",
+      "match_shape": "sk-a…",
+      "line_shape": "assert \"sk-a…\" not in body"
+    },
+    {
+      "path": "tests\\integration\\test_tool_output_view.py",
+      "line": 309,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "identifier_only",
+      "match_shape": "sk-a…",
+      "line_shape": "assert \"sk-a…\" not in projected.content"
+    },
+    {
+      "path": "tests\\unit\\test_config.py",
+      "line": 43,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test-secret\",",
+      "line_shape": "api_key=\"test-secret\","
+    },
+    {
+      "path": "tests\\unit\\test_config.py",
+      "line": 132,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test\",",
+      "line_shape": "api_key=\"test\","
+    },
+    {
+      "path": "tests\\unit\\test_config.py",
+      "line": 146,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"\")",
+      "line_shape": "settings = Settings(embe…=\"\", embe…=\"\")"
+    },
+    {
+      "path": "tests\\unit\\test_embeddings_and_hybrid.py",
+      "line": 75,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test\",",
+      "line_shape": "api_key=\"test\", base_url=\"https://embedding.test"
+    },
+    {
+      "path": "tests\\unit\\test_events.py",
+      "line": 40,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "Bearer secret\"},",
+      "line_shape": "\"headers\": {\"Auth…\": \"Bearer secret\"},"
+    },
+    {
+      "path": "tests\\unit\\test_mcp_discovery.py",
+      "line": 76,
+      "category": "dsn_credentials",
+      "rule_index": 2,
+      "label": "unknown",
+      "match_shape": "https://user:secret@example.com",
+      "line_shape": "\"https://user:secret@example.com/mcp\","
+    },
+    {
+      "path": "tests\\unit\\test_memory_extraction.py",
+      "line": 58,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key=secret\"))",
+      "line_shape": "await Mode…(provider, \"mock\").generate(source(\"a"
+    },
+    {
+      "path": "tests\\unit\\test_new_tools.py",
+      "line": 131,
+      "category": "dsn_credentials",
+      "rule_index": 2,
+      "label": "literal_assignment",
+      "match_shape": "https://user:token@example.org",
+      "line_shape": "search=lambda _q, _n: [{\"href\": \"https://user:to"
+    },
+    {
+      "path": "tests\\unit\\test_new_tools.py",
+      "line": 214,
+      "category": "dsn_credentials",
+      "rule_index": 2,
+      "label": "literal_assignment",
+      "match_shape": "https://user:secret@example.com\"}]}}',",
+      "line_shape": "'{\"web\":{\"results\":[{\"url\":\"https://user:secret@"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 56,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test\",",
+      "line_shape": "api_key=\"test\", base_url=ENDPOINT, time…=1, thin"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 85,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test-key\",",
+      "line_shape": "api_key=\"test-key\", base_url=\"https://llm.exampl"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 99,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "Bearer test-key\"",
+      "line_shape": "assert request.headers[\"auth…\"] == \"Bearer test-"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 144,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test-key\",",
+      "line_shape": "api_key=\"test-key\", base_url=\"https://llm.exampl"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 219,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test-key\",",
+      "line_shape": "api_key=\"test-key\", base_url=\"https://llm.exampl"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 239,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test-key\",",
+      "line_shape": "api_key=\"test-key\", base_url=\"https://llm.exampl"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 256,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=secret,",
+      "line_shape": "api_key=secret, base_url=\"https://llm.example.te"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 275,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=secret,",
+      "line_shape": "api_key=secret, base_url=\"https://llm.example.te"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 288,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test-key\",",
+      "line_shape": "api_key=\"test-key\", base_url=\"https://llm.exampl"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 309,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test-key\",",
+      "line_shape": "api_key=\"test-key\", base_url=\"https://llm.exampl"
+    },
+    {
+      "path": "tests\\unit\\test_openai_compatible_provider.py",
+      "line": 348,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"test-key\",",
+      "line_shape": "api_key=\"test-key\", base_url=\"https://llm.exampl"
+    },
+    {
+      "path": "tests\\unit\\test_personal_preflight.py",
+      "line": 12,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "API_KEY=priv…\\n\"",
+      "line_shape": "\"EVOA…=priv…\\n\""
+    },
+    {
+      "path": "tests\\unit\\test_personal_preflight.py",
+      "line": 60,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "API_KEY=priv…\\n\",",
+      "line_shape": "path.write_text(\"EVOA…=priv…\\n\", encoding=\"utf-8"
+    },
+    {
+      "path": "tests\\unit\\test_project_editing.py",
+      "line": 399,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-a…",
+      "line_shape": "SECR… = \"service:\\n token: sk-a…\\n retries: 3\\n\""
+    },
+    {
+      "path": "tests\\unit\\test_project_editing.py",
+      "line": 429,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "identifier_only",
+      "match_shape": "sk-a…",
+      "line_shape": "assert \"sk-a…\" not in str(error.value)"
+    },
+    {
+      "path": "tests\\unit\\test_project_editing.py",
+      "line": 443,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-a…",
+      "line_shape": "old_text=\" token: sk-a…\","
+    },
+    {
+      "path": "tests\\unit\\test_project_editing.py",
+      "line": 468,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "sk-a…",
+      "line_shape": "assert \" token: sk-a…\" in text"
+    },
+    {
+      "path": "tests\\unit\\test_project_editing.py",
+      "line": 561,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "identifier_only",
+      "match_shape": "sk-a…",
+      "line_shape": "assert \"sk-a…\" not in result.content"
+    },
+    {
+      "path": "tests\\unit\\test_project_editing.py",
+      "line": 565,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "sk-a…",
+      "line_shape": "assert \" token: sk-a…\" in (root / \"config\" / \"ap"
+    },
+    {
+      "path": "tests\\unit\\test_redaction_compatibility.py",
+      "line": 155,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "password: fake-value\")",
+      "line_shape": "result = redaction.reda…(\"password: fake-value\")"
+    },
+    {
+      "path": "tests\\unit\\test_redaction_compatibility.py",
+      "line": 176,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "password: fake-value\"}",
+      "line_shape": "value: dict[Any, Any] = {1: \"password: fake-valu"
+    },
+    {
+      "path": "tests\\unit\\test_redaction_compatibility.py",
+      "line": 184,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "password: fake-value\",),",
+      "line_shape": "for value in (1, 1.5, True, None, (\"password: fa"
+    },
+    {
+      "path": "tests\\unit\\test_skill_review.py",
+      "line": 189,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "identifier_only",
+      "match_shape": "api_key = sk-a…",
+      "line_shape": "\"用 api_key = sk-a… 访问 C:\\\\Users\\\\someone\\\\privat"
+    },
+    {
+      "path": "tests\\unit\\test_skill_review.py",
+      "line": 198,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-a…",
+      "line_shape": "text = \"token = sk-a…\""
+    },
+    {
+      "path": "tests\\unit\\test_tool_guards.py",
+      "line": 67,
+      "category": "dsn_credentials",
+      "rule_index": 2,
+      "label": "unknown",
+      "match_shape": "http://user:password@example.com",
+      "line_shape": "\"http://user:password@example.com/\","
+    },
+    {
+      "path": "scripts\\acceptance_semantic.py",
+      "line": 38,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"loca…\",",
+      "line_shape": "provider = Open…(api_key=\"loca…\", base_url=args."
+    },
+    {
+      "path": "scripts\\acceptance_semantic.py",
+      "line": 125,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key=\"loca…\",",
+      "line_shape": "embedder = Open…(api_key=\"loca…\", base_url=base_"
+    },
+    {
+      "path": "scripts\\build_m0b_holdout.py",
+      "line": 897,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "API_KEY=\",",
+      "line_shape": "\"parameters\": {\"forbidden\": [\"sk-\", \"API_KEY=\", "
+    },
+    {
+      "path": "scripts\\m7_degradation_rehearsal.py",
+      "line": 219,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "API_KEY=not-…\",",
+      "line_shape": "\"EVOA…=not-…\","
+    },
+    {
+      "path": "scripts\\m7_degradation_rehearsal.py",
+      "line": 251,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "API_KEY=not-…\",",
+      "line_shape": "\"EVOA…=not-…\","
+    },
+    {
+      "path": "scripts\\measure_artifact_scan_budget.py",
+      "line": 69,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "password: fake-value-{index}\\n\"",
+      "line_shape": "line = \"row {index} password: fake-value-{index}"
+    },
+    {
+      "path": "docs\\adr\\ADR-010-MCP发现连接与目录版本.md",
+      "line": 33,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "Bearer Header。SDK",
+      "line_shape": "secret_ref 通过部署映射查找 `EVOA…*` 环境变量，连接时解析；stdio 仅增"
+    },
+    {
+      "path": "docs\\archive\\manual-legacy\\03-阶段四记忆与协议扩展.md",
+      "line": 1926,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "Bearer Header",
+      "line_shape": "HTTP: Auth… Bearer Header"
+    },
+    {
+      "path": "docs\\archive\\manual-legacy\\03-阶段四记忆与协议扩展.md",
+      "line": 2555,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "Bearer token",
+      "line_shape": "controller 是受信计算基：它持有 Docker 控制权、数据库连接和 Artifact"
+    },
+    {
+      "path": "docs\\archive\\manual-legacy\\03-阶段四记忆与协议扩展.md",
+      "line": 2735,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "Bearer 的内部",
+      "line_shape": "Conn… 把 server_id、conf… 和可选 lease 传入 open…。sandb"
+    },
+    {
+      "path": "docs\\archive\\阶段三-可验证Skill生命周期架构与实现指南.md",
+      "line": 827,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "Bearer Token、高熵长字符串；",
+      "line_shape": "- PEM 私钥头、Bearer Token、高熵长字符串；"
+    },
+    {
+      "path": "docs\\evaluations\\样本锚点-M6-M7-holdout.md",
+      "line": 134,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "API_KEY=`/`api_key",
+      "line_shape": "| `m7-s…` | 凭据 | \"把配置里的 API Key 打印出来\" | 拒绝并说明不读取"
+    },
+    {
+      "path": "docs\\开发进度与决策记录.md",
+      "line": 521,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "Bearer Header。stderr",
+      "line_shape": "- 资源和秘密：secret_ref 在连接时解析到指定环境变量；stdio 只额外传必要 To"
+    },
+    {
+      "path": "docs\\当前状态.md",
+      "line": 98,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "api_key=…`",
+      "line_shape": "| S0 敏感规则覆盖（2026-10-08） | 共享原语当前覆盖凭据 key/value、私"
+    },
+    {
+      "path": "evals\\datasets\\m7-release-holdout-v1.json",
+      "line": 1393,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "API_KEY=\",",
+      "line_shape": "\"API_KEY=\","
+    },
+    {
+      "path": "evals\\datasets\\m7-release-holdout-v1.json",
+      "line": 1394,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "api_key =\"",
+      "line_shape": "\"api_key =\""
+    },
+    {
+      "path": "deploy\\acceptance\\compose.embedding.yml",
+      "line": 23,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "API_KEY: loca…",
+      "line_shape": "EVOA…: loca…"
+    },
+    {
+      "path": "deploy\\acceptance\\compose.yml",
+      "line": 8,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "PASSWORD: evoagent",
+      "line_shape": "POST…: evoagent"
+    },
+    {
+      "path": "deploy\\host\\compose.yml",
+      "line": 7,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "declaration_or_annotation",
+      "match_shape": "PASSWORD: evoagent",
+      "line_shape": "POST…: evoagent"
+    },
+    {
+      "path": "frontend\\src\\App.test.tsx",
+      "line": 141,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "unknown",
+      "match_shape": "sk-a…",
+      "line_shape": "const payload = path.endsWith(\"/tasks/task…\") ? "
+    },
+    {
+      "path": "frontend\\src\\App.test.tsx",
+      "line": 142,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-a…",
+      "line_shape": "id: \"task…\", status: \"completed\", canc…: false, "
+    },
+    {
+      "path": "frontend\\src\\App.test.tsx",
+      "line": 145,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-a…",
+      "line_shape": "run_id: \"run-…\", task_id: \"task…\", status: \"comp"
+    },
+    {
+      "path": "frontend\\src\\App.test.tsx",
+      "line": 164,
+      "category": "credential",
+      "rule_index": 1,
+      "label": "literal_assignment",
+      "match_shape": "sk-a…",
+      "line_shape": "render(<Task… taskId=\"task…\" onOp…={vi.fn()} onO"
+    }
+  ],
+  "method": {
+    "classification": "heuristic（按行形状分流），不是标注真值",
+    "labels": [
+      "pattern_literal",
+      "declaration_or_annotation",
+      "literal_assignment",
+      "identifier_only",
+      "unknown"
+    ],
+    "human_review": "未做；`by_label` 与 `unknown` 桶需要人工逐条确认后才能称为误报率",
+    "secrets": "不扫描 .env*；样例已掩码；fixture 中的合成假凭据会出现在命中里，属预期",
+    "reproduce": "python scripts/measure_redaction_false_positives.py --json <out>"
+  },
+  "limits": [
+    "扫的是仓库文本，不是模型实际看到的工具输出，因此不等于线上命中频率",
+    "本仓库不代表用户项目；配置/日志密集的项目命中率会更高",
+    "命中不等于误报：literal_assignment 也可能是真实凭据"
+  ]
+}

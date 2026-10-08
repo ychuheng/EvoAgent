@@ -23,14 +23,28 @@ from dataclasses import dataclass
 from typing import Any
 
 #: 只增的规则包版本。规则扩容或替换语义必须升版，否则旧检查结果会被误复用。
-POLICY_VERSION = 1
+#: v2（S0b）：新增带凭据 DSN 与 JWT 两类；v1 是 S0a 的等价抽取版本。
+POLICY_VERSION = 2
 
 REDACTED = "[REDACTED]"
 PRIVATE_KEY_PLACEHOLDER = "[REDACTED PRIVATE KEY]"
 
 _KEY_PATTERN = re.compile(r"password|api[_-]?key|authorization|密钥|密码", re.IGNORECASE)
 
+#: 带凭据的 DSN/URL：必须有 `user:password@`，因此 `postgres://host/db`、
+#: `https://host/path/user:pass@x`（路径里的冒号）这类形式不受影响。
+_DSN_PATTERN = re.compile(
+    r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss|amqp|amqps"
+    r"|clickhouse|mssql|sqlserver|https?|ftp)://[^\s:/@]+:[^\s:/@]+@[^\s/]+",
+    re.IGNORECASE,
+)
+
+#: JWT：三段 base64url，且头两段必须以 `eyJ` 开头（`{"` 的 base64），
+#: 这样普通的 `a.b.c` 点分标识符不会被误伤。
+_JWT_PATTERN = re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{8,}")
+
 #: （类别, 正则, 替换文本）。**元组顺序就是替换顺序**，改动会改变输出字节。
+#: 新增类别只能追加在末尾，并在 `expected_changes.json` 登记逐例差异（§2.1 第 10 条）。
 _SENSITIVE_TEXT_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
     (
         "private_key",
@@ -48,6 +62,8 @@ _SENSITIVE_TEXT_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
         ),
         REDACTED,
     ),
+    ("dsn_credentials", _DSN_PATTERN, REDACTED),
+    ("jwt", _JWT_PATTERN, REDACTED),
 )
 
 

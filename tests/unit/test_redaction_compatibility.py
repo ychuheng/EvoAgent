@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -44,7 +45,12 @@ EXPECTED_CHANGES: dict[str, Any] = json.loads(
     (FIXTURES / "expected_changes.json").read_text(encoding="utf-8")
 )
 DECLARED_IDS = {change["id"] for change in EXPECTED_CHANGES["changes"]}
+DECLARED = {change["id"]: change for change in EXPECTED_CHANGES["changes"]}
 SENSITIVE_KEYS = ("password", "api_key", "authorization", "密钥", "密码")
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _case(case_id: str) -> dict[str, Any]:
@@ -76,16 +82,30 @@ def test_fixture_manifest_is_consistent() -> None:
 
 
 @pytest.mark.parametrize("case", TEXT_CASES, ids=TEXT_IDS)
-def test_text_output_is_byte_identical_to_oracle(case: dict[str, Any]) -> None:
+def test_text_output_matches_oracle_or_is_declared(case: dict[str, Any]) -> None:
+    """未登记的样本必须与 oracle 逐字节一致；登记的差异必须与登记的哈希逐项对上。
+
+    S0b 的规则扩容（DSN/URL 凭据、JWT）是**有意的行为变更**，§2.1 第 10 条要求每例
+    登记样本 ID、规则版本与新旧安全输出哈希。因此"与 oracle 不同"本身不算回归——
+    **未登记**的差异才算。登记的样本反过来也必须真的有差异，否则登记是空转。
+    """
+
     text = case["input"]
     actual = redaction.redact_text(text)
     expected = ORACLE.redact(text)
-
-    assert actual == expected, f"{case['id']} 与 oracle 不一致"
-    assert actual.encode("utf-8") == expected.encode("utf-8")
+    declared = DECLARED.get(case["id"])
+    if declared is None:
+        assert actual == expected, f"{case['id']} 与 oracle 不一致且未登记"
+        assert actual.encode("utf-8") == expected.encode("utf-8")
+    else:
+        assert actual != expected, f"{case['id']} 登记了差异，但新旧输出实际相同"
+        assert _sha256(expected) == declared["old_output_hash"], f"{case['id']} 旧输出哈希不符"
+        assert _sha256(actual) == declared["new_output_hash"], f"{case['id']} 新输出哈希不符"
+        assert declared["rule_version"] == redaction.POLICY_VERSION, case["id"]
+        assert declared["reason"], case["id"]
     changed = actual != text
     if changed != case["expect_change"]:
-        assert case["id"] in DECLARED_IDS, f"{case['id']} 的实际改写与声明不符"
+        assert case["id"] in DECLARED, f"{case['id']} 的实际改写与声明不符"
 
 
 @pytest.mark.parametrize(
@@ -128,7 +148,7 @@ def test_detect_sensitive_agrees_with_declared_change() -> None:
         changed = redaction.redact_text(case["input"]) != case["input"]
         assert bool(categories) is changed, case["id"]
         assert changed is case["expect_change"], case["id"]
-        assert set(categories) <= {"private_key", "credential"}
+        assert set(categories) <= {"private_key", "credential", "dsn_credentials", "jwt"}
 
 
 def test_redaction_result_carries_policy_version() -> None:
@@ -166,12 +186,34 @@ def test_non_container_values_are_returned_unchanged() -> None:
 
 
 def test_memory_policy_wrapper_is_equivalent_to_oracle() -> None:
-    """兼容包装不得改变对外行为：`memory.policy` 的两条路径仍与 oracle 一致。"""
+    """兼容包装不得改变对外行为。
+
+    包装与共享原语必须**逐例**一致；对**未登记**的样本还要求与 oracle 也一致——
+    登记过的样本只比共享原语，因为差异已被 §2.1 第 10 条显式承认。
+    """
 
     for case in TEXT_CASES:
-        assert memory_policy.redact(case["input"]) == ORACLE.redact(case["input"])
+        assert memory_policy.redact(case["input"]) == redaction.redact_text(case["input"])
+        if case["id"] not in DECLARED:
+            assert memory_policy.redact(case["input"]) == ORACLE.redact(case["input"])
     for case in STRUCTURED_CASES:
+        assert memory_policy.redact_value(case["value"]) == redaction.redact_value(case["value"])
         assert memory_policy.redact_value(case["value"]) == ORACLE.redact_value(case["value"])
+
+
+def test_declared_changes_are_the_only_intentional_differences() -> None:
+    """登记的差异必须与"实际发生差异的样本集合"完全相等——不多不少。"""
+
+    differing = {
+        case["id"]
+        for case in TEXT_CASES
+        if redaction.redact_text(case["input"]) != ORACLE.redact(case["input"])
+    }
+    assert differing == DECLARED_IDS, (
+        f"多登记（没差异却登记）：{sorted(DECLARED_IDS - differing)}；"
+        f"少登记（有差异却没登记）：{sorted(differing - DECLARED_IDS)}"
+    )
+    assert set(TEXT_IDS) >= DECLARED_IDS
 
 
 def test_memory_policy_gate_is_unchanged() -> None:

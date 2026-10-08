@@ -1,6 +1,52 @@
 {
-  "policy_version": 1,
-  "declared_by": "S0a（等价抽取）",
-  "note": "本文件登记**预期**的新旧差异。S0a 的契约是零差异：任何未登记的实际差异都算回归。S0b 扩展规则（凭据 URL/DSN、JWT 等）时，每个新增类别都必须在此登记样本 ID、规则版本、原因与新旧安全输出哈希，且不得包含真实密钥。",
-  "changes": []
+  "policy_version": 2,
+  "declared_by": "S0b（规则扩容：带凭据 DSN/URL、JWT）",
+  "note": "本文件登记**预期**的新旧差异。未登记的差异一律算回归。哈希对应「实际运行新旧实现」的输出，不写入手写值；不含真实密钥。",
+  "changes": [
+    {
+      "id": "tp-dsn-postgres",
+      "rule_version": 2,
+      "reason": "S0b 规则扩容：新增带凭据 DSN/URL 与 JWT 两类，样本由新规则命中",
+      "old_output_hash": "b34c66100d560c55e932f13313dc0a2e1402afc4a2f17fdbea57c7bdcc919b85",
+      "new_output_hash": "223d72e10fe22eba732474ea9b1db3f6e247bc4848fd8471889996d287e30df9",
+      "old_output_len": 62,
+      "new_output_len": 27
+    },
+    {
+      "id": "tp-dsn-mysql-query",
+      "rule_version": 2,
+      "reason": "S0b 规则扩容：新增带凭据 DSN/URL 与 JWT 两类，样本由新规则命中",
+      "old_output_hash": "5731c110df673e472cc8813d3f111f967826be58d25c05ff7e10b2efc98f4a29",
+      "new_output_hash": "548f67ea59d7824003373efcabea33ea707372b523b25f3b0850050e6249dacb",
+      "old_output_len": 55,
+      "new_output_len": 30
+    },
+    {
+      "id": "tp-dsn-mongodb-srv",
+      "rule_version": 2,
+      "reason": "S0b 规则扩容：新增带凭据 DSN/URL 与 JWT 两类，样本由新规则命中",
+      "old_output_hash": "4ca1444216f8e123e2fa26e78012be66e350edb3e3727c8ed6c8769b1cd75890",
+      "new_output_hash": "20900eb9a1477b3e6d777b9e550add5b02aeefeee277fdde0c16eea1635ce512",
+      "old_output_len": 51,
+      "new_output_len": 14
+    },
+    {
+      "id": "tp-url-credentials",
+      "rule_version": 2,
+      "reason": "S0b 规则扩容：新增带凭据 DSN/URL 与 JWT 两类，样本由新规则命中",
+      "old_output_hash": "568b2a4a05d146e3f0bb765d23069ae9693ba10d7569470c20e2e916a0e596e5",
+      "new_output_hash": "555081fc8466c738098ea564b6cf1d27d3a3ffac48e5aaf7e73886475a02f22a",
+      "old_output_len": 48,
+      "new_output_len": 14
+    },
+    {
+      "id": "tp-jwt-bare",
+      "rule_version": 2,
+      "reason": "S0b 规则扩容：新增带凭据 DSN/URL 与 JWT 两类，样本由新规则命中",
+      "old_output_hash": "72bca165f9f58bd3e88a4ea2de6040ea59250c587dd94d0bcce40496218c7145",
+      "new_output_hash": "6975c2ca81b20ceca66e0ceb3fa3801ce60d75619c32e1d5fc10b8677ea828fa",
+      "old_output_len": 97,
+      "new_output_len": 16
+    }
+  ]
 }

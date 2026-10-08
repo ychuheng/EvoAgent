@@ -28,3 +28,12 @@
 {"id": "edge-fullwidth-equals", "kind": "edge", "expect_change": false, "origin": "synthetic", "assumption": "全角等号 U+FF1D 不在分隔符字符类内（只有 :=：），当前规则**不覆盖**，属现状空白，S0b 若扩需登记", "input": "密钥　＝　fake"}
 {"id": "edge-newline-only", "kind": "edge", "expect_change": false, "origin": "synthetic", "assumption": "仅换行", "input": "\n\n"}
 {"id": "edge-tab-separator", "kind": "edge", "expect_change": true, "origin": "synthetic", "assumption": "制表符属于 \\s，分隔符前后用 tab 仍会命中", "input": "password\t:\thunter2"}
+{"id": "tp-dsn-postgres", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "带凭据的 postgres DSN：user:password@host 形态（合成假口令）", "input": "DATABASE_URL=postgres://appuser:s3cr3t-pw@db.internal:5432/app"}
+{"id": "tp-dsn-mysql-query", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "带凭据的 mysql DSN 且带查询串，替换后不得残留口令", "input": "mysql://root:hunter2@127.0.0.1:3306/ledger?charset=utf8"}
+{"id": "tp-dsn-mongodb-srv", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "mongodb+srv 形态：`+` 必须被方案列表覆盖", "input": "mongodb+srv://svc:pa55w0rd@cluster0.example.net/app"}
+{"id": "tp-url-credentials", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "带凭据的 https URL（凭据 URL，不是 DSN 专有）", "input": "https://ci-bot:tok3n-value@build.example.com/api"}
+{"id": "tp-jwt-bare", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "裸 JWT：三段 base64url，头两段以 eyJ 开头（合成签名，不是真实令牌）", "input": "token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk"}
+{"id": "ctl-dsn-without-credentials", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "无凭据 DSN：只有 host:port，不该被改写（扩容的主要误伤风险）", "input": "postgres://localhost:5432/app 与 redis://cache.internal:6379/0"}
+{"id": "ctl-url-path-with-colon", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "URL 路径里出现冒号与 @ 但不是 userinfo：不得匹配", "input": "https://example.com/docs/user:pass@host 只是路径里的冒号"}
+{"id": "ctl-dotted-version", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "版本号与点分标识符：JWT 规则最容易误伤的形状", "input": "版本 1.2.3 与标识符 a.b.c 都不该被改写"}
+{"id": "ctl-jwt-like-two-segments", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "只有两段的 JWT 形状：缺第三段，不得当成令牌", "input": "header.eyJzdWIiOiIxIn0 不是令牌"}

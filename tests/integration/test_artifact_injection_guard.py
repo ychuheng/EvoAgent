@@ -103,7 +103,7 @@ async def test_sensitive_artifact_is_refused_and_recorded_without_body(tmp_path:
     payload = events[0].payload
     assert payload["artifact_id"] == str(record.id)
     assert payload["content_hash"] == record.content_hash
-    assert payload["rule_categories"] == ["credential"]
+    assert payload["rule_categories"] == ["credential", "dsn_credentials"]
     assert payload["purpose"] == "artifact_read"
     # 事件只记身份与类别，不得含正文
     assert "fake-value" not in str(payload)
@@ -581,7 +581,9 @@ async def test_review_cannot_override_a_still_matching_rule(tmp_path: Path) -> N
 
     assert outcome.outcome == OUTCOME_REJECTED
     assert outcome.reason == "sensitive_content"
-    assert outcome.categories == ("credential",)
+    # 样本同时是"连接串 + password 赋值"：S0b 扩容后 DSN 规则也会命中，
+    # 事件如实记录两个类别（不是回归，是规则覆盖变宽的可观测结果）。
+    assert outcome.categories == ("credential", "dsn_credentials")
     async with database.session_factory() as session:
         stored = await session.get(ArtifactRecord, record.id)
     assert stored.redaction_status == "quarantined"
