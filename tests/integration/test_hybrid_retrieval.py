@@ -359,3 +359,96 @@ async def test_retrieval_api_reads_evidence_without_writes_and_rebuild_is_explic
         second = await client.post("/api/v1/retrieval/rebuild")
         assert first.status_code == second.status_code == 202
         assert first.json()["job_id"] == second.json()["job_id"]
+
+
+async def test_sensitive_archive_summary_is_skipped_not_injected(env, tmp_path):
+    """归档摘要属于派生正文：旧规则写下、新规则能识别的秘密不得注入（§2.1 第 9 条）。
+
+    干净摘要是对照：同样的路径必须正常注入，证明跳过是内容判定而不是路径失效。
+    """
+
+    from evoagent.db.models import RunEventRecord, SessionArchiveRecord
+    from evoagent.memory.archival import enqueue_archive
+    from evoagent.privacy.artifact_access import BLOCK_EVENT_TYPE
+    from evoagent.tasks.lease import TaskExecutionResult
+    from evoagent.tasks.state_machine import PersistentRunStatus
+
+    db, _tasks, sid, store = env
+    await foundations.completed(env)
+    await enqueue_archive(db.session_factory, sid)
+    worker = MaintenanceWorker(db.session_factory, store)
+    assert await worker.run_once()
+
+    clean_task, clean_resolver = await resolver(env, tmp_path, archive_retrieval_enabled=True)
+    clean_resolver.settings = clean_resolver.settings.model_copy(
+        update={"memory_retrieval_enabled": False}
+    )
+    clean = await clean_resolver.resolve(clean_task.task, clean_task.run)
+    assert any("会话归档" in item for item in clean.memory_texts)
+    # 同一会话里前一条任务未终结会挡住后一条（"同会话不许插队"），先正常收尾
+    await JobLeaseManager(db.session_factory, lease_seconds=60).finalize(
+        clean_resolver.guard.lease,
+        TaskExecutionResult(status=PersistentRunStatus.COMPLETED, final_answer="ok"),
+    )
+
+    # 模拟"旧规则写下、新规则能识别"的摘要：直接改库，越过写入侧脱敏
+    async with db.session_factory() as session:
+        archive = await session.scalar(select(SessionArchiveRecord))
+        archive.summary = "会话历史摘要：password: fake-value"
+        await session.commit()
+
+    dirty_task, dirty_resolver = await resolver(env, tmp_path, archive_retrieval_enabled=True)
+    dirty_resolver.settings = dirty_resolver.settings.model_copy(
+        update={"memory_retrieval_enabled": False}
+    )
+    dirty = await dirty_resolver.resolve(dirty_task.task, dirty_task.run)
+    assert not any("会话归档" in item for item in dirty.memory_texts)
+
+    async with db.session_factory() as session:
+        events = tuple(
+            await session.scalars(
+                select(RunEventRecord).where(RunEventRecord.event_type == BLOCK_EVENT_TYPE)
+            )
+        )
+    assert [event.payload["purpose"] for event in events] == ["archive_summary"]
+    assert "fake-value" not in str(events[0].payload)
+
+
+async def test_frozen_selection_is_regated_on_restore(env, tmp_path):
+    """恢复路径注入的是冻结正文，因此它同样要过当前策略，且属于"必需恢复项"。"""
+
+    from evoagent.db.models import RunEventRecord
+    from evoagent.memory.archival import enqueue_archive
+    from evoagent.privacy.artifact_access import BLOCK_EVENT_TYPE
+    from evoagent.sessions.service import text_hash
+
+    db, _tasks, sid, store = env
+    await foundations.completed(env)
+    await enqueue_archive(db.session_factory, sid)
+    worker = MaintenanceWorker(db.session_factory, store)
+    assert await worker.run_once()
+
+    task, resolve = await resolver(env, tmp_path, archive_retrieval_enabled=True)
+    resolve.settings = resolve.settings.model_copy(update={"memory_retrieval_enabled": False})
+    frozen = await resolve.resolve(task.task, task.run)
+    assert any("会话归档" in item for item in frozen.memory_texts)
+
+    # 模拟"冻结之后规则扩容"：篡改冻结正文并同步 hash，使 hash 校验仍然通过
+    async with db.session_factory() as session:
+        row = await session.scalar(
+            select(RetrievalSelectionRecord).where(RetrievalSelectionRecord.text.is_not(None))
+        )
+        row.text = "会话历史摘要：password: fake-value"
+        row.text_hash = text_hash(row.text)
+        await session.commit()
+
+    with pytest.raises(MemoryError, match="context_source_blocked"):
+        await resolve.resolve(task.task, task.run)
+
+    async with db.session_factory() as session:
+        events = tuple(
+            await session.scalars(
+                select(RunEventRecord).where(RunEventRecord.event_type == BLOCK_EVENT_TYPE)
+            )
+        )
+    assert [event.payload["purpose"] for event in events] == ["frozen_selection"]

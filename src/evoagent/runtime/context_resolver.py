@@ -26,6 +26,7 @@ from evoagent.db.models import (
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.repository import bind_version, check_run_references
 from evoagent.memory.schema import MemoryError
+from evoagent.privacy.artifact_access import ArtifactInjectionGuard
 from evoagent.retrieval.embeddings import (
     EmbeddingError,
     EmbeddingProfile,
@@ -39,6 +40,7 @@ from evoagent.runtime.checkpoints import SnapshotCompatibilityError
 from evoagent.sessions.service import text_hash
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.retrieval import RetrievalMatch, SkillRetrievalService
+from evoagent.tools.base import ToolError
 from evoagent.workers.rate_limit import RateLimited
 
 
@@ -58,6 +60,9 @@ class ContextResolver:
         self.guard, self.builder = guard, builder
         self.provider = provider
         self.service_gate = service_gate
+        # 派生正文（archive.summary 等）在注入前过当前敏感策略；这条路径不需要
+        # artifact 存储，因此不传 artifact_store。
+        self.injection = ArtifactInjectionGuard(session_factory=factory)
 
     def config(self):
         s = self.settings
@@ -105,6 +110,8 @@ class ContextResolver:
                     cutoff=task.history_before_sequence,
                     registry=self.registry,
                     max_risk=self.settings.skill_max_effective_risk.value,
+                    verify=self.injection,
+                    run_id=run.id,
                 )
                 if source:
                     candidates[key] = source
@@ -330,6 +337,19 @@ class ContextResolver:
         for row in selections:
             if row.text is None or text_hash(row.text) != row.text_hash:
                 raise MemoryError("context_source_revoked")
+            # 冻结选择里的正文**即将被注入**，恢复路径同样要过当前敏感策略
+            # （改造方案 §2.1 第 9 条）。这是"必需恢复项"：被拦时不降级跳过，
+            # 而是显式失败，由上层提示重新准备上下文。
+            try:
+                await self.injection.verify_derived_text(
+                    text=row.text,
+                    run_id=batch.run_id,
+                    source_id=row.source_key,
+                    source_hash=row.text_hash,
+                    purpose="frozen_selection",
+                )
+            except ToolError as error:
+                raise MemoryError("context_source_blocked") from error
             if row.source_key.startswith("skill:"):
                 version = await session.get(SkillVersionRecord, UUID(row.source_key.split(":")[1]))
                 skill = await session.get(SkillRecord, version.skill_id)

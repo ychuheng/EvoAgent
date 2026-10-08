@@ -104,10 +104,12 @@ class ArtifactInjectionGuard:
         self,
         *,
         session_factory,
-        artifact_store,
+        artifact_store=None,
         scan_budget_ms: int = SCAN_BUDGET_MS,
         max_scan_bytes: int = MAX_SCAN_BYTES,
     ) -> None:
+        # 只做派生正文复查（`verify_derived_text`）的调用方不需要 artifact 存储；
+        # 那种情况下 `read_verified_text` 会显式报错，而不是静默放行。
         self._session_factory = session_factory
         self._store = artifact_store
         self._scan_budget_ms = scan_budget_ms
@@ -124,6 +126,9 @@ class ArtifactInjectionGuard:
 
         先复查**整份**正文再分页，是为了防止调用方用 offset/limit 把秘密切碎绕过检测。
         """
+
+        if self._store is None:
+            raise RuntimeError("artifact store is required for read_verified_text")
 
         from evoagent.db.models import ArtifactRecord
 

@@ -24,6 +24,7 @@ from evoagent.sessions.service import text_hash
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.rendering import SkillContextRenderer
 from evoagent.skills.schema import SkillDefinition
+from evoagent.tools.base import ToolError
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,16 @@ class Source:
 
 
 async def load_source(
-    session, key, *, scope_id=None, cutoff=None, registry=None, max_risk="R1", lock=False
+    session,
+    key,
+    *,
+    scope_id=None,
+    cutoff=None,
+    registry=None,
+    max_risk="R1",
+    lock=False,
+    verify=None,
+    run_id=None,
 ):
     kind, raw_id = key.split(":", 1)
     identity = UUID(raw_id)
@@ -150,6 +160,20 @@ async def load_source(
             return None
         if digest != archive.source_hash:
             raise MemoryError("retrieval_source_hash_mismatch")
+        if verify is not None and run_id is not None:
+            # 归档摘要是**派生正文**（没有 artifact 行），旧规则写下、新规则能识别的
+            # 秘密必须在这里拦住（改造方案 §2.1 第 9 条）。它是可选召回项，因此命中
+            # 即跳过；门禁已写下不含正文的阻断证据，不在这里重复记录。
+            try:
+                await verify.verify_derived_text(
+                    text=archive.summary,
+                    run_id=run_id,
+                    source_id=key,
+                    source_hash=text_hash(archive.summary),
+                    purpose="archive_summary",
+                )
+            except ToolError:
+                return None
         scope = await session.get(SessionRecord, archive.session_id)
         return Source(
             key,
