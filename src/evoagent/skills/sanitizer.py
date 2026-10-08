@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.canonical import content_hash
 
 _SENSITIVE_KEY = re.compile(
@@ -108,6 +109,18 @@ class TraceSanitizer:
             findings.append(
                 SanitizerFinding(
                     path, "prompt_injection", "instruction-like source content detected"
+                )
+            )
+        # §2.1 第 2 条：与共享检测原语共用规则。本类自己的 `_CREDENTIAL_VALUE` 只认
+        # `bearer`/`sk-`，覆盖不到 DSN 与 JWT；两者是**并集**，各自的判定都保留。
+        # 策略仍是"阻断"（本模块不替换后放行），与脱敏投影是两种不同处理。
+        shared_hits = detect_sensitive(value)
+        if shared_hits:
+            findings.append(
+                SanitizerFinding(
+                    path,
+                    "credential",
+                    f"credential-like value detected by shared rules: {', '.join(shared_hits)}",
                 )
             )
         contains_path = _WINDOWS_PATH.search(value) or _UNIX_PATH.search(value)

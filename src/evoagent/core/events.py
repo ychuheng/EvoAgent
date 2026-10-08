@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import JsonValue
 
 from evoagent.core.models import EventType, RuntimeEvent
+from evoagent.privacy.redaction import redact_text
 
 REDACTED = "[REDACTED]"
 _SENSITIVE_KEY_PARTS = (
@@ -38,7 +39,12 @@ class RuntimeEventSink(Protocol):
 
 
 def sanitize_payload(value: Any, *, max_string_chars: int) -> JsonValue:
-    """移除敏感信息并截断过长字符串，返回与 JSON 兼容的值。"""
+    """移除敏感信息并截断过长字符串，返回与 JSON 兼容的值。
+
+    自 §2.1 第 2 条起，**字符串值**也过共享敏感原语（键名结构脱敏、隐藏推理丢弃与
+    截断规则仍是本模块自己的）。顺序是"先检测替换、再截断"：反过来会让跨越截断边界的
+    秘密只被截掉一半。事件/日志保存的是脱敏投影，不是原始正文。
+    """
 
     if isinstance(value, Mapping):
         sanitized: dict[str, JsonValue] = {}
@@ -53,10 +59,11 @@ def sanitize_payload(value: Any, *, max_string_chars: int) -> JsonValue:
     if isinstance(value, (list, tuple)):
         return [sanitize_payload(item, max_string_chars=max_string_chars) for item in value]
     if isinstance(value, str):
-        if len(value) <= max_string_chars:
-            return value
-        omitted = len(value) - max_string_chars
-        return f"{value[:max_string_chars]}…[truncated {omitted} chars]"
+        checked = redact_text(value)
+        if len(checked) <= max_string_chars:
+            return checked
+        omitted = len(checked) - max_string_chars
+        return f"{checked[:max_string_chars]}…[truncated {omitted} chars]"
     if isinstance(value, float) and not math.isfinite(value):
         raise TypeError("event payload floats must be finite")
     if value is None or isinstance(value, (bool, int, float)):

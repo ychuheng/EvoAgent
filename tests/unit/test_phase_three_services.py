@@ -138,6 +138,41 @@ def test_sanitizer_does_not_treat_normal_chinese_as_high_entropy_secret() -> Non
     assert TraceSanitizer().sanitize({"summary": text}).payload["summary"] == text
 
 
+def test_sanitizer_blocks_dsn_and_jwt_via_shared_rules() -> None:
+    """§2.1 第 2 条：与共享原语共用规则。
+
+    本类自己的 `_CREDENTIAL_VALUE` 只认 `bearer`/`sk-`（且要求 20 位以上），
+    覆盖不到带凭据 DSN 与 JWT；共用规则后它们也必须**阻断**（本类不替换后放行）。
+    """
+
+    with pytest.raises(TraceSanitizationError) as dsn:
+        TraceSanitizer().sanitize(
+            {"command": "psql postgres://appuser:s3cr3t-pw@db.internal/app -c '\\dt'"}
+        )
+    assert "credential" in {item.kind for item in dsn.value.findings}
+
+    with pytest.raises(TraceSanitizationError) as jwt:
+        TraceSanitizer().sanitize(
+            {
+                "header": (
+                    "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+                    "dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+                )
+            }
+        )
+    assert "credential" in {item.kind for item in jwt.value.findings}
+
+
+def test_sanitizer_still_replaces_paths_after_sharing_rules(tmp_path) -> None:
+    """共用检测不改变本模块自己的路径替换策略（workspace 内替换、外部阻断）。"""
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cleaned = TraceSanitizer(workspace).sanitize({"path": str(workspace / "report.md")})
+
+    assert "${workspace}/report.md" in cleaned.payload["path"]
+
+
 def test_bm25_supports_chinese_and_stable_tie_break() -> None:
     documents = (
         SkillDocument(
