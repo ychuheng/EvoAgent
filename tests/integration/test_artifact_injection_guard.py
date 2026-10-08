@@ -10,13 +10,16 @@ M-A0 第二步（加列 + 迁移）之后，检查结果可以持久化：`verif
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
+from evoagent.core.context_policy import ContextPolicyError, LegacyContextPolicy
+from evoagent.core.models import LoopState, Message, MessageRole, ModelRequest
 from evoagent.db.base import Base
-from evoagent.db.models import ArtifactRecord, RunEventRecord
+from evoagent.db.models import ArtifactRecord, ContextRevisionRecord, RunEventRecord
 from evoagent.db.session import Database
 from evoagent.privacy.artifact_access import (
     BLOCK_EVENT_TYPE,
@@ -25,6 +28,7 @@ from evoagent.privacy.artifact_access import (
     ArtifactNotInjectable,
     ArtifactSensitiveContent,
 )
+from evoagent.runtime.context_store import ContextStore
 from evoagent.tasks.service import TaskService
 from evoagent.tools.base import ToolExecutionError, ToolPermissionError
 from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
@@ -377,4 +381,107 @@ async def test_database_rejects_verified_without_metadata(tmp_path: Path) -> Non
         )
         with pytest.raises(IntegrityError):
             await session.commit()
+    await database.dispose()
+
+
+class _StubLeaseGuard:
+    """只提供 `lease.run_id` 与空 `check()`：本测试关注的是上下文修订的错误码翻译。"""
+
+    def __init__(self, run_id) -> None:
+        self.lease = SimpleNamespace(run_id=run_id)
+
+    async def check(self, _session) -> None:
+        return None
+
+
+async def _prepare_context_revision(
+    database, aggregate, artifact_id, store, *, content: str
+) -> str:
+    """构造一条指向给定 artifact 的上下文修订，返回其 revision id。"""
+
+    revision_id = uuid4()
+    async with database.session_factory() as session:
+        session.add(
+            ContextRevisionRecord(
+                id=revision_id,
+                run_id=aggregate.run.id,
+                revision=1,
+                parent_id=None,
+                dedupe_key=f"dedupe-{revision_id.hex}",
+                input_hash=f"input-{revision_id.hex}",
+                policy_hash=f"policy-{revision_id.hex}",
+                artifact_id=artifact_id,
+                summary={},
+                estimate={},
+            )
+        )
+        await session.commit()
+    context_store = ContextStore(
+        database.session_factory,
+        _StubLeaseGuard(aggregate.run.id),
+        store,
+        LegacyContextPolicy(),
+    )
+    state = LoopState(
+        schema_version=2,
+        messages=(Message(role=MessageRole.USER, content=content),),
+        completed_iterations=0,
+        usage_is_complete=False,
+        config_hash="config-hash",
+        context_revision_id=revision_id,
+    )
+    request = ModelRequest(
+        messages=(Message(role=MessageRole.USER, content=content),), model="mock-model"
+    )
+    await context_store.prepare(state, request)
+    return revision_id
+
+
+@pytest.mark.asyncio
+async def test_context_revision_artifact_is_gated_by_current_policy(tmp_path: Path) -> None:
+    """context_source 归档同样必须过当前策略，且错误码要点明原因。"""
+
+    database, aggregate, artifacts, store, _guard = await _environment(tmp_path)
+    artifact = await _add_artifact(
+        artifacts, aggregate, SENSITIVE_TEXT, artifact_type="context_source"
+    )
+
+    with pytest.raises(ContextPolicyError) as error:
+        await _prepare_context_revision(database, aggregate, artifact.id, store, content="继续任务")
+    assert error.value.code == "context_artifact_sensitive"
+
+    async with database.session_factory() as session:
+        events = tuple(
+            await session.scalars(
+                select(RunEventRecord).where(RunEventRecord.event_type == BLOCK_EVENT_TYPE)
+            )
+        )
+    assert [event.payload["purpose"] for event in events] == ["context_revision"]
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_clean_context_revision_artifact_passes(tmp_path: Path) -> None:
+    database, aggregate, artifacts, store, _guard = await _environment(tmp_path)
+    artifact = await _add_artifact(artifacts, aggregate, CLEAN_TEXT, artifact_type="context_source")
+
+    revision_id = await _prepare_context_revision(
+        database, aggregate, artifact.id, store, content="继续任务"
+    )
+
+    assert revision_id is not None
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_deleted_context_artifact_reports_corrupt(tmp_path: Path) -> None:
+    """既有语义保持不变：artifact 文件被删 → context_artifact_invalid。"""
+
+    database, aggregate, artifacts, store, _guard = await _environment(tmp_path)
+    artifact = await _add_artifact(artifacts, aggregate, CLEAN_TEXT, artifact_type="context_source")
+    (store._root / artifact.uri).unlink()  # noqa: SLF001 - 直接删磁盘内容以模拟损坏
+
+    with pytest.raises(ContextPolicyError) as error:
+        await _prepare_context_revision(database, aggregate, artifact.id, store, content="继续任务")
+    assert error.value.code == "context_artifact_invalid"
     await database.dispose()

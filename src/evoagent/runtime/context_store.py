@@ -17,7 +17,13 @@ from evoagent.memory.policy import redact_value
 from evoagent.memory.repository import check_run_references
 from evoagent.memory.schema import MemoryError
 from evoagent.memory.summarization import ExtractiveSummarizer
+from evoagent.privacy.artifact_access import (
+    ArtifactCheckUnavailable,
+    ArtifactInjectionGuard,
+    ArtifactSensitiveContent,
+)
 from evoagent.sessions.service import text_hash
+from evoagent.tools.base import ToolError
 
 
 class ContextStore:
@@ -28,6 +34,29 @@ class ContextStore:
         self.policy = policy
         self.history_before_sequence = history_before_sequence
         self.summarizer = ExtractiveSummarizer()
+        # 注入门禁（M-A0）：旧修订正文在进入上下文之前统一过当前敏感策略。
+        # 注意它与 self.guard（LeaseGuard）不是一回事，命名上刻意区分。
+        self.injection = ArtifactInjectionGuard(
+            session_factory=factory, artifact_store=artifact_store
+        )
+
+    async def _verify_context_artifact(self, artifact_id) -> None:
+        """把门禁的拒绝翻译成本模块的错误码，保留原有的损坏/权限语义。"""
+
+        try:
+            await self.injection.read_verified_text(
+                artifact_id=artifact_id,
+                run_id=self.guard.lease.run_id,
+                purpose="context_revision",
+            )
+        except ArtifactSensitiveContent as error:
+            raise ContextPolicyError("context_artifact_sensitive", str(error)) from error
+        except ArtifactCheckUnavailable as error:
+            raise ContextPolicyError("context_artifact_unavailable", str(error)) from error
+        except (ToolError, OSError, ValueError) as error:
+            raise ContextPolicyError(
+                "context_artifact_invalid", "context artifact is corrupt"
+            ) from error
 
     async def check_sources(self):
         async with self.factory() as session:
@@ -44,16 +73,10 @@ class ContextStore:
                 revision = await session.get(ContextRevisionRecord, state.context_revision_id)
                 if revision is None or revision.run_id != self.guard.lease.run_id:
                     raise ContextPolicyError("context_revision_invalid", "revision unavailable")
-                artifact = await session.get(ArtifactRecord, revision.artifact_id)
-                try:
-                    data = await self.store.read(artifact.uri)
-                    valid = text_hash(data.decode("utf-8")) == artifact.content_hash
-                except (OSError, ValueError):
-                    valid = False
-                if not valid:
-                    raise ContextPolicyError(
-                        "context_artifact_invalid", "context artifact is corrupt"
-                    )
+                artifact_id = revision.artifact_id
+            # 旧修订的正文在注入前必须过当前敏感策略（改造方案 §2.1 第 9 条）：
+            # 只校验 hash 不足以发现"用旧规则写下、新规则能识别"的秘密。
+            await self._verify_context_artifact(artifact_id)
         state = state.model_copy(
             update={"schema_version": 2, "history_before_sequence": self.history_before_sequence}
         )
