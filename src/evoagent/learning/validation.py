@@ -1,8 +1,8 @@
 """Freeze user-supplied personal cases atomically; execution is a separate stage.
 
-This service is a trusted local control-plane entry, never a model tool. Until
-replica/project dispatch and result collection are connected it is not exposed
-as an HTTP route and it neither enqueues execution nor opens trial admission.
+This service is a trusted local control-plane entry, never a model tool.
+prepare_cases only freezes inputs; start explicitly enqueues offline execution.
+The public route and trial admission remain closed while adoption is connected.
 """
 
 from uuid import UUID
@@ -10,7 +10,12 @@ from uuid import UUID
 from pydantic import Field, model_validator
 from sqlalchemy import select
 
-from evoagent.db.models import ArtifactRecord, LearningSourceRecord
+from evoagent.db.models import (
+    ArtifactRecord,
+    LearningRequestRecord,
+    LearningSourceRecord,
+    MaintenanceJobRecord,
+)
 from evoagent.db.repositories.base import ConcurrentUpdateError
 from evoagent.db.repositories.events import RunEventRepository
 from evoagent.evals.datasets import EvalDatasetService
@@ -45,6 +50,105 @@ class PersonalValidationService:
     def __init__(self, factory, store, validators, *, learning_enabled=False):
         self.factory, self.store, self.validators = factory, store, validators
         self.enabled = learning_enabled
+
+    async def start(self, request_id, expected_lock_version):
+        """Explicit, source-authorized offline dispatch with durable replay identity."""
+        if not self.enabled:
+            raise LearningError("learning_disabled")
+        if type(expected_lock_version) is not int or expected_lock_version < 0:
+            raise LearningError("invalid_learning_request_version")
+        async with self.factory() as session:
+            request = await session.get(LearningRequestRecord, request_id)
+            if request is None:
+                raise LearningError("learning_request_not_found")
+            if request.request_kind != "validate" or request.project_id is not None:
+                raise LearningError("validation_project_replica_required")
+            source = await session.get(
+                LearningSourceRecord, UUID(request.frozen_inputs["source_id"])
+            )
+            if source is None:
+                raise LearningError("learning_source_revoked")
+            token = source.id, source.revocation_epoch, source.content_hash
+            max_risk = request.policy_snapshot["max_source_risk"]
+        await PersonalSourceService(
+            self.factory, artifact_store=self.store, max_source_risk=max_risk
+        ).read_frozen(token[0], expected_revocation_epoch=token[1])
+        async with self.factory() as session:
+            control = LearningService(self.factory)
+            request = await control._locked_request(session, request_id, None)
+            policy = await control._policy(session, request.workspace_id)
+            if policy["mode"] == "off":
+                raise LearningError("learning_policy_off")
+            source = await session.get(LearningSourceRecord, token[0], populate_existing=True)
+            if (
+                source is None
+                or source.status != "valid"
+                or (source.id, source.revocation_epoch, source.content_hash) != token
+                or source.content_hash != request.frozen_inputs["source_hash"]
+                or source.run_id != request.origin_run_id
+            ):
+                raise LearningError("learning_source_revoked")
+            await PersonalSourceService(
+                self.factory, max_source_risk=min(max_risk, policy["max_source_risk"])
+            ).check_in_session(
+                session,
+                request.origin_run_id,
+                source.feedback_id,
+                "feedback" if source.feedback_id else "manual",
+            )
+            candidate = await SkillAccessPolicy().check(
+                session,
+                request.candidate_version_id,
+                workspace_id=request.workspace_id,
+                project_id=None,
+            )
+            if (
+                candidate.lifecycle_status is not SkillVersionStatus.DRAFT
+                or candidate.content_hash != request.frozen_inputs["candidate_content_hash"]
+                or request.policy_hash != content_hash(request.policy_snapshot)
+                or request.policy_hash != request.frozen_inputs["validation_policy_hash"]
+                or request.policy_snapshot.get("provider") != "mock"
+                or request.policy_snapshot.get("model") != "mock"
+                or LearningRepository.build_source_key("validate", request.frozen_inputs)
+                != request.source_key
+            ):
+                raise LearningError("validation_execution_identity_invalid")
+            dedupe = f"learning:{request.id}:task_validate:{expected_lock_version}"
+            previous = await session.scalar(
+                select(MaintenanceJobRecord).where(MaintenanceJobRecord.dedupe_key == dedupe)
+            )
+            if previous is not None:
+                if (
+                    previous.learning_request_id != request.id
+                    or previous.kind != "learning_validate"
+                ):
+                    raise LearningError("validation_dispatch_identity_invalid")
+                return request_view(request)
+            if request.lock_version != expected_lock_version:
+                raise ConcurrentUpdateError("learning_request_version_conflict")
+            if request.stage != "task_validate" or request.status != "queued":
+                raise LearningError("validation_already_dispatched_or_terminal")
+            session.add(
+                MaintenanceJobRecord(
+                    dedupe_key=dedupe,
+                    kind="learning_validate",
+                    learning_request_id=request.id,
+                    payload={
+                        "request_id": str(request.id),
+                        "stage": "task_validate",
+                        "request_lock_version": request.lock_version,
+                    },
+                )
+            )
+            await RunEventRepository(session).append(
+                run_id=request.origin_run_id,
+                event_type="learning.validation_dispatched",
+                payload={"request_id": str(request.id), "actor": "local-user", "provider": "mock"},
+                created_at=await database_now(session),
+            )
+            result = request_view(request)
+            await session.commit()
+            return result
 
     def _require_meaningful_spec(self, criterion):
         spec = criterion.validator

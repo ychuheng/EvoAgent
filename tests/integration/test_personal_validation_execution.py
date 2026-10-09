@@ -11,7 +11,6 @@ from evoagent.db.models import (
     LearningPolicyRecord,
     LearningRequestRecord,
     LearningSourceRecord,
-    MaintenanceJobRecord,
     RunRecord,
     SkillVersionRecord,
 )
@@ -44,17 +43,7 @@ async def start(context):
         handlers={"learning_validate": handler, "learning_validation_completed": handler},
         allowed_kinds={"learning_validate", "learning_validation_completed"},
     )
-    async with db.session_factory() as session:
-        request = await session.get(LearningRequestRecord, prepared.id)
-        session.add(
-            MaintenanceJobRecord(
-                dedupe_key="explicit-validation-start",
-                kind="learning_validate",
-                learning_request_id=request.id,
-                payload={"request_lock_version": request.lock_version},
-            )
-        )
-        await session.commit()
+    await service.start(prepared.id, prepared.lock_version)
     assert await learning.run_once()
     async with db.session_factory() as session:
         request = await session.get(LearningRequestRecord, prepared.id)
