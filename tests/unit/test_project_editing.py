@@ -356,7 +356,7 @@ async def test_delete_tool_refuses_directory_and_wrong_hash(tmp_path: Path) -> N
     tool = DeleteFileTool(root, authorization=ProjectAuthorization.READ_WRITE)
 
     with pytest.raises(ToolExecutionError, match="普通文件"):
-        await tool.invoke(DeleteFileArguments(path="src/sub"))
+        await tool.invoke(DeleteFileArguments(path="src/sub", expected_sha256="0" * 64))
     with pytest.raises(EditConflictError, match="内容已变化"):
         await tool.invoke(DeleteFileArguments(path="src/store.py", expected_sha256="0" * 64))
 

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 
 from pydantic import Field
@@ -26,6 +27,7 @@ DEFAULT_MAX_LINES = 400
 HARD_MAX_LINES = 5_000
 # 读取前先看头部的字节数，用于二进制探测。
 SNIFF_BYTES = 8_192
+DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024
 
 
 class ProjectFileReadArguments(ContractModel):
@@ -48,8 +50,11 @@ class ProjectFileReadTool(BaseTool[ProjectFileReadArguments]):
     has_side_effects = False
     parallel_safe = True
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, max_file_bytes: int = DEFAULT_MAX_FILE_BYTES) -> None:
+        if not 1 <= max_file_bytes <= DEFAULT_MAX_FILE_BYTES:
+            raise ValueError("max_file_bytes must be within 1..8 MiB")
         self._root = root
+        self._max_file_bytes = max_file_bytes
 
     async def invoke(self, arguments: ProjectFileReadArguments) -> str:
         return await asyncio.to_thread(self._read, arguments)
@@ -65,12 +70,18 @@ class ProjectFileReadTool(BaseTool[ProjectFileReadArguments]):
         display = relative_display(physical, self._root)
         try:
             with physical.open("rb") as handle:
-                head = handle.read(SNIFF_BYTES)
+                # One bounded descriptor read also covers a file growing after
+                # stat. A line range is an output bound, not an input byte bound.
+                raw = handle.read(self._max_file_bytes + 1)
+            if len(raw) > self._max_file_bytes:
+                raise ToolExecutionError(
+                    f"文件超过读取上限 {self._max_file_bytes} 字节；请用 search_text 有界定位"
+                )
+            head = raw[:SNIFF_BYTES]
             if b"\x00" in head:
                 raise ToolExecutionError(
                     f"{display} 看起来是二进制文件（含 NUL 字节）；请改用 search_text 定位文本片段"
                 )
-            raw = physical.read_bytes()
         except OSError as error:
             raise ToolExecutionError(f"文件无法读取：{display}") from error
 
@@ -86,7 +97,10 @@ class ProjectFileReadTool(BaseTool[ProjectFileReadArguments]):
         lines = text.splitlines()
         total_lines = len(lines)
         if total_lines == 0:
-            return f"文件：{display}\n（空文件，0 行）"
+            return (
+                f"文件：{display}\n原文件 SHA-256：{hashlib.sha256(raw).hexdigest()}"
+                "\n（空文件，0 行）"
+            )
 
         start = arguments.start_line
         if start > total_lines:
@@ -105,6 +119,7 @@ class ProjectFileReadTool(BaseTool[ProjectFileReadArguments]):
         last_line = start + len(selected) - 1
         header = [
             f"文件：{display}",
+            f"原文件 SHA-256：{hashlib.sha256(raw).hexdigest()}",
             f"总行数：{total_lines}；本次返回第 {start}–{last_line} 行"
             f"（上限 {arguments.max_lines} 行 / {arguments.max_chars} 字符）",
         ]

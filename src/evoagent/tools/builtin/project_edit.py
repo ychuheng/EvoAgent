@@ -185,7 +185,7 @@ class ApplyPatchTool(_ProjectWriteTool, BaseTool[ApplyPatchArguments]):
 
 class DeleteFileArguments(ContractModel):
     path: str = Field(min_length=1, max_length=4_096)
-    expected_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    expected_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     dry_run: bool = False
 
 
@@ -193,7 +193,8 @@ class DeleteFileTool(_ProjectWriteTool, BaseTool[DeleteFileArguments]):
     name = "delete_file"
     description = (
         "Delete a single file inside the authorized project. Directories are refused, "
-        "so a recursive wipe can never happen implicitly."
+        "so a recursive wipe can never happen implicitly. Requires the original SHA-256 "
+        "from file_read; a changed file must be read again before deletion."
     )
     arguments_model = DeleteFileArguments
 
@@ -205,12 +206,15 @@ class DeleteFileTool(_ProjectWriteTool, BaseTool[DeleteFileArguments]):
         _lexical, physical = resolve_inside_root(self._root, arguments.path)
         if not physical.is_file():
             raise ToolExecutionError("目标不是一个普通文件")
-        if arguments.expected_sha256 is not None:
-            actual = sha256_bytes(physical.read_bytes())
-            if actual != arguments.expected_sha256:
-                raise EditConflictError(
-                    f"{arguments.path} 的内容已变化（实际 {actual[:12]}…）；请重新读取后再删"
-                )
+        with physical.open("rb") as handle:
+            raw = handle.read(8 * 1024 * 1024 + 1)
+        if len(raw) > 8 * 1024 * 1024:
+            raise ToolExecutionError("文件超过删除核对上限 8388608 字节；需要人工处理")
+        actual = sha256_bytes(raw)
+        if actual != arguments.expected_sha256:
+            raise EditConflictError(
+                f"{arguments.path} 的内容已变化（实际 {actual[:12]}…）；请重新读取后再删"
+            )
         if arguments.dry_run:
             return f"文件：{arguments.path}\n模式：dry_run（未删除）"
         display = delete_path(self._root, arguments.path)
