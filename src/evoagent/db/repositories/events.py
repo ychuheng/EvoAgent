@@ -60,6 +60,26 @@ class RunEventRepository:
         if result.scalar_one_or_none() is None:
             raise RecordNotFoundError(f"run does not exist: {run_id}")
 
+    async def append_many(self, run_id: UUID, items: list[dict]) -> tuple[RunEventRecord, ...]:
+        """同一事务分配连续序号并批量写入；提交前不把序号暴露给 SSE。"""
+        if not items:
+            return ()
+        next_sequence = await self._session.scalar(
+            update(RunRecord)
+            .where(RunRecord.id == run_id)
+            .values(next_event_sequence=RunRecord.next_event_sequence + len(items))
+            .returning(RunRecord.next_event_sequence)
+        )
+        if next_sequence is None:
+            raise RecordNotFoundError(f"run does not exist: {run_id}")
+        records = tuple(
+            RunEventRecord(run_id=run_id, sequence=next_sequence - len(items) + index, **item)
+            for index, item in enumerate(items)
+        )
+        self._session.add_all(records)
+        await self._session.flush()
+        return records
+
     async def append_once(self, *, dedupe_key: str, **kwargs) -> RunEventRecord:
         await self.lock_run(kwargs["run_id"])
         existing = await self._session.scalar(

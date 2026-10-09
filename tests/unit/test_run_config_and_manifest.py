@@ -89,6 +89,21 @@ def test_renderer_version_is_frozen_and_changes_comparison_identity():
     )
 
 
+def test_progress_mode_is_frozen_without_changing_old_manifest_hash():
+    old = snapshot()
+    assert "progress_write_mode" not in old.canonical_dict()
+    restored = RunConfigSnapshot.model_validate(old.canonical_dict())
+    assert restored.progress_write_mode is None
+    assert restored.content_hash() == old.content_hash()
+    batched = snapshot(progress_write_mode="batched_v1")
+    assert batched.content_hash() != old.content_hash()
+    assert not batched.comparable_with(old)
+    assert (
+        RunConfigSnapshot.model_validate(batched.canonical_dict()).progress_write_mode
+        == "batched_v1"
+    )
+
+
 def test_context_policy_changes_comparison_hash_without_changing_legacy_hash():
     import hashlib
     import json
@@ -102,6 +117,7 @@ def test_context_policy_changes_comparison_hash_without_changing_legacy_hash():
     legacy.pop("retrieval")
     legacy.pop("provider_thinking_mode")
     legacy.pop("skill_renderer_version")
+    legacy.pop("progress_write_mode")
     digest = (
         "sha256:"
         + hashlib.sha256(

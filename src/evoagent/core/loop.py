@@ -6,7 +6,7 @@ import json
 from typing import Protocol
 
 from evoagent.core.context_policy import ContextPolicy, ContextPolicyError, LegacyContextPolicy
-from evoagent.core.events import RuntimeEventSink
+from evoagent.core.events import ProgressEventType, RuntimeEventSink
 from evoagent.core.models import (
     AgentLoopResult,
     AgentLoopStatus,
@@ -456,6 +456,9 @@ class AgentLoop:
     ) -> None:
         if self._checkpoint_writer is None:
             return
+        flush = getattr(self._event_sink, "flush", None)
+        if flush is not None:
+            await flush()
         await self._checkpoint_writer.save(
             LoopState(
                 schema_version=2 if self._context_store else 1,
@@ -496,6 +499,14 @@ class AgentLoop:
         )
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
+    async def _append_model_progress(self, payload: dict) -> None:
+        append = getattr(self._event_sink, "append_progress", None)
+        if append is None:
+            # 兼容只有同步耐久 emit 接口的扩展 sink。
+            await self._event_sink.emit(EventType.MODEL_DELTA, payload)
+        else:
+            await append(ProgressEventType.MODEL_DELTA, payload)
+
     async def _consume_response(
         self, request: ModelRequest, iteration: int
     ) -> tuple[ModelResponse, TokenUsage | None]:
@@ -507,8 +518,7 @@ class AgentLoop:
                 raise ProviderProtocolError("provider emitted an event after completed")
 
             if event.type is ProviderEventType.TEXT_DELTA:
-                await self._event_sink.emit(
-                    EventType.MODEL_DELTA,
+                await self._append_model_progress(
                     {
                         "iteration": iteration,
                         "kind": event.type.value,
@@ -516,8 +526,7 @@ class AgentLoop:
                     },
                 )
             elif event.type is ProviderEventType.TOOL_CALL_DELTA:
-                await self._event_sink.emit(
-                    EventType.MODEL_DELTA,
+                await self._append_model_progress(
                     {
                         "iteration": iteration,
                         "kind": event.type.value,

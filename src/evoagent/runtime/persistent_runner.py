@@ -155,6 +155,11 @@ class PersistentAgentRunner:
             content_hash([item.document.content_hash for item in matches]) if matches else None
         )
         config_snapshot = RunConfigSnapshot(
+            progress_write_mode=(
+                run.config_snapshot.get("progress_write_mode")
+                if run.config_snapshot
+                else ("batched_v1" if self._settings.runtime_event_batching_enabled else None)
+            ),
             skill_renderer_version=run.config_snapshot.get("skill_renderer_version")
             if run.config_snapshot
             else 2,
@@ -199,7 +204,49 @@ class PersistentAgentRunner:
         )
         await self._persist_run_config(run.id, config_snapshot, guard)
         project_context = await self._project_context(task)
-        sink = PersistentEventSink(lease.run_id, self._session_factory, lease_guard=guard)
+        owner = asyncio.current_task()
+
+        def stop_execution(error: BaseException) -> None:
+            if owner is not None and not owner.done():
+                owner.cancel()
+
+        sink = PersistentEventSink(
+            lease.run_id,
+            self._session_factory,
+            lease_guard=guard,
+            batch_progress=config_snapshot.progress_write_mode == "batched_v1",
+            on_background_error=stop_execution,
+        )
+        try:
+            return await self._execute_owned(
+                lease,
+                guard,
+                task,
+                run,
+                resolved,
+                skill_context,
+                skill_context_hash,
+                project_context,
+                sink,
+            )
+        except LeaseLostError:
+            await sink.abort()
+            raise
+        finally:
+            await sink.aclose()
+
+    async def _execute_owned(
+        self,
+        lease,
+        guard,
+        task,
+        run,
+        resolved,
+        skill_context,
+        skill_context_hash,
+        project_context,
+        sink,
+    ) -> TaskExecutionResult:
         if task.frozen_inputs:
             await sink.emit(
                 EventType.INPUT_FROZEN,

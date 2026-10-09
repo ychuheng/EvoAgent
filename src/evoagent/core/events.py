@@ -3,8 +3,10 @@
 import asyncio
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from enum import StrEnum
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -27,6 +29,20 @@ _SENSITIVE_KEY_PARTS = (
 )
 
 
+class ProgressEventType(StrEnum):
+    MODEL_DELTA = "model.delta"
+
+
+class InvalidProgressEvent(ValueError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class ProgressReceipt:
+    accepted_watermark: int
+    durability: Literal["buffered", "committed"] = "buffered"
+
+
 class RuntimeEventSink(Protocol):
     """接收同一次 Run 有序事件的目标接口。"""
 
@@ -36,6 +52,14 @@ class RuntimeEventSink(Protocol):
     async def emit(
         self, event_type: EventType, payload: Mapping[str, Any] | None = None
     ) -> RuntimeEvent: ...
+
+    async def append_progress(
+        self, event_type: ProgressEventType, payload=None
+    ) -> ProgressReceipt: ...
+
+    async def flush(self) -> None: ...
+
+    async def close(self) -> None: ...
 
 
 def sanitize_payload(value: Any, *, max_string_chars: int) -> JsonValue:
@@ -85,6 +109,18 @@ class InMemoryEventSink:
     @property
     def events(self) -> tuple[RuntimeEvent, ...]:
         return tuple(self._events)
+
+    async def append_progress(self, event_type: ProgressEventType, payload=None) -> ProgressReceipt:
+        if not isinstance(event_type, ProgressEventType):
+            raise InvalidProgressEvent("only explicit MODEL_DELTA progress is accepted")
+        event = await self.emit(EventType.MODEL_DELTA, payload)
+        return ProgressReceipt(accepted_watermark=event.sequence, durability="committed")
+
+    async def flush(self) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
 
     async def emit(
         self, event_type: EventType, payload: Mapping[str, Any] | None = None

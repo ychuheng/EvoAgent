@@ -26,6 +26,7 @@ class RunConfigSnapshot(BaseModel):
     selected_skills: list[dict[str, str]] | None = None
     retrieval: dict[str, Any] | None = None
     skill_renderer_version: Literal[1, 2] | None = None
+    progress_write_mode: Literal["batched_v1"] | None = None
 
     provider: str = Field(min_length=1, max_length=64)
     provider_thinking_mode: Literal["disabled"] | None = None
@@ -67,6 +68,8 @@ class RunConfigSnapshot(BaseModel):
         value = self.model_dump(mode="json")
         if self.skill_renderer_version is None:
             value.pop("skill_renderer_version")
+        if self.progress_write_mode is None:
+            value.pop("progress_write_mode")
         if self.provider_thinking_mode is None:
             value.pop("provider_thinking_mode")
         if self.schema_version == 1:

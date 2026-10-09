@@ -33,3 +33,19 @@ async def test_baseline_counts_real_persistent_task_cost(tmp_path):
         assert row["transactions_commit"] > 0
         assert row["events"] > 0 and row["snapshots"] > 0
         assert row["runtime_config_hash"].startswith("sha256:")
+
+
+async def test_progress_batching_reduces_commits_without_losing_events(tmp_path, monkeypatch):
+    monkeypatch.setenv("EVOAGENT_RUNTIME_EVENT_BATCHING_ENABLED", "false")
+    off = await measure(
+        f"sqlite+aiosqlite:///{tmp_path / 'evoagent_perf_off.db'}", repeats=3, deltas=32
+    )
+    monkeypatch.setenv("EVOAGENT_RUNTIME_EVENT_BATCHING_ENABLED", "true")
+    on = await measure(
+        f"sqlite+aiosqlite:///{tmp_path / 'evoagent_perf_on.db'}", repeats=3, deltas=32
+    )
+    for before, after in zip(off["runs"], on["runs"], strict=True):
+        assert before["events"] == after["events"] == 48
+        assert before["snapshots"] == after["snapshots"] == 2
+        assert after["transactions_commit"] == before["transactions_commit"] - 31
+        assert after["sql_total"] < before["sql_total"]
