@@ -79,6 +79,7 @@ class PersonalValidationRunGuard:
             or experiment.purpose != "personal_validation"
             or str(experiment.status) not in {"queued", "running"}
             or experiment.learning_request_id != request.id
+            or request.validation_experiment_id != experiment.id
             or run is None
             or task is None
             or evaluation.run_id != self.run_id

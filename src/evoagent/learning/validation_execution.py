@@ -30,6 +30,7 @@ from evoagent.learning.validation_schema import PersonalValidationCase
 from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
 from evoagent.skills.canonical import canonical_json, content_hash
+from evoagent.skills.lifecycle import SkillVersionStatus
 from evoagent.trace.artifacts import ArtifactService
 
 
@@ -70,7 +71,10 @@ class PersonalValidationExecution:
             )
         except SkillAccessError as error:
             raise LearningError("validation_candidate_unavailable") from error
-        if candidate.content_hash != frozen.get("candidate_content_hash"):
+        if (
+            candidate.lifecycle_status is not SkillVersionStatus.DRAFT
+            or candidate.content_hash != frozen.get("candidate_content_hash")
+        ):
             raise LearningError("validation_candidate_unavailable")
         if LearningRepository.build_source_key("validate", frozen) != request.source_key:
             raise LearningError("validation_execution_identity_invalid")

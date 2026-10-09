@@ -510,6 +510,29 @@ class LearningRequestRecord(Base):
     )
 
 
+class ValidationJudgmentRecord(Base):
+    """Append-only human judgments bound to actual validation evidence."""
+
+    __tablename__ = "validation_judgments"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "client_request_id", name="uq_validation_judgment_client"),
+        UniqueConstraint("request_id", "revision", name="uq_validation_judgment_revision"),
+        CheckConstraint("revision > 0", name="revision_positive"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    request_id: Mapped[UUID] = mapped_column(ForeignKey("learning_requests.id"))
+    revision: Mapped[int] = mapped_column(Integer)
+    client_request_id: Mapped[str] = mapped_column(String(128))
+    request_body_hash: Mapped[str] = mapped_column(String(71))
+    actor: Mapped[str] = mapped_column(String(128))
+    base_report_hash: Mapped[str] = mapped_column(String(71))
+    judgments: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    resulting_report: Mapped[dict[str, Any]] = mapped_column(JSON)
+    resulting_report_hash: Mapped[str] = mapped_column(String(71))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class LearningRequestAliasRecord(Base):
     """同一学习语义的多个客户端幂等键都必须保留，不能仅记住首个键。"""
 
@@ -1475,6 +1498,11 @@ def protect_learning_request_identity(_mapper, _connection, record):
             "created_at",
         ),
     )
+
+
+@event.listens_for(ValidationJudgmentRecord, "before_update")
+def protect_validation_judgment(_mapper, _connection, _record):
+    raise ValueError("validation judgments are append-only")
 
 
 @event.listens_for(SkillTrialRecord, "before_update")

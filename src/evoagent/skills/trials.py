@@ -109,7 +109,8 @@ class SkillTrialService:
         if (
             experiment is None
             or getattr(experiment, "purpose", "formal") != "personal_validation"
-            or experiment.report_hash != request.validation_report_hash
+            or experiment.report_hash != report.get("execution_report_hash")
+            or str(experiment.report_artifact_id) != report.get("execution_report_artifact_id")
             or report.get("validation_mode") != "personal_validation"
             or report.get("candidate_hash") != version.content_hash
             or report.get("candidate_version_id") != str(version_id)
@@ -118,6 +119,11 @@ class SkillTrialService:
             or report.get("criteria_hash") != request.frozen_inputs.get("validation_criteria_hash")
         ):
             return TrialReadiness(False, ("independent_report_binding_invalid",))
+        if (
+            report.get("trial_eligible") is not True
+            or report.get("cost", {}).get("provider") == "mock"
+        ):
+            return TrialReadiness(False, ("real_validation_and_adoption_pipeline_required",))
         items = report.get("items")
         if not isinstance(items, list) or not 2 <= len(items) <= 100:
             return TrialReadiness(False, ("positive_and_counterexample_required",))
