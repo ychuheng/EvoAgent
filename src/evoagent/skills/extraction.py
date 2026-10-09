@@ -309,7 +309,12 @@ class SkillExtractionService:
         complete_stage=None,
     ):
 
-        from evoagent.db.models import DEFAULT_WORKSPACE_ID, ArtifactRecord, LearningSourceRecord
+        from evoagent.db.models import (
+            DEFAULT_WORKSPACE_ID,
+            ArtifactRecord,
+            LearningPolicyRecord,
+            LearningSourceRecord,
+        )
         from evoagent.db.repositories.skills import SkillRepository, SkillVersionRepository
         from evoagent.learning.schema import LearningError
 
@@ -330,7 +335,15 @@ class SkillExtractionService:
 
             if definition.schema_version != 2:
                 raise LearningError("personal_candidate_v2_required")
-            await PersonalSourceService(self._session_factory).check_in_session(
+            policy = await session.get(LearningPolicyRecord, request.workspace_id)
+            if policy is None or policy.mode == "off":
+                raise LearningError("learning_policy_off")
+            await PersonalSourceService(
+                self._session_factory,
+                max_source_risk=min(
+                    request.policy_snapshot["max_source_risk"], policy.max_source_risk
+                ),
+            ).check_in_session(
                 session,
                 request.origin_run_id,
                 UUID(request.frozen_inputs["feedback_id"])

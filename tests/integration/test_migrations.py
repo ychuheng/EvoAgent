@@ -9,6 +9,8 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 EXPECTED_TABLES = {
+    "skill_trials",
+    "skill_observations",
     "run_feedback",
     "learning_policies",
     "learning_request_aliases",

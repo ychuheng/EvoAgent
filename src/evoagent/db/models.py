@@ -22,6 +22,7 @@ from sqlalchemy import (
     Uuid,
     event,
     inspect,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -1122,6 +1123,39 @@ class SkillSourceRecord(Base):
     source_trace_hash: Mapped[str] = mapped_column(String(71))
 
 
+class SkillTrialRecord(Base):
+    __tablename__ = "skill_trials"
+    __table_args__ = (
+        CheckConstraint("status IN ('active','suspended','replaced')", name="status_valid"),
+        CheckConstraint("lock_version >= 0", name="lock_version_non_negative"),
+        Index(
+            "uq_skill_trials_active_scope",
+            "skill_id",
+            "scope_key",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    skill_id: Mapped[UUID] = mapped_column(ForeignKey("skills.id", ondelete="RESTRICT"), index=True)
+    version_id: Mapped[UUID] = mapped_column(ForeignKey("skill_versions.id", ondelete="RESTRICT"))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id"))
+    scope_key: Mapped[str] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    validation_request_id: Mapped[UUID] = mapped_column(ForeignKey("learning_requests.id"))
+    report_hash: Mapped[str] = mapped_column(String(71))
+    health_policy_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
+    health_policy_hash: Mapped[str] = mapped_column(String(71))
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    suspension_reason: Mapped[str | None] = mapped_column(String(1000))
+    reviewer: Mapped[str] = mapped_column(String(128))
+    reason: Mapped[str] = mapped_column(String(1000))
+    lock_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class RunSkillSelectionRecord(Base):
     __tablename__ = "run_skill_selections"
     __table_args__ = (
@@ -1134,10 +1168,42 @@ class RunSkillSelectionRecord(Base):
     skill_version_id: Mapped[UUID] = mapped_column(
         ForeignKey("skill_versions.id", ondelete="RESTRICT")
     )
+    trial_id: Mapped[UUID | None] = mapped_column(ForeignKey("skill_trials.id"))
+    origin: Mapped[str] = mapped_column(String(16), default="legacy", server_default="legacy")
+    scope_key: Mapped[str | None] = mapped_column(String(128))
+    rendered_hash: Mapped[str | None] = mapped_column(String(71))
     mode: Mapped[str] = mapped_column(String(32))
     rank: Mapped[int] = mapped_column(Integer)
     score: Mapped[float] = mapped_column()
     query_terms: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SkillObservationRecord(Base):
+    __tablename__ = "skill_observations"
+    __table_args__ = (
+        UniqueConstraint("run_id", "version_id", "feedback_revision"),
+        CheckConstraint("feedback_revision >= 0", name="feedback_revision_non_negative"),
+        CheckConstraint(
+            "outcome IN ('verified_success','verified_failure','unknown')", name="outcome_valid"
+        ),
+        CheckConstraint(
+            "attribution IN ('skill_related','environment','user_request','uncertain')",
+            name="attribution_valid",
+        ),
+        Index("ix_skill_observations_trial_finished", "trial_id", "first_finished_at"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"))
+    version_id: Mapped[UUID] = mapped_column(ForeignKey("skill_versions.id"))
+    trial_id: Mapped[UUID | None] = mapped_column(ForeignKey("skill_trials.id"))
+    selection_id: Mapped[UUID] = mapped_column(ForeignKey("run_skill_selections.id"))
+    feedback_revision: Mapped[int] = mapped_column(Integer, default=0)
+    outcome: Mapped[str] = mapped_column(String(32))
+    attribution: Mapped[str] = mapped_column(String(32))
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON)
+    first_finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    input_fingerprint: Mapped[str] = mapped_column(String(71))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -1384,6 +1450,33 @@ def protect_learning_request_identity(_mapper, _connection, record):
             "created_at",
         ),
     )
+
+
+@event.listens_for(SkillTrialRecord, "before_update")
+def protect_trial_identity(_mapper, _connection, record):
+    _reject_changed_fields(
+        record,
+        (
+            "skill_id",
+            "version_id",
+            "workspace_id",
+            "project_id",
+            "scope_key",
+            "validation_request_id",
+            "report_hash",
+            "health_policy_snapshot",
+            "health_policy_hash",
+            "reviewer",
+            "reason",
+            "created_at",
+        ),
+    )
+
+
+@event.listens_for(SkillObservationRecord, "before_update")
+@event.listens_for(SkillObservationRecord, "before_delete")
+def protect_skill_observation(_mapper, _connection, _record):
+    raise ValueError("skill observation is append-only")
 
 
 @event.listens_for(LearningSourceRecord, "before_update")
