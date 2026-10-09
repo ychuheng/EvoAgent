@@ -50,7 +50,7 @@ class SkillDefinitionValidator:
         body = definition.model_dump(mode="json")
         if redact_value(body) != body:
             raise SkillValidationError("skill contains sensitive content")
-        if definition.schema_version != self._schema_version:
+        if definition.schema_version not in {1, self._schema_version}:
             raise SkillValidationError("unsupported skill schema version")
         if len(definition.steps) > self._max_steps:
             raise SkillValidationError("skill exceeds the configured step limit")

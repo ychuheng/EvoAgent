@@ -34,6 +34,7 @@ from evoagent.memory.repository import check_run_references
 from evoagent.memory.schema import MemoryError
 from evoagent.privacy.artifact_access import ArtifactInjectionGuard, ArtifactSensitiveContent
 from evoagent.privacy.redaction import POLICY_VERSION, detect_sensitive, redact_text, redact_value
+from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
 from evoagent.skills.canonical import canonical_json, content_hash
 
 _TERMINAL = frozenset({"completed", "failed", "cancelled", "timeout", "limit_reached"})
@@ -306,7 +307,13 @@ class PersonalSourceService:
                 )
             )
             for request in requests:
-                if request.status in {"queued", "running", "ready_for_review", "failed"}:
+                if request.status in {
+                    "queued",
+                    "running",
+                    "ready_for_review",
+                    "failed",
+                    "waiting_budget",
+                }:
                     request.status = "superseded"
                     request.error_code = "learning_source_revoked"
                     request.lock_version += 1
@@ -330,6 +337,7 @@ class PersonalSourceService:
                 MaintenanceJobRecord(
                     dedupe_key=f"learning-source:{source.id}:revoke:{source.revocation_epoch}",
                     kind="learning_revoke",
+                    priority=100,
                     payload={
                         "source_id": str(source.id),
                         "revocation_epoch": source.revocation_epoch,
@@ -511,6 +519,35 @@ class PersonalSourceService:
             }
             for tool in tools
         )
+        selected_versions = [str(row.skill_version_id) for row in selections]
+        snapshot = run.config_snapshot or {}
+        if not isinstance(snapshot, dict):
+            raise LearningError("source_selection_identity_invalid")
+        legacy_selected = snapshot.get("skill_version_id")
+        if legacy_selected is not None:
+            selected_versions.append(str(legacy_selected))
+        for item in snapshot.get("selected_skills") or ():
+            if not isinstance(item, dict):
+                raise LearningError("source_selection_identity_invalid")
+            value = item.get("skill_version_id") or item.get("version_id")
+            if value is not None:
+                selected_versions.append(str(value))
+        if len(selected_versions) > _MAX_ITEMS:
+            raise LearningError("source_evidence_item_budget_exceeded")
+        try:
+            selected_versions = list(dict.fromkeys(str(UUID(value)) for value in selected_versions))
+        except (ValueError, TypeError) as error:
+            raise LearningError("source_selection_identity_invalid") from error
+        for selected in selected_versions:
+            try:
+                await SkillAccessPolicy().check(
+                    session,
+                    UUID(selected),
+                    workspace_id=eligibility.workspace_id,
+                    project_id=eligibility.project_id,
+                )
+            except SkillAccessError as error:
+                raise LearningError("source_selected_skill_unavailable") from error
         evidence = ExperienceEvidence(
             goal=task.goal,
             outcome={
@@ -542,7 +579,7 @@ class PersonalSourceService:
                 for item in manifest
                 if item["status"] == "succeeded"
             ),
-            selected_versions=tuple(str(row.skill_version_id) for row in selections),
+            selected_versions=tuple(selected_versions),
             artifact_refs=tuple(
                 {
                     "id": str(row.id),

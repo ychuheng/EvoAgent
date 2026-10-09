@@ -3,8 +3,10 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import and_, case, func, select, update
 
+from evoagent.db.learning_accounting import unknown_usage as _unknown_usage
+from evoagent.db.learning_accounting import unresolved_usage as _unresolved_usage
 from evoagent.db.models import (
     ArtifactRecord,
     LearningPolicyRecord,
@@ -50,25 +52,13 @@ _POLICY_FIELDS = (
 )
 
 
-def _unknown_usage():
-    record = LearningSpendReservationRecord
-    malformed_settlement = and_(
-        record.status == "settled", or_(record.actual_micros.is_(None), record.actual_micros < 0)
-    )
-    return or_(record.status == "unknown", malformed_settlement)
-
-
-def _unresolved_usage():
-    return or_(LearningSpendReservationRecord.status == "reserved", _unknown_usage())
-
-
 def request_view(row):
     actions = ()
     if row.status in {"queued", "running"}:
         actions = ("cancel",)
     elif row.status == "ready_for_review":
         actions = ("review", "reject")
-    elif row.status == "failed":
+    elif row.status in {"failed", "waiting_budget"}:
         actions = ("retry",)
     return LearningRequestView(
         id=row.id,
@@ -88,9 +78,10 @@ def request_view(row):
 
 
 class LearningService:
-    def __init__(self, session_factory, *, learning_enabled=False):
+    def __init__(self, session_factory, *, learning_enabled=False, generator_configuration=None):
         self.factory = session_factory
         self.enabled = learning_enabled
+        self.generator_configuration = generator_configuration
 
     async def _scope(self, session, run_id):
         run = await session.get(RunRecord, run_id)
@@ -161,12 +152,19 @@ class LearningService:
             routing = route_feedback(payload)
             request = None
             if routing == "method":
-                request = await self._append_proposal(
-                    session,
-                    run_id,
-                    LearningSubmission(client_request_id=f"feedback:{row.id}", feedback_id=row.id),
-                    trigger="feedback",
-                )
+                try:
+                    request = await self._append_proposal(
+                        session,
+                        run_id,
+                        LearningSubmission(
+                            client_request_id=f"feedback:{row.id}", feedback_id=row.id
+                        ),
+                        trigger="feedback",
+                    )
+                except LearningError as error:
+                    if error.code != "learning_revision_target_ambiguous":
+                        raise
+                    routing = "clarify"
             result = FeedbackView(
                 id=row.id,
                 run_id=run_id,
@@ -231,10 +229,34 @@ class LearningService:
             if payload.feedback_id
             else None
         )
+        target_skill_id, base_version_id = payload.target_skill_id, payload.expected_base_version_id
+        if (
+            trigger == "feedback"
+            and target_skill_id is None
+            and feedback is not None
+            and feedback.verdict in {"needs_fix", "incorrect"}
+            and evidence.selected_versions
+        ):
+            if len(evidence.selected_versions) != 1:
+                raise LearningError("learning_revision_target_ambiguous")
+            base = await session.get(SkillVersionRecord, UUID(evidence.selected_versions[0]))
+            skill = await session.get(SkillRecord, base.skill_id) if base else None
+            if (
+                skill is None
+                or skill.workspace_id != chat.workspace_id
+                or skill.project_id not in (None, task.project_id)
+            ):
+                raise LearningError("learning_revision_target_ambiguous")
+            target_skill_id, base_version_id = skill.id, base.id
         snapshot = {
             **policy,
             "validation_mode": "static_only",
             "source_policy_version": "personal:v1",
+            **(
+                {"generator_configuration": self.generator_configuration}
+                if self.generator_configuration is not None
+                else {}
+            ),
         }
         source_revision = content_hash(
             {
@@ -253,10 +275,8 @@ class LearningService:
             if feedback
             else content_hash({}),
             "source_revision": source_revision,
-            "target_skill_id": str(payload.target_skill_id) if payload.target_skill_id else None,
-            "base_version_id": str(payload.expected_base_version_id)
-            if payload.expected_base_version_id
-            else None,
+            "target_skill_id": str(target_skill_id) if target_skill_id else None,
+            "base_version_id": str(base_version_id) if base_version_id else None,
             "policy_hash": content_hash(snapshot),
             "feedback_id": str(payload.feedback_id) if payload.feedback_id else None,
             "evidence_manifest_hash": content_hash(evidence_identity),
@@ -271,8 +291,8 @@ class LearningService:
             request_body=body,
             trigger=trigger,
             project_id=task.project_id,
-            target_skill_id=payload.target_skill_id,
-            base_version_id=payload.expected_base_version_id,
+            target_skill_id=target_skill_id,
+            base_version_id=base_version_id,
         )
         dedupe = f"learning:{row.id}:prepare:0"
         if not await session.scalar(
@@ -406,7 +426,7 @@ class LearningService:
     async def cancel_request(self, request_id, expected_lock_version):
         async with self.factory() as session:
             row = await self._locked_request(session, request_id, expected_lock_version)
-            if row.status not in {"queued", "running"}:
+            if row.status not in {"queued", "running", "waiting_budget"}:
                 raise LearningError("learning_request_not_cancellable")
             row.status = "cancelled"
             row.lock_version += 1
@@ -518,7 +538,7 @@ class LearningService:
                 return request_view(row)
             if row.lock_version != expected_lock_version:
                 raise ConcurrentUpdateError("learning_request_version_conflict")
-            if row.status != "failed":
+            if row.status not in {"failed", "waiting_budget"}:
                 raise LearningError("learning_request_not_retryable")
             if await session.scalar(
                 select(LearningSpendReservationRecord.id)

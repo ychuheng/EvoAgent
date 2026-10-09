@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from evoagent.api.dependencies import DatabaseDependency, SettingsDependency
 from evoagent.db.repositories.base import ConcurrentUpdateError
+from evoagent.learning.configuration import candidate_configuration
 from evoagent.learning.schema import (
     CandidateReview,
     FeedbackPayload,
@@ -26,7 +27,11 @@ router = APIRouter(tags=["learning"])
 
 
 def service(database, settings):
-    return LearningService(database.session_factory, learning_enabled=settings.learning_enabled)
+    return LearningService(
+        database.session_factory,
+        learning_enabled=settings.learning_enabled,
+        generator_configuration=candidate_configuration(settings),
+    )
 
 
 async def respond(operation):

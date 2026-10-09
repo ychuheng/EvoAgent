@@ -22,7 +22,13 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from evoagent.db.models import SpendRecord
+from evoagent.db.learning_accounting import unresolved_usage
+from evoagent.db.models import (
+    LearningRequestRecord,
+    LearningSpendReservationRecord,
+    RunRecord,
+    SpendRecord,
+)
 from evoagent.providers.base import ProviderError
 
 MICROS_PER_UNIT = 1_000_000
@@ -188,6 +194,28 @@ async def evaluate_budget(
         )
 
     spent, task_spent = await spend_totals(session, scope=scope, task_id=task_id)
+    unresolved = unresolved_usage()
+    spent += int(
+        await session.scalar(
+            select(
+                func.coalesce(func.sum(LearningSpendReservationRecord.reserved_micros), 0)
+            ).where(LearningSpendReservationRecord.scope.in_((scope.value, "legacy")), unresolved)
+        )
+        or 0
+    )
+    if task_id is not None:
+        task_spent += int(
+            await session.scalar(
+                select(func.coalesce(func.sum(LearningSpendReservationRecord.reserved_micros), 0))
+                .join(
+                    LearningRequestRecord,
+                    LearningRequestRecord.id == LearningSpendReservationRecord.request_id,
+                )
+                .join(RunRecord, RunRecord.id == LearningRequestRecord.origin_run_id)
+                .where(RunRecord.task_id == task_id, unresolved)
+            )
+            or 0
+        )
     threshold = threshold_micros(limits)
     allowed = True
     reason = "ok"

@@ -41,6 +41,7 @@ export function FeedbackPanel({ runId, workspaceId }: { runId: string; workspace
       <p>记成方法会生成待审候选，不会直接启用 Skill。</p>
       <button type="button" disabled={busy || result !== null} onClick={() => void submit()}>提交任务反馈</button>
       {result && <p role="status">反馈已保存{result.learning_request_id ? `，方法请求已排队：${result.learning_request_id}` : "，没有创建方法请求"}。</p>}
+      {result?.routing === "clarify" && <p>已保存反馈，请拆分事实与方法，或明确要修订的 Skill；不会自动猜测目标。</p>}
       {error && <p role="alert" className="error">{error}</p>}
     </>}
   </section>;

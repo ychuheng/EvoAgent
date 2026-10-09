@@ -555,6 +555,11 @@ class LearningSpendReservationRecord(Base):
     status: Mapped[str] = mapped_column(String(32), default="reserved")
     actual_micros: Mapped[int | None] = mapped_column(Integer)
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    job_id: Mapped[UUID | None] = mapped_column(ForeignKey("maintenance_jobs.id"))
+    job_epoch: Mapped[int | None] = mapped_column(Integer)
+    scope: Mapped[str] = mapped_column(String(32), default="legacy", server_default="legacy")
+    input_price_micros_per_million: Mapped[int | None] = mapped_column(Integer)
+    output_price_micros_per_million: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

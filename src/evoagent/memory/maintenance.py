@@ -31,7 +31,16 @@ from evoagent.workers.rate_limit import RateLimited
 
 
 class MaintenanceWorker:
-    def __init__(self, factory, artifact_store, index_service=None, *, lane="all"):
+    def __init__(
+        self,
+        factory,
+        artifact_store,
+        index_service=None,
+        *,
+        lane="all",
+        handlers=None,
+        allowed_kinds=None,
+    ):
         if lane not in {"all", "critical", "background"}:
             raise ValueError("invalid maintenance lane")
         self.factory = factory
@@ -39,6 +48,13 @@ class MaintenanceWorker:
         self.owner = f"maintenance:{uuid4().hex}"
         self.index_service = index_service
         self.lane = lane
+        self.handlers = dict(handlers or {})
+        legacy = {"archive", "erase"}
+        if index_service:
+            legacy.update(("index_source", "index_rebuild"))
+        self.allowed_kinds = frozenset(
+            allowed_kinds if allowed_kinds is not None else legacy | self.handlers.keys()
+        )
 
     async def claim(self):
         async with self.factory() as session:
@@ -55,19 +71,18 @@ class MaintenanceWorker:
                         & (MaintenanceJobRecord.lease_expires_at <= now),
                     )
                 )
-                .where(
-                    MaintenanceJobRecord.kind.in_(
-                        ("archive", "erase", "index_source", "index_rebuild")
-                        if self.index_service
-                        else ("archive", "erase")
-                    )
-                )
-                .order_by(MaintenanceJobRecord.created_at)
+                .where(MaintenanceJobRecord.kind.in_(self.allowed_kinds))
+                .where(MaintenanceJobRecord.cancel_requested.is_(False))
+                .order_by(MaintenanceJobRecord.priority.desc(), MaintenanceJobRecord.created_at)
                 .with_for_update(skip_locked=True)
                 .limit(1)
             )
             if self.lane == "critical":
-                statement = statement.where(MaintenanceJobRecord.kind == "erase")
+                statement = statement.where(
+                    MaintenanceJobRecord.kind.in_(
+                        {"erase", "learning_revoke", "learning_budget_reconcile"}
+                    )
+                )
             elif self.lane == "background":
                 statement = statement.where(MaintenanceJobRecord.kind != "erase")
             job = await session.scalar(statement)
@@ -80,6 +95,9 @@ class MaintenanceWorker:
                 job.lease_owner = None
                 job.lease_expires_at = None
                 await session.commit()
+                handler = self.handlers.get(job.kind)
+                if handler is not None and hasattr(handler, "exhausted"):
+                    await handler.exhausted(job.id, job.lease_epoch)
                 return None
             epoch = job.lease_epoch
             changed = await session.execute(
@@ -158,6 +176,11 @@ class MaintenanceWorker:
                 await session.commit()
 
     async def execute(self, job_id, epoch):
+        async with self.factory() as lookup:
+            candidate = await lookup.get(MaintenanceJobRecord, job_id)
+            kind = candidate.kind if candidate else None
+        if kind in self.handlers:
+            return await self.handlers[kind].execute(job_id, self.owner, epoch)
         async with self.factory() as lookup:
             candidate = await lookup.get(MaintenanceJobRecord, job_id)
             if candidate and candidate.kind.startswith("index_"):

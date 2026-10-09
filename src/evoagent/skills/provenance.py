@@ -35,11 +35,13 @@ class IneligibleSkillSourceError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class FrozenSkillSource:
-    eval_run_id: UUID
+    eval_run_id: UUID | None
     run_id: UUID
     artifact_id: UUID
     source_trace_hash: str
     payload: dict[str, object]
+    source_kind: str = "train_eval"
+    learning_source_id: UUID | None = None
 
 
 class TraceEligibilityChecker:

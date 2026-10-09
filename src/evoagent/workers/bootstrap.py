@@ -441,18 +441,39 @@ async def run_maintenance_worker():
                 preprocessing=settings.embedding_preprocessing,
             ),
         )
+        from evoagent.learning.bootstrap import assemble_learning
+
+        learning_handler, learning_provider = assemble_learning(
+            database.session_factory, worker.store, settings, ServiceGate(settings, client)
+        )
+        handlers = {
+            "learning_revoke": learning_handler,
+            "learning_budget_reconcile": learning_handler,
+        }
+        if settings.learning_enabled:
+            handlers.update(learning_propose=learning_handler, learning_validate=learning_handler)
+        worker.handlers.update(handlers)
+        worker.allowed_kinds = worker.allowed_kinds | handlers.keys()
         listener = None
         lanes = []
         try:
-            if settings.runtime_maintenance_idle_backoff_enabled:
+            if settings.runtime_maintenance_idle_backoff_enabled or settings.learning_enabled:
                 from evoagent.workers.maintenance import MaintenanceLane
 
                 stopping = asyncio.Event()
                 critical = MaintenanceWorker(
-                    database.session_factory, worker.store, worker.index_service, lane="critical"
+                    database.session_factory,
+                    worker.store,
+                    worker.index_service,
+                    lane="critical",
+                    handlers=handlers,
                 )
                 background = MaintenanceWorker(
-                    database.session_factory, worker.store, worker.index_service, lane="background"
+                    database.session_factory,
+                    worker.store,
+                    worker.index_service,
+                    lane="background",
+                    allowed_kinds={"archive", "index_source", "index_rebuild"},
                 )
                 listener = asyncio.create_task(wakeup.listen())
                 lanes = [
@@ -469,10 +490,29 @@ async def run_maintenance_worker():
                             background,
                             wakeup,
                             poll_seconds=1,
-                            idle_backoff=True,
+                            idle_backoff=settings.runtime_maintenance_idle_backoff_enabled,
                         ).run(stopping)
                     ),
                 ]
+                if settings.learning_enabled:
+                    lanes.append(asyncio.create_task(learning_handler.periodic_reconciliation()))
+                    learning = MaintenanceWorker(
+                        database.session_factory,
+                        worker.store,
+                        handlers=handlers,
+                        allowed_kinds={"learning_propose", "learning_validate"},
+                    )
+                    lanes.append(
+                        asyncio.create_task(
+                            MaintenanceLane(
+                                learning,
+                                wakeup,
+                                poll_seconds=1,
+                                idle_backoff=settings.runtime_maintenance_idle_backoff_enabled,
+                                drain_immediately=True,
+                            ).run(stopping)
+                        )
+                    )
                 await asyncio.gather(*lanes)
                 return
             while True:
@@ -497,6 +537,8 @@ async def run_maintenance_worker():
                 await client.aclose()
             if hasattr(provider, "aclose"):
                 await provider.aclose()
+            if learning_provider is not None:
+                await learning_provider.aclose()
 
 
 def maintenance_main():

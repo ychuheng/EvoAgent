@@ -3,7 +3,9 @@ import { chat, type ChatWorkspace } from "../api/chat";
 import { api } from "../api/client";
 import { learning, learningError, type LearningPolicy, type LearningRequest } from "../api/learning";
 
-const STATUS: Record<string, string> = { queued: "已排队", running: "处理中", ready_for_review: "候选待审", completed: "候选已确认", rejected: "已拒绝", cancelled: "已取消", superseded: "来源失效", failed: "失败" };
+const STAGE: Record<string, string> = { prepare: "整理经验", generate: "提炼方法", static_validate: "检查候选", review: "等待审查", reviewed: "已审查", duplicate: "发现重复" };
+
+const STATUS: Record<string, string> = { queued: "已排队", running: "处理中", ready_for_review: "候选待审", completed: "候选已确认", rejected: "已拒绝", cancelled: "已取消", superseded: "来源失效", failed: "失败", waiting_budget: "等待学习额度", skipped: "已有相同方法" };
 
 export function LearningPage() {
   const [workspaces, setWorkspaces] = useState<ChatWorkspace[]>([]);
@@ -70,8 +72,9 @@ export function LearningPage() {
     <button type="button" disabled={busy} onClick={() => void act(refresh, false)}>刷新学习请求</button>
     {!rows.length && <p>当前没有学习请求。</p>}
     {rows.map(row => <article className="chat-evidence" key={row.id}><h3>{STATUS[row.status] ?? row.status}</h3>
-      <p>请求 {row.id} · 阶段 {row.stage} · 来源运行 {row.origin_run_id}</p>
+      <p>请求 {row.id} · 阶段 {STAGE[row.stage] ?? "处理候选"} · 来源运行 {row.origin_run_id}</p>
       {row.candidate_version_id && <><p>候选版本：{row.candidate_version_id}（尚不表示已启用）</p><button type="button" disabled={busy} onClick={() => void act(async () => { const version = await api.getVersion(row.candidate_version_id!); setCandidateViews(values => ({ ...values, [row.id]: JSON.stringify(version, null, 2) })); }, false)}>查看候选内容</button>{candidateViews[row.id] && <pre>{candidateViews[row.id]}</pre>}</>}
+      {row.status === "waiting_budget" && <p>当前额度不足或尚未授权。若申请时未填写额度，请保存策略后从原任务重新申请；旧申请不会自动扩大授权。</p>}
       {row.error_code && <p role="status">处理未完成：{row.error_code}</p>}
       <button type="button" disabled={busy} onClick={() => void act(async () => { const detail = await learning.get(row.id); setDetails(values => ({ ...values, [row.id]: detail })); }, false)}>查看来源与处理证据</button>
       {details[row.id] && <><pre>{JSON.stringify(details[row.id], null, 2)}</pre>{details[row.id].cost && <p>已知学习费用：{details[row.id].cost!.known_spent_micros / 1_000_000} 元 · 尚未确认的调用：{details[row.id].cost!.unknown_usage_count}</p>}{details[row.id].source?.status === "valid" && <><label>撤销学习来源的依据<textarea aria-label={`撤销依据 ${row.id}`} value={reasons[row.id] ?? ""} maxLength={2000} onChange={event => setReasons(values => ({ ...values, [row.id]: event.target.value }))} /></label><button type="button" disabled={busy || !reasons[row.id]?.trim()} onClick={() => void act(() => learning.revoke(details[row.id].source!.id, "valid", reasons[row.id]))}>撤销这份学习来源</button></>}</>}

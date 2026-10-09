@@ -50,14 +50,18 @@ def require_s6_annotations(definition: SkillDefinition) -> None:
 
 
 class CandidateGenerator(Protocol):
-    async def generate(self, sources: tuple[FrozenSkillSource, ...]) -> SkillDefinition: ...
+    async def generate(
+        self, sources: tuple[FrozenSkillSource, ...], *, context=None
+    ) -> SkillDefinition: ...
 
 
 class MockCandidateGenerator:
     def __init__(self, definition: SkillDefinition | Exception) -> None:
         self._definition = definition
 
-    async def generate(self, sources: tuple[FrozenSkillSource, ...]) -> SkillDefinition:
+    async def generate(
+        self, sources: tuple[FrozenSkillSource, ...], *, context=None
+    ) -> SkillDefinition:
         if not sources:
             raise CandidateGenerationError("at least one source is required")
         if isinstance(self._definition, Exception):
@@ -73,7 +77,9 @@ class ModelCandidateGenerator:
         self._model = model
         self._max_output_tokens = max_output_tokens
 
-    async def generate(self, sources: tuple[FrozenSkillSource, ...]) -> SkillDefinition:
+    async def generate(
+        self, sources: tuple[FrozenSkillSource, ...], *, context=None
+    ) -> SkillDefinition:
         source_payload = [source.payload for source in sources]
         request = ModelRequest(
             model=self._model,
@@ -86,6 +92,14 @@ class ModelCandidateGenerator:
                         "只返回一个符合下方 JSON Schema 的 JSON 对象；"
                         "不要返回代码、Markdown 或解释。根据训练来源与可用工具约束选择工具，"
                         "不要把示例的 calculator 当作唯一可用工具；总结可复用方法，不编造固定答案。"
+                        + (
+                            "本次为个人方法候选，输出 schema_version=2。"
+                            "必须有 applicability 与 rationale。"
+                            "反例 origin 明确 hypothetical 或有 evidence_refs 的 observed。"
+                            "修订 name 必须等于宿主 candidate_context.required_name。"
+                            if context is not None
+                            else ""
+                        )
                     ),
                 ),
                 Message(
@@ -94,7 +108,15 @@ class ModelCandidateGenerator:
                         {
                             "skill_definition_json_schema": SkillDefinition.model_json_schema(),
                             "minimal_example": {
-                                "schema_version": 1,
+                                "schema_version": 2 if context is not None else 1,
+                                **(
+                                    {
+                                        "applicability": {"task_families": ["general"]},
+                                        "rationale": "根据开发轨迹提议方法，效果尚待验证。",
+                                    }
+                                    if context is not None
+                                    else {}
+                                ),
                                 "name": "verified_calculation",
                                 "description": "核验计算并解释依据",
                                 "triggers": ["计算"],
@@ -121,10 +143,16 @@ class ModelCandidateGenerator:
                                     {
                                         "situation": "问题不是可计算表达式，而是需要外部资料",
                                         "why_not": "该 Skill 只覆盖计算核验，资料检索应另行处理",
+                                        **(
+                                            {"origin": "hypothetical", "evidence_refs": []}
+                                            if context is not None
+                                            else {}
+                                        ),
                                     }
                                 ],
                             },
                             "sanitized_training_traces": source_payload,
+                            **({"candidate_context": context} if context is not None else {}),
                         },
                         ensure_ascii=False,
                     ),
@@ -137,6 +165,8 @@ class ModelCandidateGenerator:
                 content = event.response.message.content
         if content is None:
             raise CandidateGenerationError("model did not return a completed JSON response")
+        if len(content.encode()) > 128 * 1024:
+            raise CandidateGenerationError("model candidate exceeds the 128 KiB response limit")
         try:
             return SkillDefinition.model_validate_json(content)
         except ValidationError as error:
@@ -190,59 +220,228 @@ class SkillExtractionService:
         except Exception as error:
             logger.warning("Skill 候选提炼失败：%s", type(error).__name__)
             raise
+        return await self.extract_sources(sources, definition=definition)
+
+    async def extract_sources(
+        self,
+        sources,
+        *,
+        request_id=None,
+        target_skill_id=None,
+        base_version_id=None,
+        workspace_id=None,
+        project_id=None,
+        job_guard=None,
+        definition=None,
+        context=None,
+        session=None,
+        complete_stage=None,
+    ) -> ExtractionResult:
+        """Persist a checked draft and its stage delivery in the caller's transaction.
+
+        The personal handler supplies an already generated candidate because it
+        owns cancellation monitoring and paid call accounting. Formal extraction
+        keeps its TRAIN-only wrapper and owns its UnitOfWork.
+        """
+        if not sources or len(sources) > self._max_sources:
+            raise ValueError("invalid frozen source count")
+        personal = any(source.source_kind == "personal" for source in sources)
+        if personal:
+            if (
+                any(source.source_kind != "personal" for source in sources)
+                or request_id is None
+                or job_guard is None
+                or session is None
+                or complete_stage is None
+                or definition is None
+                or workspace_id is None
+            ):
+                raise ValueError("personal extraction requires fenced stage delivery")
+        elif any(
+            source.source_kind != "train_eval" or source.eval_run_id is None for source in sources
+        ):
+            raise ValueError("formal extraction requires TRAIN provenance")
+        if definition is None:
+            definition = await self._generator.generate(sources, context=context)
+        self._validator.validate(definition)
+        if personal:
+            require_s6_annotations(definition)
+            return await self._persist_sources(
+                session,
+                sources,
+                definition,
+                request_id=request_id,
+                target_skill_id=target_skill_id,
+                base_version_id=base_version_id,
+                workspace_id=workspace_id,
+                project_id=project_id,
+                job_guard=job_guard,
+                context=context,
+                complete_stage=complete_stage,
+            )
+        # A direct call cannot manufacture formal source identity or import an
+        # offline/holdout run. Recheck the existing formal eligibility policy.
+        checked_sources = []
+        for source in sources:
+            frozen = await self._provenance.freeze(source.eval_run_id)
+            if frozen != source:
+                raise ValueError("formal frozen source identity changed")
+            checked_sources.append(frozen)
+        sources = tuple(checked_sources)
+        async with UnitOfWork(self._session_factory) as unit:
+            result = await self._persist_sources(unit.session, sources, definition)
+            await unit.commit()
+            return result
+
+    async def _persist_sources(
+        self,
+        session,
+        sources,
+        definition,
+        *,
+        request_id=None,
+        target_skill_id=None,
+        base_version_id=None,
+        workspace_id=None,
+        project_id=None,
+        job_guard=None,
+        context=None,
+        complete_stage=None,
+    ):
+
+        from evoagent.db.models import DEFAULT_WORKSPACE_ID, ArtifactRecord, LearningSourceRecord
+        from evoagent.db.repositories.skills import SkillRepository, SkillVersionRepository
+        from evoagent.learning.schema import LearningError
+
+        personal = request_id is not None
+        workspace_id = workspace_id or DEFAULT_WORKSPACE_ID
+        if personal:
+            _, request = await job_guard.check(session)
+            if (
+                request.id != request_id
+                or request.workspace_id != workspace_id
+                or request.project_id != project_id
+                or request.target_skill_id != target_skill_id
+                or request.base_version_id != base_version_id
+                or request.stage != "generate"
+            ):
+                raise LearningError("learning_extraction_identity_conflict")
+            from evoagent.learning.sources import PersonalSourceService
+
+            if definition.schema_version != 2:
+                raise LearningError("personal_candidate_v2_required")
+            await PersonalSourceService(self._session_factory).check_in_session(
+                session,
+                request.origin_run_id,
+                UUID(request.frozen_inputs["feedback_id"])
+                if request.frozen_inputs.get("feedback_id")
+                else None,
+                "feedback" if request.frozen_inputs.get("feedback_id") else "manual",
+            )
+            for item in sources:
+                source = await session.get(LearningSourceRecord, item.learning_source_id)
+                artifact = await session.get(ArtifactRecord, item.artifact_id)
+                if (
+                    source is None
+                    or source.status != "valid"
+                    or source.run_id != request.origin_run_id
+                    or source.source_revision != request.frozen_inputs["source_revision"]
+                    or source.artifact_id != item.artifact_id
+                    or source.content_hash != item.source_trace_hash
+                    or artifact is None
+                    or artifact.attributes.get("erased")
+                    or artifact.redaction_status == "quarantined"
+                    or artifact.content_hash != source.content_hash
+                ):
+                    raise LearningError("learning_source_revoked")
         definition_json = definition.model_dump(mode="json")
         digest = content_hash(definition_json)
-        extraction_key = content_hash(
-            {
-                "source_hashes": sorted(source.source_trace_hash for source in sources),
-                "definition_hash": digest,
-            }
+        identity = {
+            "source_hashes": sorted(source.source_trace_hash for source in sources),
+            "definition_hash": digest,
+        }
+        if personal:
+            identity.update(
+                {
+                    "request_id": str(request_id),
+                    "source_revision": source.source_revision,
+                    "base_version_id": str(base_version_id),
+                    "generator_context_hash": content_hash(context or {}),
+                }
+            )
+        extraction_key = content_hash(identity)
+        versions, skills = SkillVersionRepository(session), SkillRepository(session)
+        existing = await versions.find_by_extraction_key(extraction_key)
+        if existing is not None:
+            if personal:
+                await complete_stage(session, request, existing)
+            return ExtractionResult(
+                existing.skill_id, existing.id, existing.version, existing.content_hash, False
+            )
+        skill = (
+            await skills.get(target_skill_id, for_update=True)
+            if target_skill_id
+            else await skills.find_by_slug(definition.name, workspace_id=workspace_id)
         )
-        async with UnitOfWork(self._session_factory) as unit:
-            existing = await unit.skill_versions.find_by_extraction_key(extraction_key)
-            if existing is not None:
-                return ExtractionResult(
-                    existing.skill_id, existing.id, existing.version, existing.content_hash, False
+        if personal and target_skill_id is None and skill is not None:
+            raise LearningError("candidate_slug_conflict")
+        if personal and target_skill_id is not None:
+            from evoagent.skills.access import SkillAccessPolicy
+
+            if (
+                skill.workspace_id != workspace_id
+                or skill.project_id not in (None, project_id)
+                or definition.name != skill.slug
+            ):
+                raise LearningError("revision_target_invalid")
+            base = await SkillAccessPolicy().check(
+                session, base_version_id, workspace_id=workspace_id, project_id=project_id
+            )
+            if base.skill_id != skill.id:
+                raise LearningError("revision_target_invalid")
+        if skill is None:
+            skill = SkillRecord(
+                name=definition.name,
+                slug=definition.name,
+                description=definition.description,
+                status=SkillStatus.ENABLED,
+                workspace_id=workspace_id,
+                project_id=project_id,
+            )
+            skills.add(skill)
+            await session.flush()
+        version = SkillVersionRecord(
+            skill_id=skill.id,
+            parent_version_id=base_version_id,
+            version=await skills.next_version(skill.id),
+            schema_version=definition.schema_version,
+            definition=definition_json,
+            content_hash=digest,
+            extraction_key=extraction_key,
+            lifecycle_status=SkillVersionStatus.DRAFT,
+        )
+        versions.add(version)
+        await session.flush()
+        for source in sources:
+            session.add(
+                SkillSourceRecord(
+                    skill_version_id=version.id,
+                    source_run_id=source.run_id,
+                    source_kind=source.source_kind,
+                    learning_source_id=source.learning_source_id,
+                    source_eval_run_id=source.eval_run_id,
+                    trace_artifact_id=source.artifact_id,
+                    source_trace_hash=source.source_trace_hash,
                 )
-            skill = await unit.skills.find_by_slug(definition.name)
-            if skill is None:
-                skill = SkillRecord(
-                    name=definition.name,
-                    slug=definition.name,
-                    description=definition.description,
-                    status=SkillStatus.ENABLED,
-                )
-                unit.skills.add(skill)
-                await unit.session.flush()
-            version = SkillVersionRecord(
+            )
+        session.add(
+            SkillEventRecord(
                 skill_id=skill.id,
-                version=await unit.skills.next_version(skill.id),
-                schema_version=definition.schema_version,
-                definition=definition_json,
-                content_hash=digest,
-                extraction_key=extraction_key,
-                lifecycle_status=SkillVersionStatus.DRAFT,
+                sequence=await skills.allocate_event_sequence(skill.id),
+                event_type="skill.version_drafted",
+                payload={"skill_version_id": str(version.id), "source_count": len(sources)},
             )
-            unit.skill_versions.add(version)
-            await unit.session.flush()
-            for source in sources:
-                unit.session.add(
-                    SkillSourceRecord(
-                        skill_version_id=version.id,
-                        source_run_id=source.run_id,
-                        source_eval_run_id=source.eval_run_id,
-                        trace_artifact_id=source.artifact_id,
-                        source_trace_hash=source.source_trace_hash,
-                    )
-                )
-            sequence = await unit.skills.allocate_event_sequence(skill.id)
-            unit.session.add(
-                SkillEventRecord(
-                    skill_id=skill.id,
-                    sequence=sequence,
-                    event_type="skill.version_drafted",
-                    payload={"skill_version_id": str(version.id), "source_count": len(sources)},
-                )
-            )
-            await unit.commit()
-            return ExtractionResult(skill.id, version.id, version.version, digest, True)
+        )
+        if personal:
+            await complete_stage(session, request, version)
+        return ExtractionResult(skill.id, version.id, version.version, digest, True)

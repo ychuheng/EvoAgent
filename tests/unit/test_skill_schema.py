@@ -62,10 +62,56 @@ def test_skill_definition_is_strict_and_has_stable_hash() -> None:
         SkillDefinition.model_validate({**definition_data(), "unexpected": True})
 
 
+def test_v1_hash_matches_pre_v2_frozen_oracle():
+    # Captured from commit 55d1fd4 before schema v2 existed, not recomputed by
+    # today's serializer. Old Run/version identities must remain byte-identical.
+    body = SkillDefinition.model_validate(definition_data()).model_dump(mode="json")
+    assert (
+        content_hash(body)
+        == "sha256:4fc29a7910d208326f22647aa019f38494a69bd4bbdc3c4589644cd8c4d6b4e7"
+    )
+    assert "applicability" not in body and "rationale" not in body
+
+
+def v2_data():
+    data = definition_data()
+    data.update(
+        schema_version=2,
+        applicability={
+            "task_families": ["research"],
+            "required_facts": [{"key": "tool.available", "op": "contains", "value": "web_search"}],
+        },
+        rationale="单次开发证据，尚未验证收益",
+        stop_conditions=["资料不足停止"],
+        counterexamples=[
+            {"situation": "假设资料缺失", "why_not": "不能编造来源", "origin": "hypothetical"}
+        ],
+    )
+    return data
+
+
+def test_v2_has_explicit_applicability_and_counterexample_provenance():
+    definition = SkillDefinition.model_validate(v2_data())
+    current = SkillDefinitionValidator(
+        validator()._registry, allowed_tools=frozenset({"web_search"}), supported_schema_version=2
+    )
+    current.validate(definition)
+    assert definition.model_dump(mode="json")["counterexamples"][0]["origin"] == "hypothetical"
+    current.validate(SkillDefinition.model_validate(definition_data()))
+    data = v2_data()
+    data["counterexamples"][0]["origin"] = "observed"
+    with pytest.raises(ValidationError, match="evidence"):
+        SkillDefinition.model_validate(data)
+    data = v2_data()
+    data["applicability"]["required_facts"][0]["key"] = "__import__('os')"
+    with pytest.raises(ValidationError):
+        SkillDefinition.model_validate(data)
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
-        lambda data: data.update(schema_version=2),
+        lambda data: data.update(schema_version=3),
         lambda data: data["preconditions"].update(allowed_tools=["shell"]),
         lambda data: data["steps"][0].update(args={"path": "C:\\secret.txt"}),
         lambda data: data["steps"][0].update(args={"query": "${inputs.unknown}"}),

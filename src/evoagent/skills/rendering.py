@@ -24,6 +24,26 @@ class SkillContextRenderer:
                 lines.append(f"{index}. 模型处理：{step.instruction}")
         lines.append("成功标准：" + "；".join(definition.success_criteria))
         if self.version == 2:
+            if definition.schema_version == 2:
+                applicability = definition.applicability
+                lines.extend(
+                    [
+                        "任务范围：" + "、".join(applicability.task_families),
+                        "文件类型：" + ("、".join(applicability.file_types) or "未限定"),
+                        "所需事实："
+                        + str(
+                            [item.model_dump(mode="json") for item in applicability.required_facts]
+                        ),
+                        "排除条件："
+                        + str(
+                            [
+                                item.model_dump(mode="json")
+                                for item in applicability.excluded_conditions
+                            ]
+                        ),
+                        "提议依据（不代表效果已证实）：" + definition.rationale,
+                    ]
+                )
             lines.extend(
                 [
                     "触发条件：" + "；".join(definition.triggers),
