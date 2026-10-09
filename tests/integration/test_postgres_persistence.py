@@ -105,3 +105,62 @@ async def test_two_workers_cannot_claim_the_same_task(postgres_database: Databas
     leases = [lease for lease in claims if lease is not None]
     assert len(leases) == 1
     assert leases[0].task_id == aggregate.task.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_concurrent_artifact_identity_and_review(postgres_database, tmp_path):
+    from evoagent.privacy.artifact_access import ArtifactInjectionGuard
+    from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
+
+    service = TaskService(postgres_database.session_factory)
+    session = await service.create_session("artifact identity")
+    aggregate = await service.create_task(
+        session_id=session.id, goal="test", provider="mock", model="mock"
+    )
+    store = LocalArtifactStore(tmp_path)
+    artifacts = ArtifactService(store, postgres_database.session_factory)
+    record = await artifacts.create_unique(
+        run_id=aggregate.run.id,
+        name="safe.txt",
+        content=b"safe",
+        artifact_type="tool_output",
+        attributes={},
+    )
+    guard = ArtifactInjectionGuard(
+        session_factory=postgres_database.session_factory, artifact_store=store
+    )
+    await asyncio.gather(
+        *(
+            guard._ensure_block_event(
+                run_id=aggregate.run.id,
+                source_id=record.id,
+                source_hash=record.content_hash,
+                categories=(),
+                purpose="test",
+            )
+            for _ in range(8)
+        )
+    )
+    request = dict(
+        artifact_id=record.id,
+        actor="human",
+        reason="single review",
+        expected_policy_version=None,
+        expected_content_hash=record.content_hash,
+        client_request_id="same",
+        offline=True,
+    )
+    results = await asyncio.gather(*(guard.clear_quarantine(**request) for _ in range(4)))
+    assert all(x.outcome == "cleared" for x in results)
+    async with postgres_database.session_factory() as session:
+        events = tuple(
+            await session.scalars(
+                select(RunEventRecord).where(RunEventRecord.run_id == aggregate.run.id)
+            )
+        )
+        assert len([x for x in events if x.event_type == "artifact.injection_blocked"]) == 1
+        assert (
+            len([x for x in events if x.event_type == "artifact.quarantine_review_requested"]) == 1
+        )
+        assert len([x for x in events if x.event_type == "artifact.quarantine_cleared"]) == 1

@@ -7,8 +7,11 @@ def next_status(current: str, action: str) -> str:
     allowed = {
         "confirm": ({"proposed"}, "confirmed"),
         "reject": ({"proposed"}, "rejected"),
-        "revoke": ({"proposed", "confirmed"}, "revoked"),
-        "erase": ({"proposed", "confirmed", "rejected", "revoked", "superseded"}, "revoked"),
+        "revoke": ({"proposed", "confirmed", "quarantined"}, "revoked"),
+        "erase": (
+            {"proposed", "confirmed", "rejected", "revoked", "superseded", "quarantined"},
+            "revoked",
+        ),
     }
     sources, target = allowed[action]
     if current not in sources:

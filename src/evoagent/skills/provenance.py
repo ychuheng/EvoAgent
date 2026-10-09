@@ -139,16 +139,30 @@ class ProvenanceService:
                 )
             )
             if existing is not None and existing.attributes.get("eval_run_id") == str(eval_run_id):
-                content = await self._artifacts.read(existing.uri)
+                if existing.attributes.get("erased"):
+                    raise IneligibleSkillSourceError("frozen source was erased")
+                content = await self._artifacts.read_bounded(
+                    existing.uri, max_bytes=8 * 1024 * 1024
+                )
                 actual_hash = "sha256:" + hashlib.sha256(content).hexdigest()
                 if actual_hash != existing.content_hash:
                     raise IneligibleSkillSourceError("frozen source artifact was modified")
+                payload = json.loads(content)
+                if not isinstance(payload, dict):
+                    raise IneligibleSkillSourceError("frozen source payload is invalid")
+                sanitized = self._sanitizer.sanitize(payload)
+                if sanitized.payload != payload:
+                    raise IneligibleSkillSourceError("frozen source requires a new safe version")
+                await self._eligibility.check(eval_run_id)
+                await session.refresh(existing)
+                if existing.attributes.get("erased") or existing.content_hash != actual_hash:
+                    raise IneligibleSkillSourceError("frozen source changed during read")
                 return FrozenSkillSource(
                     eval_run_id,
                     eval_run.run_id,
                     existing.id,
                     existing.content_hash,
-                    json.loads(content),
+                    payload,
                 )
 
         bundle = await TraceBundleService(self._session_factory).build(

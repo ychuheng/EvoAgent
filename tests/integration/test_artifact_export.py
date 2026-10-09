@@ -173,6 +173,7 @@ async def _quarantine(database: Database, artifact_id: str) -> str:
     async with database.session_factory() as session:
         record = await session.get(ArtifactRecord, UUID(artifact_id))
         record.redaction_status = "quarantined"
+        record.type = "tool_output"
         record.redaction_policy_version = POLICY_VERSION - 1
         record.redaction_checked_hash = None
         await session.commit()

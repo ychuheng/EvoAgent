@@ -23,12 +23,12 @@ class ToolOutputStore:
       hash 与当前策略复查、必要时隔离并拒绝注入。**不再**只校验 hash 就返回内容。
     """
 
-    def __init__(self, run_id, service, session_factory):
+    def __init__(self, run_id, service, session_factory, *, settings=None):
         self.run_id = run_id
         self.service = service
         self.factory = session_factory
         self._guard = ArtifactInjectionGuard(
-            session_factory=session_factory, artifact_store=service
+            session_factory=session_factory, artifact_store=service, settings=settings
         )
 
     async def preserve(self, content, limit):

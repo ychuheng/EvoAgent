@@ -1,0 +1,21 @@
+{
+  "measured_on": "2026-10-08",
+  "source_revision": "583059a",
+  "scope": "D:/EvoAgent/workspace recursively discovered artifacts directories; metadata only",
+  "method": "Deduplicate resolved regular-file paths; exclude symlink files; collect stat().st_size; nearest-rank percentiles",
+  "directories": 7,
+  "files": 112,
+  "stat_errors": 0,
+  "p50_bytes": 153,
+  "p95_bytes": 14200,
+  "p99_bytes": 43906,
+  "max_bytes": 43906,
+  "over_8_mib_count": 0,
+  "over_8_mib_percent": 0,
+  "over_64_mib_count": 0,
+  "acceptance_database_linked": false,
+  "content_scanned": false,
+  "acceptance_database_coverage": "not_measured",
+  "expected_injection_rejection_rate": "unknown",
+  "limitations": "Local development artifacts only; size counts do not measure secrets, corruption, policy compatibility or scanner timeouts. No file contents or private configuration were read."
+}

@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from evoagent.core.models import ToolRisk
 from evoagent.db.models import RunSkillSelectionRecord, SkillVersionRecord
 from evoagent.db.unit_of_work import UnitOfWork
+from evoagent.memory.schema import MemoryError
+from evoagent.privacy.redaction import redact_value
 from evoagent.retrieval.lexical import bm25, tokenize  # noqa: F401
 from evoagent.runtime.run_config import RunMode
 from evoagent.skills.schema import SkillDefinition
@@ -166,6 +168,8 @@ class SkillRetrievalService:
 
     @staticmethod
     def _document(version: SkillVersionRecord) -> SkillDocument:
+        if redact_value(version.definition) != version.definition:
+            raise MemoryError("context_source_blocked")
         return SkillDocument(
             version.skill_id,
             version.id,

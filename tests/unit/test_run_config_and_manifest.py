@@ -78,6 +78,17 @@ def test_tool_manifest_hash_tracks_implementation_version() -> None:
     assert first != second
 
 
+def test_renderer_version_is_frozen_and_changes_comparison_identity():
+    old = snapshot()
+    assert "skill_renderer_version" not in old.canonical_dict()
+    current = snapshot(skill_renderer_version=2)
+    assert current.content_hash() != old.content_hash()
+    assert not current.comparable_with(old)
+    assert (
+        RunConfigSnapshot.model_validate(old.canonical_dict()).content_hash() == old.content_hash()
+    )
+
+
 def test_context_policy_changes_comparison_hash_without_changing_legacy_hash():
     import hashlib
     import json
@@ -90,6 +101,7 @@ def test_context_policy_changes_comparison_hash_without_changing_legacy_hash():
     legacy.pop("selected_skills")
     legacy.pop("retrieval")
     legacy.pop("provider_thinking_mode")
+    legacy.pop("skill_renderer_version")
     digest = (
         "sha256:"
         + hashlib.sha256(

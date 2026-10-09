@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import os
+import stat
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,8 @@ class ArtifactStore(Protocol):
     async def write(self, run_id: UUID, name: str, content: bytes) -> StoredArtifact: ...
 
     async def read(self, uri: str) -> bytes: ...
+
+    async def read_bounded(self, uri: str, *, max_bytes: int) -> bytes: ...
 
     async def write_unique(self, run_id: UUID, name: str, content: bytes) -> StoredArtifact: ...
 
@@ -95,6 +98,24 @@ class LocalArtifactStore:
     async def read(self, uri: str) -> bytes:
         return await asyncio.to_thread(self._read, uri)
 
+    async def read_bounded(self, uri: str, *, max_bytes: int) -> bytes:
+        if max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+        return await asyncio.to_thread(self._read_bounded, uri, max_bytes)
+
+    def _read_bounded(self, uri: str, max_bytes: int) -> bytes:
+        target = (self._root / uri).resolve(strict=False)
+        if not target.is_relative_to(self._root):
+            raise ValueError("artifact path escapes configured root")
+        descriptor = os.open(target, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("artifact must be a regular file")
+            data = stream.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise ValueError("artifact exceeds bounded read limit")
+        return data
+
     async def erase(self, uri: str) -> None:
         target = (self._root / uri).resolve(strict=False)
         if not target.is_relative_to(self._root) or target == self._root:
@@ -141,6 +162,9 @@ class ArtifactService:
         """通过受控 Store 读取已经登记的内容。"""
 
         return await self._store.read(uri)
+
+    async def read_bounded(self, uri: str, *, max_bytes: int) -> bytes:
+        return await self._store.read_bounded(uri, max_bytes=max_bytes)
 
     async def create(
         self,

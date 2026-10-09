@@ -23,6 +23,7 @@ class RunEventRepository:
         payload: dict[str, Any],
         created_at: datetime,
         schema_version: int = 1,
+        dedupe_key: str | None = None,
     ) -> RunEventRecord:
         """通过数据库原子计数器为事件分配唯一 sequence。"""
 
@@ -39,6 +40,7 @@ class RunEventRepository:
             run_id=run_id,
             sequence=next_sequence - 1,
             event_type=event_type,
+            dedupe_key=dedupe_key,
             payload=payload,
             schema_version=schema_version,
             created_at=created_at,
@@ -46,6 +48,29 @@ class RunEventRepository:
         self._session.add(event)
         await self._session.flush()
         return event
+
+    async def lock_run(self, run_id: UUID) -> None:
+        """Serialize check-and-append on PostgreSQL and SQLite without consuming a sequence."""
+        result = await self._session.execute(
+            update(RunRecord)
+            .where(RunRecord.id == run_id)
+            .values(next_event_sequence=RunRecord.next_event_sequence)
+            .returning(RunRecord.id)
+        )
+        if result.scalar_one_or_none() is None:
+            raise RecordNotFoundError(f"run does not exist: {run_id}")
+
+    async def append_once(self, *, dedupe_key: str, **kwargs) -> RunEventRecord:
+        await self.lock_run(kwargs["run_id"])
+        existing = await self._session.scalar(
+            select(RunEventRecord).where(
+                RunEventRecord.run_id == kwargs["run_id"],
+                RunEventRecord.dedupe_key == dedupe_key,
+            )
+        )
+        return (
+            existing if existing is not None else await self.append(dedupe_key=dedupe_key, **kwargs)
+        )
 
     async def list_for_run(
         self, run_id: UUID, *, after_sequence: int = 0

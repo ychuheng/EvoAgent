@@ -103,6 +103,36 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
     await act(() => chat.decideApproval(approvalId, "approve", response), approvalId);
   }
 
+  const [reviewReasons, setReviewReasons] = useState<Record<string, string>>({});
+  const [reviewRequests, setReviewRequests] = useState<Record<string, { fingerprint: string; id: string }>>({});
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+
+  async function reviewArtifact(detail: ArtifactDetail) {
+    const reason = (reviewReasons[detail.id] ?? "").trim();
+    if (!reason || busy) return;
+    const fingerprint = JSON.stringify([reason, detail.content_hash, detail.redaction_policy_version]);
+    const previous = reviewRequests[detail.id];
+    const id = previous?.fingerprint === fingerprint ? previous.id : crypto.randomUUID();
+    setReviewRequests((values) => ({ ...values, [detail.id]: { fingerprint, id } }));
+    setBusy(true);
+    setError("");
+    try {
+      const outcome = await chat.reviewArtifact(detail.id, {
+        reason, expected_policy_version: detail.redaction_policy_version ?? null,
+        expected_content_hash: detail.content_hash, client_request_id: id, offline: true,
+      });
+      setReviewNotes((values) => ({ ...values, [detail.id]: outcome.note }));
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      try {
+        const current = await chat.artifact(detail.id);
+        setArtifactPreviews((values) => ({ ...values, [detail.id]: { data: current } }));
+      } catch (reason) { setError(String(reason)); }
+      setBusy(false);
+    }
+  }
+
   async function toggleArtifactPreview(artifactId: string) {
     const shown = artifactPreviews[artifactId];
     if (shown?.data || shown?.error) {
@@ -191,6 +221,14 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
             if (!detail) return null;
             return <div className="chat-artifact-preview">
               <p className="chat-meta">{detail.note}{detail.preview_truncated ? "（预览已截断）" : ""}</p>
+              {detail.redaction_status && <p>注入检查：{detail.redaction_status} · 已检查策略 {detail.redaction_policy_version ?? "未知"} · 当前策略 {detail.current_policy_version}</p>}
+              {["tool_output", "context_source"].includes(detail.type) && ["quarantined", "unchecked"].includes(detail.redaction_status ?? "") && <div>
+                <p>单件受限复查：最多 64 MiB，仍命中敏感规则则继续隔离；不会绕过规则。</p>
+                <label>复查理由<input aria-label="产物复查理由" value={reviewReasons[detail.id] ?? ""} maxLength={2000}
+                  onChange={(event) => setReviewReasons((values) => ({ ...values, [detail.id]: event.target.value }))} /></label>
+                <button type="button" disabled={busy || !(reviewReasons[detail.id] ?? "").trim()} onClick={() => { void reviewArtifact(detail); }}>确认并复查此产物</button>
+              </div>}
+              {reviewNotes[detail.id] && <p role="status">{reviewNotes[detail.id]}</p>}
               {detail.preview === null
                 ? <p className="chat-meta">该产物没有文本预览（二进制或未启用预览）；请下载后核对 SHA-256。</p>
                 : <pre>{detail.preview}</pre>}

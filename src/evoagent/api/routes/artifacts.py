@@ -26,6 +26,7 @@ from evoagent.privacy.artifact_access import (
     ArtifactInjectionGuard,
     QuarantineReviewStale,
 )
+from evoagent.privacy.redaction import POLICY_VERSION
 from evoagent.tools.base import ToolPermissionError
 from evoagent.trace.artifacts import LocalArtifactStore
 
@@ -69,7 +70,9 @@ async def _load(record: ArtifactRecord, settings) -> bytes:
         )
     store = LocalArtifactStore(settings.artifact_root)
     try:
-        content = await store.read(record.uri)
+        content = await store.read_bounded(
+            record.uri, max_bytes=settings.artifact_download_max_bytes
+        )
     except (OSError, ValueError) as error:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -118,6 +121,9 @@ async def get_artifact(
         "size_bytes": record.size_bytes,
         "created_at": record.created_at,
         "metadata": record.attributes,
+        "redaction_status": record.redaction_status,
+        "redaction_policy_version": record.redaction_policy_version,
+        "current_policy_version": POLICY_VERSION,
         "preview": preview,
         "preview_truncated": truncated,
         "download_url": f"/api/v1/artifacts/{record.id}/download",
@@ -137,9 +143,10 @@ class QuarantineReviewRequest(BaseModel):
     """
 
     reason: str = Field(min_length=1, max_length=2_000)
-    expected_policy_version: int = Field(ge=0)
+    expected_policy_version: int | None = Field(default=None, ge=0)
     expected_content_hash: str = Field(min_length=8, max_length=128)
     client_request_id: str = Field(min_length=1, max_length=128)
+    offline: bool = False
 
 
 @router.post("/{artifact_id}/quarantine-review")
@@ -163,6 +170,7 @@ async def review_quarantine(
     guard = ArtifactInjectionGuard(
         session_factory=database.session_factory,
         artifact_store=LocalArtifactStore(settings.artifact_root),
+        settings=settings,
     )
     try:
         outcome = await guard.clear_quarantine(
@@ -172,6 +180,7 @@ async def review_quarantine(
             expected_policy_version=body.expected_policy_version,
             expected_content_hash=body.expected_content_hash,
             client_request_id=body.client_request_id,
+            offline=body.offline,
         )
     except QuarantineReviewStale as error:
         # 过期条件：内容 hash、策略版本或隔离状态在复核期间变了。
@@ -180,6 +189,8 @@ async def review_quarantine(
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
     except ValueError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+    async with database.session_factory() as session:
+        current = await session.get(ArtifactRecord, artifact_id)
     return {
         "artifact_id": str(outcome.artifact_id),
         "outcome": outcome.outcome,
@@ -188,8 +199,9 @@ async def review_quarantine(
         "policy_version": outcome.policy_version,
         "checked_hash": outcome.checked_hash,
         "replayed": outcome.replayed,
+        "current_redaction_status": current.redaction_status,
         "note": (
-            "已解除隔离；历史 bytes 与 content_hash 未变，只更新了检查结论。"
+            "该请求通过检查；当前状态以 current_redaction_status 为准，历史回放不代表当前已解封。"
             if outcome.outcome == OUTCOME_CLEARED
             else "仍保持隔离：当前规则依然命中该正文。纠正误报需要改规则并升策略版本，"
             "而不是绕过检测。"

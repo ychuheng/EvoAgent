@@ -1,0 +1,50 @@
+{
+  "events:legacy-credential": {
+    "policy_version": 2,
+    "reason": "Explicit security change: shared detection now applies to string values; includes legacy credential omissions as well as DSN/JWT expansion.",
+    "old_hash": "addeca2d922c40becc417317a3bedb2f80530b53c6d39bc9203352676e23dccd",
+    "new_hash": "160baff0031dd05c3feb6a44c9384d8053caba30048c6da3ca081fbe9ca2c1d9"
+  },
+  "events:dsn": {
+    "policy_version": 2,
+    "reason": "Explicit security change: shared detection now applies to string values; includes legacy credential omissions as well as DSN/JWT expansion.",
+    "old_hash": "4e9866ad7c307afa9dc570e61b32c2497883ae9f32018fa48bd0a4d28dc0f60a",
+    "new_hash": "f0df332b308bd6cf45e0bbbc10ac5abea86bd85eda4c6ed15fff2aadb1484a67"
+  },
+  "events:jwt": {
+    "policy_version": 2,
+    "reason": "Explicit security change: shared detection now applies to string values; includes legacy credential omissions as well as DSN/JWT expansion.",
+    "old_hash": "92e18d433cdd99941821ad35eeb5c9b53d34d8427a494a99d5aa7782f0884cbd",
+    "new_hash": "80dda49d15efb8a11f1fb3b6d5be5334a683e5e442b4cb8377da9997786487a8"
+  },
+  "events:private-key": {
+    "policy_version": 2,
+    "reason": "Explicit security change: shared detection now applies to string values; includes legacy credential omissions as well as DSN/JWT expansion.",
+    "old_hash": "b5d57c6bb7cdf808d3e722156bd94cefc528f87154b4ad23e6a80523911dbd07",
+    "new_hash": "47fd73936ca0eb1be6479009b76667e16cde64fdb74d8120db57851f1c1cb0ef"
+  },
+  "trace:legacy-credential": {
+    "policy_version": 2,
+    "reason": "Explicit security change: shared detection now applies to string values; includes legacy credential omissions as well as DSN/JWT expansion.",
+    "old_hash": "d0370de62c6b3973f13e4229cdacb43da46fe4b852eff575b3ff84c837e21e18",
+    "new_hash": "07f0372678507cf71a73d68e86d43be5d439def9537427bfab8552f196dc57f8"
+  },
+  "trace:dsn": {
+    "policy_version": 2,
+    "reason": "Explicit security change: shared detection now applies to string values; includes legacy credential omissions as well as DSN/JWT expansion.",
+    "old_hash": "9d61e480e2b9ae7694d1349276e3087fa477666185893e6971a955280a7288d9",
+    "new_hash": "11e08e0bdf84bf6da7c97469b89210fc7c43b4105d969ed12324d23e721f6efd"
+  },
+  "trace:jwt": {
+    "policy_version": 2,
+    "reason": "Explicit security change: shared detection now applies to string values; includes legacy credential omissions as well as DSN/JWT expansion.",
+    "old_hash": "eda5a8a5db2c80e22e85681cbfe37c83975bc847695fbf15fbb5890e2f052378",
+    "new_hash": "07e9badac5796d1449f7d54f858308d5a7ba674201f2ac54cd95bf4c63130ee0"
+  },
+  "trace:private-key": {
+    "policy_version": 2,
+    "reason": "Explicit security change: shared detection now applies to string values; includes legacy credential omissions as well as DSN/JWT expansion.",
+    "old_hash": "2b87ffe834dc41c71198fb3ba3b9b3a9e600142e1eba6064f19e5404b9f37c2c",
+    "new_hash": "331f94b43135a9a40a480ba7f47b9a0b4e6749a3ce6e41d0fedfa0c43b0d6ab6"
+  }
+}

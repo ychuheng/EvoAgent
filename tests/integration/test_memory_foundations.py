@@ -130,6 +130,7 @@ async def test_version_written_under_older_rules_is_not_injectable_and_gets_quar
     并且要在重新索引前把它隔离，而不是每次静默跳过。
     """
 
+    from evoagent.db.models import MemoryEntryRecord
     from evoagent.memory import service as memory_service
     from evoagent.memory.repository import verify_version
     from evoagent.retrieval.embeddings import MockEmbeddingProvider
@@ -152,8 +153,8 @@ async def test_version_written_under_older_rules_is_not_injectable_and_gets_quar
             scope="session",
         ),
     )
-    monkeypatch.undo()
     entry, version = await confirm(service, sid, entry, version)
+    monkeypatch.undo()
 
     async with db.session_factory() as session:
         row = await session.get(MemoryVersionRecord, version.id)
@@ -171,7 +172,36 @@ async def test_version_written_under_older_rules_is_not_injectable_and_gets_quar
     async with db.session_factory() as session:
         row = await session.get(MemoryVersionRecord, version.id)
         assert row.status == "quarantined"
+        entry = await session.get(MemoryEntryRecord, entry.id)
+        assert entry.status == "quarantined" and entry.current_version_id is None
+    entry, version = await service.decide(
+        sid, version.id, MemoryDecision(action="erase", expected_lock_version=entry.lock_version)
+    )
+    assert version.status == "revoked" and entry.status == "revoked"
     await db.dispose()
+
+
+async def test_old_proposal_cannot_be_confirmed_under_current_policy(env, monkeypatch):
+    from evoagent.memory import service as module
+
+    db, _, sid, _ = env
+    service = MemoryService(db.session_factory)
+    task, message = await completed(env, goal="postgres://fake:fake@localhost/example")
+    monkeypatch.setattr(module, "detect_sensitive", lambda _: ())
+    entry, version = await service.propose(
+        sid,
+        MemoryProposal(
+            source_message_id=message.id,
+            fact_key="database_url",
+            content="postgres://fake:fake@localhost/example",
+            scope="session",
+        ),
+    )
+    monkeypatch.undo()
+    with pytest.raises(MemoryError, match="sensitive_memory_content"):
+        await confirm(service, sid, entry, version)
+    async with db.session_factory() as session:
+        assert (await session.get(MemoryVersionRecord, version.id)).status == "proposed"
 
 
 async def test_clean_fact_still_proposes_and_confirms(env):

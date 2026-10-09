@@ -16,8 +16,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any
 from uuid import UUID
 
@@ -30,21 +32,17 @@ from evoagent.privacy.redaction import (
     POLICY_VERSION,
     RedactionResult,
     redact_text,
-    redact_text_result,
 )
+from evoagent.privacy.scanner import ScanLimits, ScanUnavailable, shared_scanner
 from evoagent.tools.base import ToolExecutionError, ToolPermissionError
 
 #: 允许注入模型的 artifact 类型白名单。其余类型（评测报告、skill 来源、下载产物等）
 #: 没有"重新注入模型"的用途，一律不因门禁通过而获得注入权限。
 INJECTABLE_ARTIFACT_TYPES = frozenset({"tool_output", "context_source"})
 
-#: 扫描预算来自实测：现有原语中位 51.45 ms/MB、**最差 70.04 ms/MB**（规则 v2 + 字面量
-#: 预筛），见 docs/reports/artifact-scan-budget-2026-10-08.json。
-#: 6 MiB（6.29 MB）× 70.04 ms/MB ≈ 441 ms，**最差档也在 500 ms 预算内**（留约 12% 余量），
-#: 因此这对参数自洽：低于尺寸上限的正文预期都能在时间预算内扫完。
-#: 超过尺寸上限的按 §2.1 第 8 条**拒绝注入**，另排受限离线扫描；不降级放行。
-SCAN_BUDGET_MS = 500
-MAX_SCAN_BYTES = 6 * 1024 * 1024
+#: 全量扫描采用有界读取、CPU/墙钟截止时间及可终止子进程。
+SCAN_BUDGET_MS = 1000
+MAX_SCAN_BYTES = 8 * 1024 * 1024
 
 BLOCK_EVENT_TYPE = "artifact.injection_blocked"
 
@@ -56,9 +54,6 @@ REVIEW_EVENT_TYPES = (REVIEW_REQUESTED_EVENT, REVIEW_CLEARED_EVENT, REVIEW_REJEC
 
 OUTCOME_CLEARED = "cleared"
 OUTCOME_REJECTED = "rejected"
-
-#: 复核幂等回放的事件回看窗口。它**不是**严格幂等保证，见 `_find_review` 的说明。
-_REVIEW_LOOKBACK_EVENTS = 1_000
 
 STATUS_UNCHECKED = "unchecked"
 STATUS_VERIFIED = "verified"
@@ -145,13 +140,42 @@ class ArtifactInjectionGuard:
         artifact_store=None,
         scan_budget_ms: int = SCAN_BUDGET_MS,
         max_scan_bytes: int = MAX_SCAN_BYTES,
+        settings=None,
     ) -> None:
         # 只做派生正文复查（`verify_derived_text`）的调用方不需要 artifact 存储；
         # 那种情况下 `read_verified_text` 会显式报错，而不是静默放行。
         self._session_factory = session_factory
         self._store = artifact_store
-        self._scan_budget_ms = scan_budget_ms
-        self._max_scan_bytes = max_scan_bytes
+        self._scan_budget_ms = settings.artifact_scan_wall_ms if settings else scan_budget_ms
+        self._max_scan_bytes = (
+            settings.artifact_scan_inline_max_bytes if settings else max_scan_bytes
+        )
+        self._limits = ScanLimits(
+            max_bytes=self._max_scan_bytes,
+            wall_ms=self._scan_budget_ms,
+            cpu_ms=settings.artifact_scan_cpu_ms if settings else 250,
+            concurrency=settings.artifact_scan_concurrency if settings else 2,
+            queue_size=settings.artifact_scan_queue_size if settings else 16,
+        )
+        self._offline_limits = ScanLimits(
+            max_bytes=64 * 1024 * 1024,
+            cpu_ms=2000,
+            wall_ms=5000,
+            concurrency=self._limits.concurrency,
+            queue_size=self._limits.queue_size,
+        )
+
+    async def _read_bounded(self, uri, *, limits, deadline):
+        reader = getattr(self._store, "read_bounded", None)
+        if reader is None:
+            raise ArtifactCheckUnavailable("artifact store has no bounded reader")
+        try:
+            async with asyncio.timeout_at(deadline):
+                return await reader(uri, max_bytes=limits.max_bytes)
+        except (ValueError, TimeoutError) as error:
+            raise ArtifactCheckUnavailable(
+                "artifact bounded read limit or deadline exceeded"
+            ) from error
 
     async def read_verified_text(
         self,
@@ -167,6 +191,7 @@ class ArtifactInjectionGuard:
 
         if self._store is None:
             raise RuntimeError("artifact store is required for read_verified_text")
+        started = monotonic()
 
         from evoagent.db.models import ArtifactRecord
 
@@ -183,13 +208,20 @@ class ArtifactInjectionGuard:
             expected_hash = record.content_hash
             size_bytes = record.size_bytes
             state = _check_state(record)
+            offline_verified = (
+                state.reusable and record.attributes.get("redaction_scan_mode") == "offline"
+            )
 
         if artifact_type not in INJECTABLE_ARTIFACT_TYPES:
             raise ArtifactNotInjectable(f"artifact type is not injectable: {artifact_type}")
+        if state.policy_version is not None and state.policy_version > POLICY_VERSION:
+            raise ArtifactCheckUnavailable("runtime sensitive policy is older than artifact policy")
 
         # 先按**登记尺寸**（来自数据库，无需读盘）做预算判断：超过预算的正文根本
         # 不进内存，而不是读进来再拒绝（F3）。
-        if size_bytes > self._max_scan_bytes:
+        limits = self._offline_limits if offline_verified else self._limits
+        deadline = started + limits.wall_ms / 1000
+        if size_bytes > limits.max_bytes:
             await self._ensure_block_event(
                 run_id=run_id,
                 source_id=artifact_id,
@@ -203,7 +235,7 @@ class ArtifactInjectionGuard:
                 f"{size_bytes} > {self._max_scan_bytes} bytes"
             )
 
-        data = await self._store.read(uri)
+        data = await self._read_bounded(uri, limits=limits, deadline=deadline)
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -241,6 +273,7 @@ class ArtifactInjectionGuard:
             source_hash=actual_hash,
             text=text,
             purpose=purpose,
+            deadline=deadline,
         )
         if checked.redacted:
             await self._quarantine(artifact_id=artifact_id, run_id=run_id, source_hash=actual_hash)
@@ -330,29 +363,16 @@ class ArtifactInjectionGuard:
             raise ArtifactSensitiveContent("derived text matched the current sensitive policy")
         return text
 
-    async def _rescan(self, text: str) -> tuple[RedactionResult | None, str | None]:
-        """在预算内复查整份正文；返回 `(结果, 拒绝原因)`，不抛错、不写事件。
+    async def _rescan(
+        self, text: str, *, deadline=None, limits=None
+    ) -> tuple[RedactionResult | None, str | None]:
+        """有界排队与可终止子进程扫描；退出前回收进程，不遗留后台 CPU 工作。"""
 
-        预算作为**真实墙钟截止时间**执行，并且把 CPU 密集的检测放到工作线程：
-
-        - 事件循环在扫描期间不再被阻塞（原本同步调用会卡住整个 Worker）；
-        - 超过 `scan_budget_ms` 就当超时拒绝，而不是"跑完了再看耗时"。
-
-        **仍然不是可强杀的执行器**：Python 线程无法被强制终止，病态输入下后台线程
-        可能继续消耗 CPU。真正可终止的受限进程/有界队列属于方案里另列的后续项，
-        本函数不声称已实现硬隔离。
-        """
-
-        encoded = len(text.encode("utf-8"))
-        if encoded > self._max_scan_bytes:
-            return None, "scan_budget_exceeded"
+        limits = limits or self._limits
         try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(redact_text_result, text),
-                timeout=self._scan_budget_ms / 1000,
-            )
-        except TimeoutError:
-            return None, "scan_timeout"
+            result = await shared_scanner(limits).scan(text, limits, deadline=deadline)
+        except ScanUnavailable as error:
+            return None, error.reason
         return result, None
 
     async def _scan(
@@ -363,10 +383,11 @@ class ArtifactInjectionGuard:
         source_hash: str,
         text: str,
         purpose: str,
+        deadline=None,
     ) -> RedactionResult:
         """在扫描预算内复查整份正文；超预算或检查不可用一律拒绝注入。"""
 
-        result, reason = await self._rescan(text)
+        result, reason = await self._rescan(text, deadline=deadline)
         if reason is not None:
             await self._ensure_block_event(
                 run_id=run_id,
@@ -433,9 +454,10 @@ class ArtifactInjectionGuard:
         artifact_id: UUID,
         actor: str,
         reason: str,
-        expected_policy_version: int,
+        expected_policy_version: int | None,
         expected_content_hash: str,
         client_request_id: str,
+        offline: bool = False,
     ) -> QuarantineReviewOutcome:
         """单件人工复核：**通过才解除隔离**（改造方案 §2.4）。
 
@@ -459,26 +481,51 @@ class ArtifactInjectionGuard:
         if not safe_reason:
             raise ValueError("reason is required")
 
-        from evoagent.db.models import ArtifactRecord
+        request_hash = _text_hash(
+            json.dumps(
+                {
+                    "artifact_id": str(artifact_id),
+                    "actor": actor,
+                    "reason": reason,
+                    "expected_policy_version": expected_policy_version,
+                    "expected_content_hash": expected_content_hash,
+                    "offline": offline,
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+        limits = self._offline_limits if offline else self._limits
+        deadline = monotonic() + limits.wall_ms / 1000
 
         async with UnitOfWork(self._session_factory) as unit:
-            record = await unit.session.get(ArtifactRecord, artifact_id, with_for_update=True)
+            record = await self._lock_review_record(unit, artifact_id)
+            await self._require_access(unit.session, record)
             # 幂等回放放在**锁内**并与 artifact 绑定：并发重复提交被这把行锁串行化，
             # 不会两个请求都判定"未见历史记录"而各写一次（F4）。
-            replayed = await self._find_review(unit.session, artifact_id, client_request_id)
+            replayed = await self._find_review(
+                unit.session, artifact_id, client_request_id, request_hash
+            )
             if replayed is not None:
                 return replayed
             await self._require_reviewable(
-                unit.session, record, expected_content_hash, expected_policy_version
+                unit.session,
+                record,
+                expected_content_hash,
+                expected_policy_version,
+                offline=offline,
             )
             assert record is not None
             run_id, uri = record.run_id, record.uri
-            await unit.events.append(
+            await unit.events.append_once(
+                dedupe_key=_text_hash(f"review:requested:{artifact_id}:{client_request_id}"),
                 run_id=run_id,
                 event_type=REVIEW_REQUESTED_EVENT,
                 payload={
                     "artifact_id": str(artifact_id),
                     "actor": actor,
+                    "request_body_hash": request_hash,
+                    "offline": offline,
                     "reason": safe_reason,
                     "expected_content_hash": expected_content_hash,
                     "expected_policy_version": expected_policy_version,
@@ -489,12 +536,20 @@ class ArtifactInjectionGuard:
             await unit.commit()
 
         # 复查在事务之外完成：长扫描不持有行锁（§2.4 明确要求先释放长事务）。
-        data = await self._store.read(uri)
-        text = data.decode("utf-8")
-        actual_hash = _text_hash(text)
-        if actual_hash != expected_content_hash:
-            raise QuarantineReviewStale("artifact content changed during review")
-        result, reject_reason = await self._rescan(text)
+        actual_hash = None
+        result = None
+        reject_reason = None
+        try:
+            data = await self._read_bounded(uri, limits=limits, deadline=deadline)
+            text = data.decode("utf-8")
+            actual_hash = _text_hash(text)
+            if actual_hash != expected_content_hash:
+                raise QuarantineReviewStale("artifact content changed during review")
+            result, reject_reason = await self._rescan(text, deadline=deadline, limits=limits)
+        except ArtifactCheckUnavailable:
+            reject_reason = "scan_budget_exceeded"
+        except UnicodeDecodeError:
+            reject_reason = "not_utf8"
         if reject_reason is not None:
             outcome = OUTCOME_REJECTED
             categories: tuple[str, ...] = ()
@@ -507,10 +562,20 @@ class ArtifactInjectionGuard:
             categories = ()
 
         async with UnitOfWork(self._session_factory) as unit:
-            record = await unit.session.get(ArtifactRecord, artifact_id, with_for_update=True)
+            record = await self._lock_review_record(unit, artifact_id)
+            await self._require_access(unit.session, record)
+            replayed = await self._find_review(
+                unit.session, artifact_id, client_request_id, request_hash
+            )
+            if replayed is not None:
+                return replayed
             # 加锁复验同一条件：复查期间被撤销/擦除/改动都不允许解封。
             await self._require_reviewable(
-                unit.session, record, expected_content_hash, expected_policy_version
+                unit.session,
+                record,
+                expected_content_hash,
+                expected_policy_version,
+                offline=offline,
             )
             assert record is not None
             if outcome == OUTCOME_CLEARED:
@@ -518,16 +583,26 @@ class ArtifactInjectionGuard:
                 record.redaction_status = STATUS_VERIFIED
                 record.redaction_policy_version = POLICY_VERSION
                 record.redaction_checked_hash = actual_hash
+                record.attributes = {
+                    **record.attributes,
+                    "redaction_scan_mode": "offline" if offline else "inline",
+                }
                 event_type = REVIEW_CLEARED_EVENT
             else:
+                if reject_reason == "sensitive_content":
+                    record.redaction_status = STATUS_QUARANTINED
+                    record.redaction_policy_version = POLICY_VERSION
+                    record.redaction_checked_hash = actual_hash
                 event_type = REVIEW_REJECTED_EVENT
-            await unit.events.append(
+            await unit.events.append_once(
+                dedupe_key=_text_hash(f"review:terminal:{artifact_id}:{client_request_id}"),
                 run_id=run_id,
                 event_type=event_type,
                 payload={
                     "artifact_id": str(artifact_id),
                     "actor": actor,
                     "client_request_id": client_request_id,
+                    "request_body_hash": request_hash,
                     "outcome": outcome,
                     "reason": reject_reason,
                     "rule_categories": list(categories),
@@ -549,68 +624,64 @@ class ArtifactInjectionGuard:
             categories=categories,
         )
 
-    async def _require_reviewable(
-        self,
-        session,
-        record,
-        expected_content_hash: str,
-        expected_policy_version: int,
-    ) -> None:
-        """复核的前置条件；任一过期即 `QuarantineReviewStale`（路由映射 409）。"""
+    async def _lock_review_record(self, unit, artifact_id):
+        record = await unit.session.get(_artifact_model(), artifact_id)
+        if record is None:
+            raise ToolPermissionError("artifact is unknown or erased")
+        await unit.events.lock_run(record.run_id)
+        return await unit.session.scalar(
+            select(_artifact_model())
+            .where(_artifact_model().id == artifact_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
 
+    async def _require_access(self, session, record):
         if record is None or record.attributes.get("erased"):
             raise ToolPermissionError("artifact is unknown or erased")
+        if record.type not in INJECTABLE_ARTIFACT_TYPES:
+            raise ArtifactNotInjectable("artifact type is not injectable")
         try:
             await check_run_references(session, record.run_id)
         except MemoryError as error:
-            # 解封**不恢复**已撤销的授权：被撤销的来源仍然不可用。
             raise ToolPermissionError("context source revoked") from error
+
+    async def _require_reviewable(
+        self, session, record, expected_content_hash, expected_policy_version, *, offline=False
+    ):
+        await self._require_access(session, record)
         if record.content_hash != expected_content_hash:
             raise QuarantineReviewStale("artifact content hash changed")
         state = _check_state(record)
         if state.policy_version != expected_policy_version:
             raise QuarantineReviewStale("artifact policy version changed")
-        if state.status != STATUS_QUARANTINED:
+        if state.policy_version is not None and state.policy_version > POLICY_VERSION:
+            raise QuarantineReviewStale("runtime sensitive policy is older than artifact policy")
+        if not offline and state.status != STATUS_QUARANTINED:
             raise QuarantineReviewStale("artifact is not quarantined")
+        if offline and state.status not in (STATUS_QUARANTINED, STATUS_UNCHECKED, STATUS_VERIFIED):
+            raise QuarantineReviewStale("artifact cannot be reviewed")
 
-    async def _find_review(
-        self, session, artifact_id: UUID, client_request_id: str
-    ) -> QuarantineReviewOutcome | None:
-        """按**该 artifact 的** `client_request_id` 回放已结算结果；未结算返回 None。
-
-        必须接收调用方的 session：回放要在持有 artifact 行锁的同一事务里做，否则
-        并发重复提交会同时判定"没有历史记录"而各写一次。匹配条件必须同时包含
-        `artifact_id`——同一 Run 内两个 artifact 用同一个请求 ID 时，只比对请求 ID
-        会把 A 的结论串给 B（F4）。
-
-        **已知残余限制**：这里只扫最近 200 条复核事件，因此一个远早于该窗口的请求
-        ID 理论上可能被再次执行。彻底的修法是给 (artifact_id, client_request_id)
-        加唯一约束；当前靠行锁串行化 + 窗口查询，不声称已做到任意历史窗口的严格幂等。
-        """
-
-        from evoagent.db.models import ArtifactRecord
-
-        record = await session.get(ArtifactRecord, artifact_id)
-        if record is None:
-            return None
+    async def _find_review(self, session, artifact_id, client_request_id, request_hash):
+        record = await session.get(_artifact_model(), artifact_id)
         events = tuple(
             await session.scalars(
                 select(_event_model())
                 .where(
                     _event_model().run_id == record.run_id,
                     _event_model().event_type.in_(REVIEW_EVENT_TYPES),
+                    _event_model().payload["artifact_id"].as_string() == str(artifact_id),
+                    _event_model().payload["client_request_id"].as_string() == client_request_id,
                 )
                 .order_by(_event_model().sequence.desc())
-                .limit(_REVIEW_LOOKBACK_EVENTS)
             )
         )
         for event in events:
             payload = event.payload or {}
-            if payload.get("client_request_id") != client_request_id:
-                continue
-            if payload.get("artifact_id") != str(artifact_id):
-                # 同一请求 ID 属于另一个 artifact：不串结果，也不当成"已结算"。
-                continue
+            if payload.get("request_body_hash") != request_hash:
+                raise QuarantineReviewStale(
+                    "client_request_id reused with a different or unverifiable request"
+                )
             if event.event_type == REVIEW_CLEARED_EVENT:
                 return QuarantineReviewOutcome(
                     artifact_id=artifact_id,
@@ -627,8 +698,6 @@ class ArtifactInjectionGuard:
                     categories=tuple(payload.get("rule_categories") or ()),
                     replayed=True,
                 )
-            # 只有 requested：上次复核中途失败，允许按同一请求 ID 重跑。
-            return None
         return None
 
     async def _ensure_block_event(
@@ -653,20 +722,25 @@ class ArtifactInjectionGuard:
             "policy_version": POLICY_VERSION,
         }
         async with UnitOfWork(self._session_factory) as unit:
-            existing = await unit.session.scalars(
-                select(_event_model())
+            await unit.events.lock_run(run_id)
+            event = _event_model()
+            existing = await unit.session.scalar(
+                select(event.id)
                 .where(
-                    _event_model().run_id == run_id,
-                    _event_model().event_type == BLOCK_EVENT_TYPE,
+                    event.run_id == run_id,
+                    event.event_type == BLOCK_EVENT_TYPE,
+                    event.payload["artifact_id"].as_string() == key["artifact_id"],
+                    event.payload["content_hash"].as_string() == key["content_hash"],
+                    event.payload["policy_version"].as_integer() == POLICY_VERSION,
                 )
-                .order_by(_event_model().sequence.desc())
-                .limit(200)
+                .limit(1)
             )
-            for event in existing:
-                payload = event.payload or {}
-                if all(payload.get(name) == value for name, value in key.items()):
-                    return
-            await unit.events.append(
+            if existing is not None:
+                return
+            await unit.events.append_once(
+                dedupe_key=_text_hash(
+                    json.dumps([BLOCK_EVENT_TYPE, str(source_id), source_hash, POLICY_VERSION])
+                ),
                 run_id=run_id,
                 event_type=BLOCK_EVENT_TYPE,
                 payload={
@@ -690,3 +764,9 @@ def _text_hash(text: str) -> str:
     from evoagent.sessions.service import text_hash
 
     return text_hash(text)
+
+
+def _artifact_model():
+    from evoagent.db.models import ArtifactRecord
+
+    return ArtifactRecord

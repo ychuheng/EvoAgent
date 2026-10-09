@@ -13,6 +13,8 @@ from evoagent.db.models import (
     EmbeddingProfileRecord,
     IndexGenerationRecord,
     MaintenanceJobRecord,
+    MemoryEntryRecord,
+    MemoryEventRecord,
     MemoryVersionRecord,
     RetrievalDocumentRecord,
     WorkspaceRecord,
@@ -105,7 +107,29 @@ class IndexService:
             return False
         if not detect_sensitive(version.content):
             return False
+        entry = await session.scalar(
+            select(MemoryEntryRecord)
+            .where(MemoryEntryRecord.id == version.entry_id)
+            .with_for_update()
+        )
+        await session.refresh(version)
+        if version.status != "confirmed" or not detect_sensitive(version.content):
+            return False
         version.status = "quarantined"
+        if entry.current_version_id == version.id:
+            entry.current_version_id = None
+            entry.status = "quarantined"
+            entry.lock_version += 1
+        session.add(
+            MemoryEventRecord(
+                entry_id=entry.id,
+                version_id=version.id,
+                action="quarantined",
+                actor="sensitive_policy",
+                reason="current_sensitive_policy",
+            )
+        )
+        await enqueue_source(session, key)
         return True
 
     async def queue_rebuild(self):
@@ -185,6 +209,8 @@ class IndexService:
             )
             sources = []
             for key in keys:
+                if await self._quarantine_nonconforming(session, key):
+                    continue
                 source = await load_source(session, key)
                 if source:
                     sources.append(source)

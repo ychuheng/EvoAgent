@@ -140,6 +140,30 @@ async def test_source_to_draft_and_active_retrieval_pipeline(tmp_path: Path) -> 
     second = await extraction.extract((eval_run.id,))
     assert first.created is True
     assert second.created is False
+    # Cached sources must be rechecked under current policy, even when their hash is valid.
+    import json
+
+    from evoagent.db.models import ArtifactRecord
+    from evoagent.sessions.service import text_hash
+    from evoagent.skills.sanitizer import TraceSanitizationError
+
+    source = await provenance.freeze(eval_run.id)
+    async with database.session_factory() as db_session:
+        row = await db_session.get(ArtifactRecord, source.artifact_id)
+        original = await artifacts.read(row.uri)
+        changed = json.loads(original)
+        changed["description"] = "postgres://fake:fake@localhost/example"
+        changed_text = json.dumps(changed, ensure_ascii=False)
+        (tmp_path / "artifacts" / row.uri).write_bytes(changed_text.encode())
+        row.content_hash = text_hash(changed_text)
+        await db_session.commit()
+    with pytest.raises(TraceSanitizationError):
+        await provenance.freeze(eval_run.id)
+    async with database.session_factory() as db_session:
+        row = await db_session.get(ArtifactRecord, source.artifact_id)
+        (tmp_path / "artifacts" / row.uri).write_bytes(original)
+        row.content_hash = text_hash(original.decode())
+        await db_session.commit()
     async with database.session_factory() as db_session:
         version = await db_session.get(SkillVersionRecord, first.skill_version_id)
         skill = await db_session.get(SkillRecord, first.skill_id)

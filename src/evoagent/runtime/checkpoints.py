@@ -1,15 +1,18 @@
 """版本化 LoopState 快照的保存与加载。"""
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import UUID
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from evoagent.core.context_policy import ContextPolicyError, LegacyContextPolicy
 from evoagent.core.models import LoopState
 from evoagent.db.models import ContextRevisionRecord, RunSnapshotRecord
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.repository import check_run_references
+from evoagent.runtime.context_store import ContextStore
 from evoagent.tasks.lease_guard import LeaseGuard
 
 
@@ -26,12 +29,14 @@ class PersistentCheckpointStore:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         schema_version: int = 1,
+        settings=None,
         lease_guard: LeaseGuard | None = None,
     ) -> None:
         if schema_version < 1:
             raise ValueError("snapshot schema version must be positive")
         if lease_guard is not None and lease_guard.lease.run_id != run_id:
             raise ValueError("run does not match lease")
+        self._settings = settings
         self._lease_guard = lease_guard
         self._run_id = run_id
         self._session_factory = session_factory
@@ -84,6 +89,24 @@ class PersistentCheckpointStore:
                         or revision.summary.get("erased")
                     ):
                         raise SnapshotCompatibilityError("context revision missing or erased")
+                # Schema-v1 does not otherwise install ContextStore. Check before
+                # pending resumed tools can execute, as well as before model dispatch.
+                guard = self._lease_guard or SimpleNamespace(
+                    lease=SimpleNamespace(run_id=self._run_id)
+                )
+                context = ContextStore(
+                    self._session_factory,
+                    guard,
+                    None,
+                    LegacyContextPolicy(),
+                    settings=self._settings,
+                )
+                try:
+                    await context.verify_restored_messages(state)
+                except ContextPolicyError as error:
+                    raise SnapshotCompatibilityError(
+                        "restored derived messages require new safe context"
+                    ) from error
                 return state
             except ValidationError as error:
                 raise SnapshotCompatibilityError("snapshot state is invalid") from error

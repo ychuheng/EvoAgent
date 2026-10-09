@@ -6,6 +6,7 @@ from pathlib import PurePath
 from typing import Any
 
 from evoagent.core.models import ToolRisk
+from evoagent.privacy.redaction import redact_value
 from evoagent.skills.schema import InputType, ModelStep, SkillDefinition, ToolStep
 from evoagent.tools.registry import ToolRegistry
 
@@ -46,6 +47,9 @@ class SkillDefinitionValidator:
         self._schema_version = supported_schema_version
 
     def validate(self, definition: SkillDefinition) -> SkillValidationResult:
+        body = definition.model_dump(mode="json")
+        if redact_value(body) != body:
+            raise SkillValidationError("skill contains sensitive content")
         if definition.schema_version != self._schema_version:
             raise SkillValidationError("unsupported skill schema version")
         if len(definition.steps) > self._max_steps:

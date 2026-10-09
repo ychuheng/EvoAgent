@@ -109,6 +109,9 @@ class PersistentAgentRunner:
     async def _handle_owned(self, lease: JobLease) -> TaskExecutionResult:
         guard = LeaseGuard(lease)
         task, run = await self._load_owned_records(lease)
+        renderer_version = (
+            (run.config_snapshot.get("skill_renderer_version") or 1) if run.config_snapshot else 2
+        )
         async with self._session_factory() as session:
             await check_run_references(session, run.id)
         use_resolver = run.run_mode == "retrieval" and (
@@ -141,7 +144,10 @@ class PersistentAgentRunner:
             ).select(run.id, task.goal)
         )
         skill_context = (
-            "\n\n".join(SkillContextRenderer().render(item.document.definition) for item in matches)
+            "\n\n".join(
+                SkillContextRenderer(renderer_version).render(item.document.definition)
+                for item in matches
+            )
             or None
         )
         selected = matches[0].document if matches else None
@@ -149,6 +155,9 @@ class PersistentAgentRunner:
             content_hash([item.document.content_hash for item in matches]) if matches else None
         )
         config_snapshot = RunConfigSnapshot(
+            skill_renderer_version=run.config_snapshot.get("skill_renderer_version")
+            if run.config_snapshot
+            else 2,
             selected_skills=[
                 {
                     "version_id": str(item.document.version_id),
@@ -205,6 +214,7 @@ class PersistentAgentRunner:
             lease.run_id,
             self._session_factory,
             schema_version=self._settings.snapshot_schema_version,
+            settings=self._settings,
             lease_guard=guard,
         )
         resume_state = await checkpoints.load_latest()
@@ -258,6 +268,7 @@ class PersistentAgentRunner:
                     LocalArtifactStore(self._settings.artifact_root), self._session_factory, guard
                 ),
                 self._session_factory,
+                settings=self._settings,
             ),
             middleware=PersistentToolMiddleware(
                 task_id=lease.task_id,
@@ -285,6 +296,7 @@ class PersistentAgentRunner:
                 LocalArtifactStore(self._settings.artifact_root),
                 policy_from_settings(self._settings),
                 history_before_sequence=task.history_before_sequence,
+                settings=self._settings,
             )
             if self._settings.snapshot_schema_version == 2
             else None,

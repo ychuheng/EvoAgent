@@ -63,6 +63,112 @@ def sample_state() -> LoopState:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("schema", [1, 2])
+async def test_legacy_derived_tool_message_is_blocked_before_resume(persistence, schema):
+    database, run_id = persistence
+    store = PersistentCheckpointStore(run_id, database.session_factory, schema_version=schema)
+    state = sample_state().model_copy(
+        update={
+            "schema_version": schema,
+            "messages": (
+                Message(role=MessageRole.USER, content="read my config"),
+                Message(
+                    role=MessageRole.TOOL,
+                    content="postgres://fake:fake@localhost/example",
+                    tool_call_id="legacy",
+                ),
+            ),
+        }
+    )
+    await store.save(state)
+    with pytest.raises(SnapshotCompatibilityError, match="derived messages"):
+        await store.load_latest()
+    async with database.session_factory() as session:
+        saved = await session.scalar(
+            select(RunSnapshotRecord).where(RunSnapshotRecord.run_id == run_id)
+        )
+        assert saved.state == state.model_dump(mode="json")
+
+
+@pytest.mark.asyncio
+async def test_bounded_read_limits_actual_bytes_not_metadata(persistence, tmp_path):
+    _, run_id = persistence
+    store = LocalArtifactStore(tmp_path)
+    uri = await store.write(run_id, "oversize.txt", b"a" * 1024)
+    with pytest.raises(ValueError, match="limit"):
+        await store.read_bounded(uri.uri, max_bytes=10)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("schema", [1, 2])
+async def test_persistent_runner_blocks_legacy_tool_body_before_any_dispatch(
+    persistence, tmp_path, schema
+):
+    from evoagent.config import Settings
+    from evoagent.runtime.persistent_runner import PersistentAgentRunner
+    from evoagent.tasks.lease import JobLeaseManager
+
+    database, run_id = persistence
+    manager = JobLeaseManager(database.session_factory, lease_seconds=30)
+    lease = await manager.claim_next("repair-test")
+    assert lease.run_id == run_id
+    checkpoints = PersistentCheckpointStore(run_id, database.session_factory, schema_version=schema)
+    state = sample_state().model_copy(
+        update={
+            "schema_version": schema,
+            "messages": (
+                Message(role=MessageRole.USER, content="continue"),
+                Message(
+                    role=MessageRole.TOOL,
+                    content="postgres://fake:fake@localhost/example",
+                    tool_call_id="old",
+                ),
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    tool_calls=(
+                        ToolCall(
+                            call_id="pending", name="calculator", arguments={"expression": "1+1"}
+                        ),
+                    ),
+                ),
+            ),
+        }
+    )
+    await checkpoints.save(state)
+    provider = MockProvider([])
+
+    class ForbiddenCalculator(CalculatorTool):
+        async def execute(self, arguments):
+            raise AssertionError("pending tool must not execute")
+
+    runner = PersistentAgentRunner(
+        settings=Settings(
+            snapshot_schema_version=schema,
+            context_policy="legacy",
+            workspace=tmp_path / "workspace",
+            artifact_root=tmp_path / "workspace" / "artifacts",
+        ),
+        session_factory=database.session_factory,
+        context_builder=ContextBuilder(),
+        provider=provider,
+        registry=ToolRegistry([ForbiddenCalculator()]),
+    )
+    result = await runner.handle(lease)
+    assert result.error_code == "snapshot_incompatible"
+    assert provider.requests == ()
+    from evoagent.db.models import RunEventRecord
+
+    async with database.session_factory() as session:
+        event = await session.scalar(
+            select(RunEventRecord).where(
+                RunEventRecord.run_id == run_id,
+                RunEventRecord.event_type == "artifact.injection_blocked",
+            )
+        )
+        assert event.payload["purpose"] == "snapshot_restore"
+
+
+@pytest.mark.asyncio
 async def test_checkpoint_round_trip_and_version_rejection(persistence) -> None:
     database, run_id = persistence
     store = PersistentCheckpointStore(run_id, database.session_factory, schema_version=1)

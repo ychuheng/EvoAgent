@@ -25,6 +25,7 @@ class RunConfigSnapshot(BaseModel):
     summarizer: str | None = None
     selected_skills: list[dict[str, str]] | None = None
     retrieval: dict[str, Any] | None = None
+    skill_renderer_version: Literal[1, 2] | None = None
 
     provider: str = Field(min_length=1, max_length=64)
     provider_thinking_mode: Literal["disabled"] | None = None
@@ -64,6 +65,8 @@ class RunConfigSnapshot(BaseModel):
 
     def canonical_dict(self, *, comparison: bool = False) -> dict[str, Any]:
         value = self.model_dump(mode="json")
+        if self.skill_renderer_version is None:
+            value.pop("skill_renderer_version")
         if self.provider_thinking_mode is None:
             value.pop("provider_thinking_mode")
         if self.schema_version == 1:

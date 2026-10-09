@@ -196,7 +196,12 @@ class ConfiguredTaskHandler:
                 ),
                 ArtifactWriteTool(lease.run_id, artifact_service),
                 ArtifactReadTool(
-                    ToolOutputStore(lease.run_id, artifact_service, self._database.session_factory)
+                    ToolOutputStore(
+                        lease.run_id,
+                        artifact_service,
+                        self._database.session_factory,
+                        settings=self._settings,
+                    )
                 ),
                 WebSearchTool(search_provider),
                 web_fetch,

@@ -20,6 +20,7 @@ from evoagent.db.models import (
 from evoagent.memory.archival import archive_input
 from evoagent.memory.repository import verify_version
 from evoagent.memory.schema import MemoryError
+from evoagent.privacy.redaction import redact_value
 from evoagent.sessions.service import text_hash
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.rendering import SkillContextRenderer
@@ -52,6 +53,7 @@ async def load_source(
     lock=False,
     verify=None,
     run_id=None,
+    renderer_version=2,
 ):
     kind, raw_id = key.split(":", 1)
     identity = UUID(raw_id)
@@ -77,13 +79,20 @@ async def load_source(
         if content_hash(version.definition) != version.content_hash:
             raise MemoryError("retrieval_source_hash_mismatch")
         definition = SkillDefinition.model_validate(version.definition)
+        if redact_value(version.definition) != version.definition:
+            return None
         allowed = set(definition.preconditions.allowed_tools)
         if "shell" in allowed or definition.preconditions.max_effective_risk.value > max_risk:
             return None
         if registry is not None and not allowed <= set(registry.names):
             return None
         text = " ".join((definition.name, definition.description, *definition.triggers))
-        return Source(key, text, SkillContextRenderer().render(definition), version.content_hash)
+        return Source(
+            key,
+            text,
+            SkillContextRenderer(renderer_version).render(definition),
+            version.content_hash,
+        )
     if kind == "memory":
         version = await session.get(MemoryVersionRecord, identity)
         if version is None:

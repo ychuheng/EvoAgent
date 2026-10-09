@@ -27,7 +27,9 @@ from evoagent.tools.base import ToolError
 
 
 class ContextStore:
-    def __init__(self, factory, guard, artifact_store, policy, *, history_before_sequence=0):
+    def __init__(
+        self, factory, guard, artifact_store, policy, *, history_before_sequence=0, settings=None
+    ):
         self.factory = factory
         self.guard = guard
         self.store = artifact_store
@@ -37,7 +39,7 @@ class ContextStore:
         # 注入门禁（M-A0）：旧修订正文在进入上下文之前统一过当前敏感策略。
         # 注意它与 self.guard（LeaseGuard）不是一回事，命名上刻意区分。
         self.injection = ArtifactInjectionGuard(
-            session_factory=factory, artifact_store=artifact_store
+            session_factory=factory, artifact_store=artifact_store, settings=settings
         )
 
     async def _verify_context_artifact(self, artifact_id) -> None:
@@ -68,6 +70,7 @@ class ContextStore:
 
     async def prepare(self, state, request):
         await self.check_sources()
+        await self.verify_restored_messages(state)
         if state.context_revision_id:
             async with self.factory() as session:
                 revision = await session.get(ContextRevisionRecord, state.context_revision_id)
@@ -211,3 +214,31 @@ class ContextStore:
                 created_at=utc_now(),
             )
             await unit.commit()
+
+    async def verify_restored_messages(self, state):
+        """Check derived messages even without a compaction artifact; never rewrite goals."""
+        derived = [
+            {"role": message.role.value, "content": message.content}
+            for message in state.messages
+            if message.role is MessageRole.TOOL
+            or (
+                message.role is MessageRole.USER
+                and message.context_priority == 0
+                and (message.content or "").startswith("以下仅为低可信历史摘录")
+            )
+        ]
+        if not derived:
+            return
+        body = json.dumps(derived, ensure_ascii=False, sort_keys=True)
+        try:
+            await self.injection.verify_derived_text(
+                text=body,
+                run_id=self.guard.lease.run_id,
+                source_id="snapshot:derived_messages",
+                source_hash=text_hash(body),
+                purpose="snapshot_restore",
+            )
+        except ToolError as error:
+            raise ContextPolicyError(
+                "context_source_blocked", "restored derived messages require new safe context"
+            ) from error

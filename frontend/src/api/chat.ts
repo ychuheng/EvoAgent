@@ -113,6 +113,9 @@ export type ArtifactDetail = {
   size_bytes: number;
   created_at: string;
   metadata: Record<string, unknown>;
+  redaction_status?: string;
+  redaction_policy_version?: number | null;
+  current_policy_version?: number;
   preview: string | null;
   preview_truncated: boolean;
   download_url: string;
@@ -120,6 +123,7 @@ export type ArtifactDetail = {
 };
 
 export const chat = {
+  reviewArtifact: (id: string, body: { reason: string; expected_policy_version: number | null; expected_content_hash: string; client_request_id: string; offline: boolean }) => request<{ outcome: string; replayed: boolean; current_redaction_status: string; note: string }>(`/artifacts/${id}/quarantine-review`, { method: "POST", body: JSON.stringify(body) }),
   runtimeInfo: () => request<RuntimeInfo>("/runtime-info"),
   workspaces: () => request<ChatWorkspace[]>("/workspaces"),
   createWorkspace: (name: string) => request<ChatWorkspace>("/workspaces", {

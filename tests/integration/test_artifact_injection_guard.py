@@ -19,13 +19,14 @@ from sqlalchemy import select
 from evoagent.core.context_policy import ContextPolicyError, LegacyContextPolicy
 from evoagent.core.models import LoopState, Message, MessageRole, ModelRequest
 from evoagent.db.base import Base
-from evoagent.db.models import ArtifactRecord, ContextRevisionRecord, RunEventRecord
+from evoagent.db.models import ArtifactRecord, ContextRevisionRecord, RunEventRecord, utc_now
 from evoagent.db.session import Database
 from evoagent.privacy.artifact_access import (
     BLOCK_EVENT_TYPE,
     OUTCOME_CLEARED,
     OUTCOME_REJECTED,
     REVIEW_CLEARED_EVENT,
+    REVIEW_EVENT_TYPES,
     REVIEW_REJECTED_EVENT,
     REVIEW_REQUESTED_EVENT,
     ArtifactCheckUnavailable,
@@ -282,14 +283,15 @@ def _counting_scanner(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """替换门禁里的复查原语，记录每次真正发生的扫描。"""
 
     calls: list[str] = []
-    from evoagent.privacy import artifact_access
-    from evoagent.privacy.redaction import redact_text_result as real
+    from evoagent.privacy.scanner import BoundedScanner
 
-    def counted(text: str):
+    real = BoundedScanner.scan
+
+    async def counted(self, text, limits, **kwargs):
         calls.append(text[:16])
-        return real(text)
+        return await real(self, text, limits, **kwargs)
 
-    monkeypatch.setattr(artifact_access, "redact_text_result", counted)
+    monkeypatch.setattr(BoundedScanner, "scan", counted)
     return calls
 
 
@@ -524,6 +526,111 @@ async def _review_events(database, *types: str) -> tuple[RunEventRecord, ...]:
 
 
 @pytest.mark.asyncio
+async def test_review_identity_survives_history_and_checks_current_access(tmp_path):
+    from evoagent.db.unit_of_work import UnitOfWork
+
+    database, aggregate, artifacts, _, guard = await _environment(tmp_path)
+    record = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+    request = dict(
+        artifact_id=record.id,
+        actor="human",
+        reason="review false positive",
+        expected_policy_version=POLICY_VERSION - 1,
+        expected_content_hash=record.content_hash,
+        client_request_id="stable",
+    )
+    await guard.clear_quarantine(**request)
+    async with UnitOfWork(database.session_factory) as unit:
+        for _ in range(1001):
+            await unit.events.append(
+                run_id=aggregate.run.id,
+                event_type=REVIEW_REQUESTED_EVENT,
+                payload={"artifact_id": "other"},
+                created_at=utc_now(),
+            )
+        await unit.commit()
+    assert (await guard.clear_quarantine(**request)).replayed
+    with pytest.raises(QuarantineReviewStale, match="different"):
+        await guard.clear_quarantine(**{**request, "reason": "changed request"})
+    async with database.session_factory() as session:
+        row = await session.get(ArtifactRecord, record.id)
+        row.attributes = {**row.attributes, "erased": True}
+        await session.commit()
+    with pytest.raises(ToolPermissionError, match="erased"):
+        await guard.clear_quarantine(**request)
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_review_has_one_requested_and_terminal_event(tmp_path):
+    import asyncio
+
+    database, aggregate, artifacts, _, guard = await _environment(tmp_path)
+    record = await _quarantined_artifact(database, aggregate, artifacts, CLEAN_TEXT)
+    request = dict(
+        artifact_id=record.id,
+        actor="human",
+        reason="review",
+        expected_policy_version=POLICY_VERSION - 1,
+        expected_content_hash=record.content_hash,
+        client_request_id="concurrent",
+    )
+    results = await asyncio.gather(*(guard.clear_quarantine(**request) for _ in range(2)))
+    assert all(x.outcome == OUTCOME_CLEARED for x in results)
+    events = await _review_events(database, *REVIEW_EVENT_TYPES)
+    assert len(events) == 2
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_block_identity_has_no_rolling_window(tmp_path):
+    database, aggregate, _, _, guard = await _environment(tmp_path)
+    request = dict(
+        run_id=aggregate.run.id, source_id="same", source_hash="hash", categories=(), purpose="test"
+    )
+    await guard._ensure_block_event(**request)
+    for index in range(201):
+        await guard._ensure_block_event(**{**request, "source_id": str(index)})
+    await guard._ensure_block_event(**request)
+    assert len(await _review_events(database, BLOCK_EVENT_TYPE)) == 202
+    await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_explicit_offline_review_and_forged_size_limit(tmp_path):
+    database, aggregate, artifacts, store, _ = await _environment(tmp_path)
+    guard = ArtifactInjectionGuard(
+        session_factory=database.session_factory, artifact_store=store, max_scan_bytes=10
+    )
+    record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
+    async with database.session_factory() as session:
+        row = await session.get(ArtifactRecord, record.id)
+        row.size_bytes = 1  # The actual read must still enforce its byte budget.
+        await session.commit()
+    with pytest.raises(ArtifactCheckUnavailable):
+        await guard.read_verified_text(
+            artifact_id=record.id, run_id=aggregate.run.id, purpose="read"
+        )
+    outcome = await guard.clear_quarantine(
+        artifact_id=record.id,
+        actor="human",
+        reason="single artifact review",
+        expected_policy_version=None,
+        expected_content_hash=record.content_hash,
+        client_request_id="offline",
+        offline=True,
+    )
+    assert outcome.outcome == OUTCOME_CLEARED
+    assert (
+        await guard.read_verified_text(
+            artifact_id=record.id, run_id=aggregate.run.id, purpose="read"
+        )
+        == CLEAN_TEXT
+    )
+    await database.dispose()
+
+
+@pytest.mark.asyncio
 async def test_review_clears_when_current_policy_no_longer_matches(tmp_path: Path) -> None:
     """规则误报被纠正并升版之后，复核才通过——这才是解封的正常路径。"""
 
@@ -746,8 +853,8 @@ class _MutatingStore:
         self._artifact_id = artifact_id
         self._mutate = mutate
 
-    async def read(self, uri: str) -> bytes:
-        data = await self._inner.read(uri)
+    async def read_bounded(self, uri: str, *, max_bytes: int) -> bytes:
+        data = await self._inner.read_bounded(uri, max_bytes=max_bytes)
         async with self._database.session_factory() as session:
             row = await session.get(ArtifactRecord, self._artifact_id)
             self._mutate(row)
@@ -851,16 +958,18 @@ async def test_scan_budget_is_a_deadline_not_a_post_hoc_check(
 
     import time as _time
 
-    from evoagent.privacy import artifact_access
-
     database, aggregate, artifacts, store, _guard = await _environment(tmp_path)
     record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT)
 
-    def slow_scan(text):
-        _time.sleep(0.5)
-        raise AssertionError("超时后不应使用该结果")
+    import sys
 
-    monkeypatch.setattr(artifact_access, "redact_text_result", slow_scan)
+    from evoagent.privacy.scanner import BoundedScanner
+
+    monkeypatch.setattr(
+        BoundedScanner,
+        "command",
+        lambda self, limits: (sys.executable, "-c", "import time; time.sleep(10)"),
+    )
     guard = ArtifactInjectionGuard(
         session_factory=database.session_factory, artifact_store=store, scan_budget_ms=5
     )

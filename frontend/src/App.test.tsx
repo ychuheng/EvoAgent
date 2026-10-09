@@ -125,6 +125,38 @@ test("执行详情区分已读正文、搜索摘要和未观察到的答复链�
   expect(screen.getByText(/仍需人工判断网页内容是否支持答复/)).toBeInTheDocument();
 });
 
+test("单件产物复查携带乐观条件且刷新当前状态", async () => {
+  let reviewed = false;
+  let requestBody: Record<string, unknown> = {};
+  vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+    const path = new URL(url, "http://localhost").pathname;
+    const detail = { id: "artifact-review", run_id: "run-review", type: "tool_output", name: "safe.txt",
+      content_type: "text/plain", content_hash: "sha256:" + "a".repeat(64), size_bytes: 4,
+      metadata: {}, preview: "safe", preview_truncated: false, note: "preview",
+      redaction_status: reviewed ? "verified" : "quarantined", redaction_policy_version: 1, current_policy_version: 2 };
+    let payload: unknown = {};
+    if (path.endsWith("/quarantine-review")) {
+      requestBody = JSON.parse(String(init?.body)); reviewed = true;
+      payload = { outcome: "cleared", replayed: false, current_redaction_status: "verified", note: "单件复查通过" };
+    } else if (path.endsWith("/tasks/task-review")) {
+      payload = { id: "task-review", status: "completed", cancel_requested: false, latest_run: { id: "run-review", provider: "mock", model: "mock" } };
+    } else if (path.endsWith("/trace")) {
+      payload = { events: [], tool_calls: [], tool_effects: [], approvals: [], artifacts: [{ ...detail, uri: "run-review/safe.txt" }] };
+    } else if (path.endsWith("/artifacts/artifact-review")) { payload = detail; }
+    return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }));
+  }));
+  render(<TaskInspector taskId="task-review" onOpenVersion={vi.fn()} onOpenContext={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "预览" }));
+  const button = await screen.findByRole("button", { name: "确认并复查此产物" });
+  expect(button).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("产物复查理由"), { target: { value: "已核对误报" } });
+  fireEvent.click(button);
+  expect(await screen.findByText("单件复查通过")).toBeInTheDocument();
+  expect(requestBody).toMatchObject({ reason: "已核对误报", expected_policy_version: 1, expected_content_hash: "sha256:" + "a".repeat(64), offline: true });
+  expect(typeof requestBody.client_request_id).toBe("string");
+  expect(screen.queryByRole("button", { name: "确认并复查此产物" })).not.toBeInTheDocument();
+});
+
 test("产物可以先预览再下载，并按类型/二进制如实提示", async () => {
   const artifacts = [
     {

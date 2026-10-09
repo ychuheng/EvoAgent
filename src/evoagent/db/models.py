@@ -376,6 +376,7 @@ class RunEventRecord(Base):
     __tablename__ = "run_events"
     __table_args__ = (
         UniqueConstraint("run_id", "sequence"),
+        UniqueConstraint("run_id", "dedupe_key", name="uq_run_events_dedupe_key"),
         CheckConstraint("sequence >= 1", name="sequence_positive"),
         CheckConstraint("schema_version >= 1", name="schema_version_positive"),
     )
@@ -384,6 +385,7 @@ class RunEventRecord(Base):
     run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), index=True)
     sequence: Mapped[int] = mapped_column(Integer)
     event_type: Mapped[str] = mapped_column(String(128), index=True)
+    dedupe_key: Mapped[str | None] = mapped_column(String(71), nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     schema_version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

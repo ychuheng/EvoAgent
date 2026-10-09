@@ -62,7 +62,7 @@ class ContextResolver:
         self.service_gate = service_gate
         # 派生正文（archive.summary 等）在注入前过当前敏感策略；这条路径不需要
         # artifact 存储，因此不传 artifact_store。
-        self.injection = ArtifactInjectionGuard(session_factory=factory)
+        self.injection = ArtifactInjectionGuard(session_factory=factory, settings=settings)
 
     def config(self):
         s = self.settings
@@ -91,7 +91,14 @@ class ContextResolver:
                 select(RetrievalBatchRecord).where(RetrievalBatchRecord.run_id == run.id)
             )
             if saved:
+                if "skill_renderer_version" in saved.config:
+                    config["skill_renderer_version"] = saved.config["skill_renderer_version"]
                 return await self._restore(session, saved, config)
+            config["skill_renderer_version"] = (
+                (run.config_snapshot.get("skill_renderer_version") or 1)
+                if run.config_snapshot
+                else 2
+            )
             scope = await session.get(SessionRecord, task.session_id)
             candidates = {}
             for key in await source_keys(session):
@@ -112,6 +119,7 @@ class ContextResolver:
                     max_risk=self.settings.skill_max_effective_risk.value,
                     verify=self.injection,
                     run_id=run.id,
+                    renderer_version=config["skill_renderer_version"],
                 )
                 if source:
                     candidates[key] = source
@@ -234,6 +242,7 @@ class ContextResolver:
                     registry=self.registry,
                     max_risk=self.settings.skill_max_effective_risk.value,
                     lock=True,
+                    renderer_version=config["skill_renderer_version"],
                 )
                 if current is None or current.source_hash != source.source_hash:
                     continue

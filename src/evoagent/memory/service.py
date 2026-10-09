@@ -142,7 +142,10 @@ class MemoryService:
                 session_id,
             ):
                 raise MemoryError("memory_not_found")
+            await session.refresh(version)
             target = next_status(version.status, decision.action)
+            if decision.action == "confirm" and detect_sensitive(version.content):
+                raise MemoryError("sensitive_memory_content")
             changed = await session.execute(
                 update(MemoryEntryRecord)
                 .where(
@@ -185,7 +188,9 @@ class MemoryService:
                     old.status = "superseded"
                 entry.current_version_id = version.id
                 entry.status = "confirmed"
-            elif entry.current_version_id == version.id:
+            elif entry.current_version_id == version.id or (
+                entry.current_version_id is None and entry.status == "quarantined"
+            ):
                 entry.current_version_id = None
                 entry.status = "revoked"
             version.status = target

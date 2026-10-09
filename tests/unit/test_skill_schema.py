@@ -82,6 +82,41 @@ def test_skill_semantic_validation_rejects_unsafe_or_invalid_graph(mutation) -> 
         validator().validate(definition)
 
 
+@pytest.mark.parametrize(
+    "field", ["description", "stop_conditions", "triggers", "success_criteria"]
+)
+def test_full_skill_body_rejects_secret_fields(field):
+    data = definition_data()
+    secret = "postgres://fake:fake@localhost/example"
+    data[field] = secret if field == "description" else [secret]
+    with pytest.raises(SkillValidationError, match="sensitive content"):
+        validator().validate(SkillDefinition.model_validate(data))
+
+
+def test_renderer_exposes_safety_boundaries_and_keeps_v1_stable():
+    from evoagent.skills.rendering import SkillContextRenderer
+
+    data = definition_data()
+    data.update(
+        stop_conditions=["stop after error"],
+        counterexamples=[{"situation": "external side effects", "why_not": "read only"}],
+    )
+    definition = SkillDefinition.model_validate(data)
+    current = SkillContextRenderer().render(definition)
+    assert all(
+        value in current
+        for value in (
+            "stop after error",
+            "external side effects",
+            "read only",
+            "审批点：",
+            "风险上限：",
+        )
+    )
+    legacy = SkillContextRenderer(1).render(definition)
+    assert "stop after error" not in legacy
+
+
 def test_skill_definition_accepts_s6_annotations() -> None:
     """M6 S-02 的停止条件、审批点与反例都要能用，且审批点必须指向真实步骤。"""
 
