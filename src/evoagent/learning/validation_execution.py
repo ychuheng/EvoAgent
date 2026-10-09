@@ -93,8 +93,8 @@ class PersonalValidationExecution:
                 PersonalValidationCase.model_validate(item) for item in frozen["validation_cases"]
             )
             dataset_id = UUID(frozen["validation_dataset_id"])
-        except (KeyError, ValueError, TypeError) as error:
-            raise LearningError("validation_frozen_contract_invalid") from error
+        except (KeyError, ValueError, TypeError):
+            raise LearningError("validation_frozen_contract_invalid") from None
         criteria = {
             case.case_key: [item.model_dump(mode="json") for item in case.criteria]
             for case in cases
@@ -232,8 +232,8 @@ class PersonalValidationExecution:
                     results = [
                         ValidationResult.model_validate(item) for item in row.validation_results
                     ]
-                except ValueError as error:
-                    raise LearningError("validation_machine_results_invalid") from error
+                except ValueError:
+                    raise LearningError("validation_machine_results_invalid") from None
                 if len(results) != (len(machine) or 1):
                     raise LearningError("validation_machine_results_invalid")
                 if not machine and (results[0].validator, results[0].version) != (

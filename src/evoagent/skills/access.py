@@ -53,8 +53,8 @@ class SkillAccessPolicy:
                 raise SkillAccessError("skill_scope_or_hash_invalid")
             try:
                 definition = SkillDefinition.model_validate(version.definition)
-            except ValueError as error:
-                raise SkillAccessError("skill_definition_invalid") from error
+            except ValueError:
+                raise SkillAccessError("skill_definition_invalid") from None
             if (
                 definition.schema_version not in {1, 2}
                 or version.schema_version != definition.schema_version

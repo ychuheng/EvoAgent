@@ -108,8 +108,9 @@ class PersonalValidationRunGuard:
                 if item["case_key"] == case.case_key
             )
             source_id = UUID(request.frozen_inputs["source_id"])
-        except (KeyError, ValueError, TypeError, StopIteration) as error:
-            raise MemoryError("personal_validation_frozen_input_invalid") from error
+        except (KeyError, ValueError, TypeError, StopIteration):
+            # Parser errors may retain the full legacy input in their context.
+            raise MemoryError("personal_validation_frozen_input_invalid") from None
         if (
             frozen_case.public_input != case.public_input
             or frozen_case.task_family != case.task_family
@@ -177,8 +178,8 @@ class PersonalValidationRunGuard:
             await PersonalSourceService(
                 self.factory, artifact_store=self.store, max_source_risk=max_risk
             ).read_frozen(source_id, expected_revocation_epoch=epoch)
-        except ValueError as error:
-            raise MemoryError("personal_validation_source_revoked") from error
+        except ValueError:
+            raise MemoryError("personal_validation_source_revoked") from None
         async with self.factory() as session:
             if await self._verify(session) != (source_id, epoch, max_risk):
                 raise MemoryError("personal_validation_authorization_revoked")

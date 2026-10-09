@@ -168,3 +168,35 @@ async def test_internal_guard_rechecks_mutable_authority(trial_candidate, mutati
         await session.commit()
     with pytest.raises(MemoryError):
         await guard.check()
+
+
+async def test_validation_parser_exception_chain_does_not_expose_input(
+    trial_candidate, monkeypatch
+):
+    import traceback
+
+    from evoagent.learning.validation_schema import PersonalValidationCase
+
+    db, settings, request, _ = await start(trial_candidate)
+    async with db.session_factory() as session:
+        evaluation = await session.scalar(
+            select(EvalRunRecord).where(
+                EvalRunRecord.experiment_id == request.validation_experiment_id,
+            )
+        )
+    guard = await PersonalValidationRunGuard.for_run(
+        db.session_factory,
+        LocalArtifactStore(settings.artifact_root),
+        evaluation.run_id,
+        learning_enabled=True,
+    )
+
+    def unsafe_parser(*args, **kwargs):
+        raise ValueError("private-input-marker-must-not-reach-traceback")
+
+    monkeypatch.setattr(PersonalValidationCase, "model_validate", unsafe_parser)
+    with pytest.raises(MemoryError, match="personal_validation_frozen_input_invalid") as raised:
+        await guard.check()
+    formatted = "".join(traceback.format_exception(raised.value))
+    assert "private-input-marker" not in formatted
+    assert raised.value.__suppress_context__
