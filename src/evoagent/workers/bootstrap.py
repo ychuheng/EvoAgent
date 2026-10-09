@@ -378,6 +378,7 @@ async def run_worker() -> None:
             heartbeat_seconds=settings.heartbeat_seconds,
             poll_seconds=settings.worker_poll_seconds,
             snapshot_schema_version=settings.snapshot_schema_version,
+            recovery_scan_decoupled=settings.runtime_recovery_scan_decoupled_enabled,
         )
         loop = asyncio.get_running_loop()
         with suppress(NotImplementedError):

@@ -15,7 +15,8 @@ from evoagent.tasks.state_machine import TaskStatus
 
 
 @pytest.mark.postgres
-async def test_two_real_worker_processes_same_label(tmp_path):
+@pytest.mark.parametrize("decoupled", [False, True])
+async def test_two_real_worker_processes_same_label(tmp_path, decoupled):
     url = os.getenv("EVOAGENT_TEST_DATABASE_URL")
     if not url:
         pytest.skip("EVOAGENT_TEST_DATABASE_URL is not configured")
@@ -42,6 +43,7 @@ async def test_two_real_worker_processes_same_label(tmp_path):
         "EVOAGENT_PROVIDER": "mock",
         "EVOAGENT_WORKER_ID": "same-label",
         "EVOAGENT_WORKER_CONCURRENCY": "1",
+        "EVOAGENT_RUNTIME_RECOVERY_SCAN_DECOUPLED_ENABLED": str(decoupled).lower(),
         "EVOAGENT_WORKER_POLL_SECONDS": "0.1",
         "EVOAGENT_ARTIFACT_ROOT": str(tmp_path / "artifacts"),
         "EVOAGENT_WORKSPACE": str(tmp_path),

@@ -13,7 +13,8 @@ from evoagent.db.session import Database
 
 
 @pytest.mark.parametrize("mode", ["readonly", "committed", "unknown"])
-async def test_api_task_survives_killed_worker(tmp_path, mode):
+@pytest.mark.parametrize("decoupled", [False, True])
+async def test_api_task_survives_killed_worker(tmp_path, mode, decoupled):
     url = f"sqlite+aiosqlite:///{tmp_path / 'process.db'}"
     settings = Settings(_env_file=None, database_url=url, workspace=tmp_path / "workspace")
     database = Database(url)
@@ -28,7 +29,11 @@ async def test_api_task_survives_killed_worker(tmp_path, mode):
             str(Path(__file__).with_name("worker_crash_fixture.py")),
             str(tmp_path),
             mode,
-            env={**os.environ, "PYTHONPATH": str(Path("src").resolve())},
+            env={
+                **os.environ,
+                "PYTHONPATH": str(Path("src").resolve()),
+                "EVOAGENT_RUNTIME_RECOVERY_SCAN_DECOUPLED_ENABLED": str(decoupled).lower(),
+            },
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -84,7 +89,8 @@ async def test_api_task_survives_killed_worker(tmp_path, mode):
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("mode", ["readonly", "committed", "unknown"])
-async def test_postgres_standby_worker_recovers_active_crash(tmp_path, mode):
+@pytest.mark.parametrize("decoupled", [False, True])
+async def test_postgres_standby_worker_recovers_active_crash(tmp_path, mode, decoupled):
     """A second live worker must take over an expired PostgreSQL lease."""
     url = os.getenv("EVOAGENT_TEST_DATABASE_URL")
     if not url:
@@ -106,6 +112,7 @@ async def test_postgres_standby_worker_recovers_active_crash(tmp_path, mode):
                 **os.environ,
                 "PYTHONPATH": str(Path("src").resolve()),
                 "EVOAGENT_WORKER_CRASH_DATABASE_URL": url,
+                "EVOAGENT_RUNTIME_RECOVERY_SCAN_DECOUPLED_ENABLED": str(decoupled).lower(),
             },
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

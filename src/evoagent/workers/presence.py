@@ -26,10 +26,15 @@ class WorkerPresence:
             async with asyncio.timeout(1):
                 await self._client.delete(f"{self._prefix}{worker_id}")
 
-    async def run(self, worker_id: str, stopping: asyncio.Event) -> None:
+    async def run(
+        self, worker_id: str, stopping: asyncio.Event, *, ready: asyncio.Event | None = None
+    ) -> None:
         try:
             while not stopping.is_set():
-                await self.refresh(worker_id)
+                if ready is None or ready.is_set():
+                    await self.refresh(worker_id)
+                else:
+                    await self.remove(worker_id)
                 with suppress(TimeoutError):
                     await asyncio.wait_for(stopping.wait(), timeout=2)
         finally:

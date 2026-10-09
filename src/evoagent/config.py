@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     worker_concurrency: int = Field(default=1, ge=1, le=64)
     runtime_event_batching_enabled: bool = False
     runtime_shared_notifications_enabled: bool = False
+    runtime_recovery_scan_decoupled_enabled: bool = False
     worker_runtime_experiment_id: UUID | None = None
     worker_runtime_arm: Literal["control", "treatment"] | None = None
     redis_url: SecretStr | None = None

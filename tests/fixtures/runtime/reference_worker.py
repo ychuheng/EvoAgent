@@ -1,3 +1,4 @@
+# Frozen pre-P6a reference: 7610cd596b085e0dadf791bf582db7fa8266d156
 """一次只处理一个租约任务的后台 Worker。"""
 
 import asyncio
@@ -17,7 +18,6 @@ from evoagent.tasks.lease import (
 from evoagent.tasks.state_machine import PersistentRunStatus
 from evoagent.workers.heartbeat import LeaseHeartbeat
 from evoagent.workers.presence import WorkerPresence
-from evoagent.workers.recovery import RecoveryScanner
 from evoagent.workers.wakeup import Wakeup
 
 
@@ -41,7 +41,6 @@ class JobWorker:
         concurrency: int = 1,
         wakeup: Wakeup | None = None,
         presence: WorkerPresence | None = None,
-        recovery_scan_decoupled: bool = False,
     ) -> None:
         self._worker_id = f"{worker_id[:95]}:{uuid4().hex}"
         self._maintenance_worker = maintenance_worker
@@ -59,12 +58,6 @@ class JobWorker:
         )
         self._poll_seconds = poll_seconds
         self._stopping = asyncio.Event()
-        self._recovery = (
-            RecoveryScanner(lease_manager, schema_version=snapshot_schema_version)
-            if recovery_scan_decoupled
-            else None
-        )
-        self._background_recovery = False
 
     def stop(self) -> None:
         """请求 Worker 在当前短步骤结束后优雅停止。"""
@@ -72,30 +65,10 @@ class JobWorker:
         self._stopping.set()
 
     async def run_forever(self) -> None:
-        self._background_recovery = self._recovery is not None
         tasks = [asyncio.create_task(self._lane()) for _ in range(self._concurrency)]
-        if self._recovery is not None:
-            tasks.append(
-                asyncio.create_task(
-                    self._recovery.run(
-                        self._stopping,
-                        on_failure=(lambda: self._presence.remove(self._worker_id))
-                        if self._presence is not None
-                        else None,
-                    )
-                )
-            )
         listener = asyncio.create_task(self._wakeup.listen())
         if self._presence is not None:
-            tasks.append(
-                asyncio.create_task(
-                    self._presence.run(
-                        self._worker_id,
-                        self._stopping,
-                        ready=self._recovery.ready if self._recovery else None,
-                    )
-                )
-            )
+            tasks.append(asyncio.create_task(self._presence.run(self._worker_id, self._stopping)))
         if self._maintenance_worker is not None:
             tasks.append(asyncio.create_task(self._maintenance_lane()))
         try:
@@ -105,7 +78,6 @@ class JobWorker:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            self._background_recovery = False
 
     async def _maintenance_lane(self):
         while not self._stopping.is_set():
@@ -124,16 +96,9 @@ class JobWorker:
                 await self._wakeup.wait(self._stopping, self._poll_seconds)
 
     async def run_once(self) -> bool:
-        if self._recovery is not None:
-            if self._background_recovery:
-                if not await self._recovery.wait_ready(self._stopping):
-                    return False
-            else:
-                await self._recovery.scan_if_due()
-        else:
-            await self._lease_manager.promote_due_retries()
-            await self._lease_manager.recover_expired()
-            await self._lease_manager.recover_pending(schema_version=self._snapshot_schema_version)
+        await self._lease_manager.promote_due_retries()
+        await self._lease_manager.recover_expired()
+        await self._lease_manager.recover_pending(schema_version=self._snapshot_schema_version)
         lease = await self._lease_manager.claim_next(self._worker_id)
         if lease is None:
             return False

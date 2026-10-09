@@ -62,26 +62,29 @@ class RecoveryService:
         self._session_factory = session_factory
         self._snapshot_schema_version = snapshot_schema_version
 
-    async def recover_pending(self, *, limit: int = 100) -> int:
+    async def recover_pending(self, *, limit: int = 100, skip_locked: bool = False) -> int:
+        if not 1 <= limit <= 100:
+            raise ValueError("invalid recovery batch size")
+        statement = (
+            select(TaskRecord.id)
+            .where(TaskRecord.status == TaskStatus.RECOVERING)
+            .order_by(TaskRecord.created_at, TaskRecord.id)
+            .limit(limit)
+        )
+        if skip_locked:
+            statement = statement.with_for_update(skip_locked=True)
         async with self._session_factory() as session:
-            ids = tuple(
-                await session.scalars(
-                    select(TaskRecord.id)
-                    .where(TaskRecord.status == TaskStatus.RECOVERING)
-                    .order_by(TaskRecord.created_at, TaskRecord.id)
-                    .limit(limit)
-                )
-            )
+            ids = tuple(await session.scalars(statement))
         count = 0
         for task_id in ids:
             try:
-                await self.recover(task_id)
+                await self.recover(task_id, skip_locked=skip_locked)
                 count += 1
             except RecoveryAlreadyHandled:
                 pass
         return count
 
-    async def recover(self, task_id: UUID) -> RecoveryDecision:
+    async def recover(self, task_id: UUID, *, skip_locked: bool = False) -> RecoveryDecision:
         """对 RECOVERING 任务做恢复决策，副作用结果不明时转人工确认。
 
         契约（改造方案 §10.4）：这里只处理**原 Run 已存在**的未决副作用
@@ -91,18 +94,24 @@ class RecoveryService:
         """
         async with UnitOfWork(self._session_factory) as unit:
             task = await unit.session.scalar(
-                select(TaskRecord).where(TaskRecord.id == task_id).with_for_update()
+                select(TaskRecord)
+                .where(TaskRecord.id == task_id)
+                .with_for_update(skip_locked=skip_locked)
             )
             if task is None:
+                if skip_locked:
+                    raise RecoveryAlreadyHandled("task is locked or no longer exists")
                 raise ValueError(f"task does not exist: {task_id}")
             run = await unit.session.scalar(
                 select(RunRecord)
                 .where(RunRecord.task_id == task_id)
                 .order_by(RunRecord.created_at.desc())
-                .with_for_update()
+                .with_for_update(skip_locked=skip_locked)
                 .limit(1)
             )
             if run is None:
+                if skip_locked:
+                    raise RecoveryAlreadyHandled("run is locked or no longer exists")
                 raise ValueError(f"task has no run: {task_id}")
             if task.status is not TaskStatus.RECOVERING or (
                 run.status is not PersistentRunStatus.RECOVERING

@@ -67,6 +67,7 @@ async def main():
             heartbeat_seconds=settings.heartbeat_seconds,
             poll_seconds=0.02,
             snapshot_schema_version=settings.snapshot_schema_version,
+            recovery_scan_decoupled=settings.runtime_recovery_scan_decoupled_enabled,
         )
         if mode == "standby":
             await worker.run_forever()

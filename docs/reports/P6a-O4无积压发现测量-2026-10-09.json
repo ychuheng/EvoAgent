@@ -1,0 +1,127 @@
+{
+  "created_at": "2026-10-09T07:56:21.026594+00:00",
+  "database": "isolated PostgreSQL",
+  "interval_seconds": 2,
+  "samples": [
+    {
+      "sample": 1,
+      "phase_seconds": 0.0,
+      "latency_ms": 2084.879
+    },
+    {
+      "sample": 2,
+      "phase_seconds": 0.19,
+      "latency_ms": 1826.619
+    },
+    {
+      "sample": 3,
+      "phase_seconds": 0.38,
+      "latency_ms": 1659.591
+    },
+    {
+      "sample": 4,
+      "phase_seconds": 0.5700000000000001,
+      "latency_ms": 1432.322
+    },
+    {
+      "sample": 5,
+      "phase_seconds": 0.76,
+      "latency_ms": 1270.965
+    },
+    {
+      "sample": 6,
+      "phase_seconds": 0.95,
+      "latency_ms": 1110.816
+    },
+    {
+      "sample": 7,
+      "phase_seconds": 1.1400000000000001,
+      "latency_ms": 871.976
+    },
+    {
+      "sample": 8,
+      "phase_seconds": 1.33,
+      "latency_ms": 676.601
+    },
+    {
+      "sample": 9,
+      "phase_seconds": 1.52,
+      "latency_ms": 497.975
+    },
+    {
+      "sample": 10,
+      "phase_seconds": 1.71,
+      "latency_ms": 278.145
+    },
+    {
+      "sample": 11,
+      "phase_seconds": 0.0,
+      "latency_ms": 2082.756
+    },
+    {
+      "sample": 12,
+      "phase_seconds": 0.19,
+      "latency_ms": 1816.885
+    },
+    {
+      "sample": 13,
+      "phase_seconds": 0.38,
+      "latency_ms": 1635.122
+    },
+    {
+      "sample": 14,
+      "phase_seconds": 0.5700000000000001,
+      "latency_ms": 1430.507
+    },
+    {
+      "sample": 15,
+      "phase_seconds": 0.76,
+      "latency_ms": 1291.924
+    },
+    {
+      "sample": 16,
+      "phase_seconds": 0.95,
+      "latency_ms": 1066.29
+    },
+    {
+      "sample": 17,
+      "phase_seconds": 1.1400000000000001,
+      "latency_ms": 877.028
+    },
+    {
+      "sample": 18,
+      "phase_seconds": 1.33,
+      "latency_ms": 673.222
+    },
+    {
+      "sample": 19,
+      "phase_seconds": 1.52,
+      "latency_ms": 458.727
+    },
+    {
+      "sample": 20,
+      "phase_seconds": 1.71,
+      "latency_ms": 345.545
+    }
+  ],
+  "p50_ms": 1110.816,
+  "p95_ms": 2082.756,
+  "max_ms": 2084.879,
+  "paid_calls": 0,
+  "failures": 0,
+  "limits": [
+    "synthetic already-expired lease becomes visible on seed commit; does not include time from worker crash until lease expires",
+    "stop=Session after_commit for recovery.decided; does not include claim or model/tool reconstruction",
+    "no recovery backlog; 20 deliberate scan phases; local commit return introduces a few ms timing bias"
+  ],
+  "base_git_sha": "337024a723c2ad47f1bf2af2b9a1344a87c9fe95",
+  "runtime_worktree_modified": true,
+  "runtime_source_sha256": {
+    "src/evoagent/workers/recovery.py": "4712be365f6b59c69284f05ca03b0b58fb1b59b7d6831357b82fbe3f418b6724",
+    "src/evoagent/workers/main.py": "0987bfe801def493360b257c90ee8f4da5ccc590a97df343b747d36fe56d656f",
+    "src/evoagent/tasks/lease.py": "73f6151f912223b25e0eb46281bba633d2742c8cfbece311787a7483729542c3",
+    "src/evoagent/runtime/recovery.py": "7b99aca875b57abe34d510ddd6b16aa5d53a886d47814790fea50008003059f8",
+    "src/evoagent/workers/presence.py": "7e81e542286a3b3912297f97229d9e856b0f314ffe0fa613e519eb94d0ac7648"
+  },
+  "mode": "RecoveryScanner enabled, batch=50, interval=2s"
+}

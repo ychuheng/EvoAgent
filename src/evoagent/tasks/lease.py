@@ -366,7 +366,7 @@ class JobLeaseManager:
                         TaskRecord.status.in_((TaskStatus.RUNNING, TaskStatus.WAITING_TOOL)),
                         TaskRecord.lease_expires_at <= current_time,
                     )
-                    .order_by(TaskRecord.lease_expires_at)
+                    .order_by(TaskRecord.lease_expires_at, TaskRecord.id)
                     .with_for_update(skip_locked=True)
                     .limit(limit)
                 )
@@ -414,7 +414,7 @@ class JobLeaseManager:
                         TaskRecord.status == TaskStatus.RETRYING,
                         TaskRecord.next_attempt_at <= current_time,
                     )
-                    .order_by(TaskRecord.next_attempt_at)
+                    .order_by(TaskRecord.next_attempt_at, TaskRecord.id)
                     .with_for_update(skip_locked=True)
                     .limit(limit)
                 )
@@ -446,9 +446,11 @@ class JobLeaseManager:
             await unit.commit()
         return promoted
 
-    async def recover_pending(self, *, schema_version: int = 1) -> int:
+    async def recover_pending(
+        self, *, schema_version: int = 1, limit: int = 100, skip_locked: bool = False
+    ) -> int:
         from evoagent.runtime.recovery import RecoveryService
 
         return await RecoveryService(
             self._session_factory, snapshot_schema_version=schema_version
-        ).recover_pending()
+        ).recover_pending(limit=limit, skip_locked=skip_locked)
