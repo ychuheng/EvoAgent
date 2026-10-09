@@ -435,7 +435,7 @@ def test_process_tree_watcher_kills_the_group_when_the_tree_grows(
             raising=False,
         )
         exceeded = await asyncio.wait_for(watcher, timeout=5)
-        assert exceeded is True
+        assert exceeded == "process_limit"
         drain.cancel()
 
     asyncio.run(scenario())

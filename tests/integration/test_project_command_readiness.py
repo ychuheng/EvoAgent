@@ -227,12 +227,19 @@ def test_probe_reports_disabled_without_allowlist() -> None:
 def test_probe_lists_trusted_host_separately() -> None:
     """Windows 可信主机没有 Linux 会话计数这套保证，不假装等价。"""
 
-    settings = Settings(_env_file=None, project_command_allowlist=("git",), trusted_host_mode=True)
+    # 这里只测试预检的模式说明；真实 Settings 的平台准入在下一条用例独立验证。
+    settings = SimpleNamespace(project_command_allowlist=("git",), trusted_host_mode=True)
     result = ProjectCommandReadinessProbe().check(settings)
 
     assert result.ready is True
     assert result.reason == REASON_TRUSTED_HOST
     assert "没有 Linux 会话进程数配额" in result.detail
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="验证非 Windows 的配置拒绝")
+def test_settings_rejects_trusted_host_on_non_windows() -> None:
+    with pytest.raises(ValueError, match="trusted host mode requires a Windows process"):
+        Settings(_env_file=None, project_command_allowlist=("git",), trusted_host_mode=True)
 
 
 def test_probe_reports_unobservable_instead_of_healthy(monkeypatch) -> None:
