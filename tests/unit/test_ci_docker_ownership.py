@@ -55,3 +55,18 @@ def test_cleanup_refuses_a_container_with_other_job_ownership(monkeypatch):
     monkeypatch.setattr(ci_docker, "docker", metadata_only)
     with pytest.raises(RuntimeError, match="outside this CI job"):
         ci_docker.stop()
+
+
+def test_failed_docker_command_retains_bounded_diagnostic_without_masking_failure(
+    monkeypatch, capsys
+):
+    import subprocess
+
+    def failed(*args, **kwargs):
+        raise subprocess.CalledProcessError(125, args[0], stderr="x" * 20000 + "pull failed")
+
+    monkeypatch.setattr(ci_docker.subprocess, "run", failed)
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_docker.docker("pull", "public-image")
+    diagnostic = capsys.readouterr().err
+    assert len(diagnostic) == 16385 and diagnostic.endswith("pull failed\n")

@@ -46,13 +46,20 @@ def runner_owner():
 
 
 def docker(*args):
-    return subprocess.run(
-        ["docker", *args],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=180,
-    ).stdout.strip()
+    try:
+        return subprocess.run(
+            ["docker", *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        # These CI commands contain only public image names and fixture values.
+        # Retain a bounded diagnostic: capture_output otherwise hides pull/port
+        # errors entirely, making a failed service impossible to diagnose.
+        print((error.stderr or "Docker command failed without stderr")[-16384:], file=sys.stderr)
+        raise
 
 
 def configure():
