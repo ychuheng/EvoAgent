@@ -1,0 +1,888 @@
+{
+  "fixture": "paired PostgreSQL, local ASGI API, isolated preclaimed tasks",
+  "heartbeat_seconds": 10,
+  "paid_calls": 0,
+  "samples_per_arm": 30,
+  "cohorts": [
+    {
+      "implementation": "reference",
+      "redis_disconnected": false,
+      "p95_ms": 10170.982100069523,
+      "max_ms": 10511.627899948508,
+      "samples": [
+        {
+          "implementation": "reference",
+          "phase_seconds": 0.0,
+          "latency_ms": 10511.627899948508,
+          "heartbeat_wait_ms": 10005.190199939534,
+          "heartbeat_io_ms": 442.91390001308173
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 0.3310344827586207,
+          "latency_ms": 10170.982100069523,
+          "heartbeat_wait_ms": 10008.132499991916,
+          "heartbeat_io_ms": 440.970900002867
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 0.6620689655172414,
+          "latency_ms": 9849.570899968967,
+          "heartbeat_wait_ms": 10011.47399994079,
+          "heartbeat_io_ms": 437.23809998482466
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 0.9931034482758619,
+          "latency_ms": 9572.573299985379,
+          "heartbeat_wait_ms": 10014.556999900378,
+          "heartbeat_io_ms": 443.62050003837794
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 1.3241379310344827,
+          "latency_ms": 9245.445900014602,
+          "heartbeat_wait_ms": 10017.591900075786,
+          "heartbeat_io_ms": 437.3442999785766
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 1.6551724137931034,
+          "latency_ms": 8913.691300083883,
+          "heartbeat_wait_ms": 10021.782500087284,
+          "heartbeat_io_ms": 433.303999947384
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 1.9862068965517239,
+          "latency_ms": 8578.41489999555,
+          "heartbeat_wait_ms": 10024.930600076914,
+          "heartbeat_io_ms": 429.6868999954313
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 2.317241379310345,
+          "latency_ms": 8188.868100056425,
+          "heartbeat_wait_ms": 10028.009500005282,
+          "heartbeat_io_ms": 425.12730008456856
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 2.6482758620689655,
+          "latency_ms": 7918.201899970882,
+          "heartbeat_wait_ms": 10029.73949990701,
+          "heartbeat_io_ms": 484.59790006745607
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 2.979310344827586,
+          "latency_ms": 7598.458899999969,
+          "heartbeat_wait_ms": 10030.07910004817,
+          "heartbeat_io_ms": 486.8500999873504
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 3.310344827586207,
+          "latency_ms": 7096.367699909024,
+          "heartbeat_wait_ms": 10011.17820001673,
+          "heartbeat_io_ms": 349.29140005260706
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 3.6413793103448273,
+          "latency_ms": 6756.919800071046,
+          "heartbeat_wait_ms": 10012.113800039515,
+          "heartbeat_io_ms": 347.25739993155
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 3.9724137931034478,
+          "latency_ms": 6437.870199908502,
+          "heartbeat_wait_ms": 10012.823899975047,
+          "heartbeat_io_ms": 346.1618999717757
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 4.303448275862069,
+          "latency_ms": 6096.919299918227,
+          "heartbeat_wait_ms": 10015.59839991387,
+          "heartbeat_io_ms": 367.26379999890924
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 4.63448275862069,
+          "latency_ms": 5834.762100013904,
+          "heartbeat_wait_ms": 10018.822700018063,
+          "heartbeat_io_ms": 364.720799960196
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 4.9655172413793105,
+          "latency_ms": 5443.944799946621,
+          "heartbeat_wait_ms": 10021.792099927552,
+          "heartbeat_io_ms": 361.28509999252856
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 5.296551724137931,
+          "latency_ms": 5103.237099945545,
+          "heartbeat_wait_ms": 10025.051699951291,
+          "heartbeat_io_ms": 354.79510005097836
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 5.627586206896551,
+          "latency_ms": 4772.174599929713,
+          "heartbeat_wait_ms": 10028.165700030513,
+          "heartbeat_io_ms": 348.52809994481504
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 5.958620689655172,
+          "latency_ms": 4463.362699956633,
+          "heartbeat_wait_ms": 10030.619299970567,
+          "heartbeat_io_ms": 359.64509996119887
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 6.289655172413793,
+          "latency_ms": 4181.662500021048,
+          "heartbeat_wait_ms": 10030.931400018744,
+          "heartbeat_io_ms": 363.8061999808997
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 6.620689655172414,
+          "latency_ms": 3816.132500069216,
+          "heartbeat_wait_ms": 10011.139099951833,
+          "heartbeat_io_ms": 358.02899999544024
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 6.951724137931034,
+          "latency_ms": 3433.3983999677002,
+          "heartbeat_wait_ms": 10012.437099940144,
+          "heartbeat_io_ms": 353.7678000284359
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 7.282758620689655,
+          "latency_ms": 3149.4397999485955,
+          "heartbeat_wait_ms": 10012.99060008023,
+          "heartbeat_io_ms": 355.81979993730783
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 7.613793103448275,
+          "latency_ms": 2815.619900007732,
+          "heartbeat_wait_ms": 10015.171100036241,
+          "heartbeat_io_ms": 378.6383999977261
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 7.9448275862068956,
+          "latency_ms": 2494.3084000842646,
+          "heartbeat_wait_ms": 10018.778200028464,
+          "heartbeat_io_ms": 381.1260999646038
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 8.275862068965518,
+          "latency_ms": 2149.3340999586508,
+          "heartbeat_wait_ms": 10021.979999961331,
+          "heartbeat_io_ms": 375.15760003589094
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 8.606896551724137,
+          "latency_ms": 1842.552899965085,
+          "heartbeat_wait_ms": 10025.218000053428,
+          "heartbeat_io_ms": 374.8040999053046
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 8.937931034482759,
+          "latency_ms": 1509.8015000112355,
+          "heartbeat_wait_ms": 10029.76549998857,
+          "heartbeat_io_ms": 369.7138000279665
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 9.26896551724138,
+          "latency_ms": 1193.2738999603316,
+          "heartbeat_wait_ms": 10032.319799996912,
+          "heartbeat_io_ms": 384.77520004380494
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 9.6,
+          "latency_ms": 867.954200017266,
+          "heartbeat_wait_ms": 10032.674100017175,
+          "heartbeat_io_ms": 384.5737000228837
+        }
+      ]
+    },
+    {
+      "implementation": "on",
+      "redis_disconnected": false,
+      "p95_ms": 10221.251899958588,
+      "max_ms": 10471.276200027205,
+      "samples": [
+        {
+          "implementation": "on",
+          "phase_seconds": 0.0,
+          "latency_ms": 10471.276200027205,
+          "heartbeat_wait_ms": 10006.900900043547,
+          "heartbeat_io_ms": 442.5353999249637
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 0.3310344827586207,
+          "latency_ms": 10221.251899958588,
+          "heartbeat_wait_ms": 10009.973000036553,
+          "heartbeat_io_ms": 444.5252000587061
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 0.6620689655172414,
+          "latency_ms": 9905.81220004242,
+          "heartbeat_wait_ms": 10013.000200036913,
+          "heartbeat_io_ms": 441.8256999924779
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 0.9931034482758619,
+          "latency_ms": 9514.10179992672,
+          "heartbeat_wait_ms": 10016.090100049041,
+          "heartbeat_io_ms": 436.4449999993667
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 1.3241379310344827,
+          "latency_ms": 9186.919200001284,
+          "heartbeat_wait_ms": 10019.612399977632,
+          "heartbeat_io_ms": 433.85350005701184
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 1.6551724137931034,
+          "latency_ms": 8853.48759999033,
+          "heartbeat_wait_ms": 10023.3767000027,
+          "heartbeat_io_ms": 428.8022000109777
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 1.9862068965517239,
+          "latency_ms": 8525.78230004292,
+          "heartbeat_wait_ms": 10026.472099940293,
+          "heartbeat_io_ms": 426.32620001677424
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 2.317241379310345,
+          "latency_ms": 8243.487900006585,
+          "heartbeat_wait_ms": 10029.515699949116,
+          "heartbeat_io_ms": 482.2676000185311
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 2.6482758620689655,
+          "latency_ms": 7916.2455999758095,
+          "heartbeat_wait_ms": 10029.909100034274,
+          "heartbeat_io_ms": 483.5771999787539
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 2.979310344827586,
+          "latency_ms": 7624.314700020477,
+          "heartbeat_wait_ms": 10030.234599951655,
+          "heartbeat_io_ms": 488.1266000447795
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 3.310344827586207,
+          "latency_ms": 7064.726699958555,
+          "heartbeat_wait_ms": 10011.637999908999,
+          "heartbeat_io_ms": 346.23880009166896
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 3.6413793103448273,
+          "latency_ms": 6753.988999989815,
+          "heartbeat_wait_ms": 10012.498100055382,
+          "heartbeat_io_ms": 346.71389998402447
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 3.9724137931034478,
+          "latency_ms": 6499.441200052388,
+          "heartbeat_wait_ms": 10013.255400001071,
+          "heartbeat_io_ms": 370.02350005786866
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 4.303448275862069,
+          "latency_ms": 6093.552300008014,
+          "heartbeat_wait_ms": 10017.356600030325,
+          "heartbeat_io_ms": 361.4361999789253
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 4.63448275862069,
+          "latency_ms": 5771.342899999581,
+          "heartbeat_wait_ms": 10020.314400084317,
+          "heartbeat_io_ms": 359.15979999117553
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 4.9655172413793105,
+          "latency_ms": 5435.074200038798,
+          "heartbeat_wait_ms": 10023.242400027812,
+          "heartbeat_io_ms": 355.9007999720052
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 5.296551724137931,
+          "latency_ms": 5113.435100065544,
+          "heartbeat_wait_ms": 10026.522799977101,
+          "heartbeat_io_ms": 356.8368999985978
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 5.627586206896551,
+          "latency_ms": 4825.428899959661,
+          "heartbeat_wait_ms": 10030.330199981108,
+          "heartbeat_io_ms": 358.0761000048369
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 5.958620689655172,
+          "latency_ms": 4511.225600028411,
+          "heartbeat_wait_ms": 10030.786600080319,
+          "heartbeat_io_ms": 363.2874999893829
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 6.289655172413793,
+          "latency_ms": 4196.394500089809,
+          "heartbeat_wait_ms": 10031.075400067493,
+          "heartbeat_io_ms": 389.30139993317425
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 6.620689655172414,
+          "latency_ms": 3807.5556000694633,
+          "heartbeat_wait_ms": 10012.117100064643,
+          "heartbeat_io_ms": 356.8866999121383
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 6.951724137931034,
+          "latency_ms": 3460.459199966863,
+          "heartbeat_wait_ms": 10012.714799959213,
+          "heartbeat_io_ms": 355.8561000972986
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 7.282758620689655,
+          "latency_ms": 3145.027599995956,
+          "heartbeat_wait_ms": 10013.326899963431,
+          "heartbeat_io_ms": 380.2193000447005
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 7.613793103448275,
+          "latency_ms": 2823.041700059548,
+          "heartbeat_wait_ms": 10016.756400000304,
+          "heartbeat_io_ms": 383.0019999295473
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 7.9448275862068956,
+          "latency_ms": 2478.0450999969617,
+          "heartbeat_wait_ms": 10020.335500012152,
+          "heartbeat_io_ms": 374.4456999702379
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 8.275862068965518,
+          "latency_ms": 2146.22120000422,
+          "heartbeat_wait_ms": 10023.626599926502,
+          "heartbeat_io_ms": 370.5350999953225
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 8.606896551724137,
+          "latency_ms": 1830.9636999620125,
+          "heartbeat_wait_ms": 10027.341700042598,
+          "heartbeat_io_ms": 370.72889995761216
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 8.937931034482759,
+          "latency_ms": 1528.4527000039816,
+          "heartbeat_wait_ms": 10032.01700001955,
+          "heartbeat_io_ms": 382.2321000043303
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 9.26896551724138,
+          "latency_ms": 1189.207199960947,
+          "heartbeat_wait_ms": 10032.526400056668,
+          "heartbeat_io_ms": 384.3039999483153
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 9.6,
+          "latency_ms": 915.8017999725416,
+          "heartbeat_wait_ms": 10032.823400106281,
+          "heartbeat_io_ms": 410.69759998936206
+        }
+      ]
+    },
+    {
+      "implementation": "reference",
+      "redis_disconnected": true,
+      "p95_ms": 10078.244199976325,
+      "max_ms": 10422.134599997662,
+      "samples": [
+        {
+          "implementation": "reference",
+          "phase_seconds": 0.0,
+          "latency_ms": 10422.134599997662,
+          "heartbeat_wait_ms": 10014.865899924189,
+          "heartbeat_io_ms": 356.31310008466244
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 0.3310344827586207,
+          "latency_ms": 10078.244199976325,
+          "heartbeat_wait_ms": 10015.73109999299,
+          "heartbeat_io_ms": 356.57940001692623
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 0.6620689655172414,
+          "latency_ms": 9750.062000006437,
+          "heartbeat_wait_ms": 10016.236600000411,
+          "heartbeat_io_ms": 356.5527000464499
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 0.9931034482758619,
+          "latency_ms": 9420.656799920835,
+          "heartbeat_wait_ms": 10018.22239998728,
+          "heartbeat_io_ms": 372.888799989596
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 1.3241379310344827,
+          "latency_ms": 9112.922600004822,
+          "heartbeat_wait_ms": 10021.22810005676,
+          "heartbeat_io_ms": 373.119099996984
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 1.6551724137931034,
+          "latency_ms": 8769.881000043824,
+          "heartbeat_wait_ms": 10024.217199999839,
+          "heartbeat_io_ms": 368.7806000234559
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 1.9862068965517239,
+          "latency_ms": 8444.79500001762,
+          "heartbeat_wait_ms": 10027.417100034654,
+          "heartbeat_io_ms": 366.09499994665384
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 2.317241379310345,
+          "latency_ms": 8110.6847000774,
+          "heartbeat_wait_ms": 10030.904500046745,
+          "heartbeat_io_ms": 362.45330004021525
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 2.6482758620689655,
+          "latency_ms": 7797.239099978469,
+          "heartbeat_wait_ms": 10033.277500071563,
+          "heartbeat_io_ms": 375.5659000016749
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 2.979310344827586,
+          "latency_ms": 7464.350099908188,
+          "heartbeat_wait_ms": 10033.606100012548,
+          "heartbeat_io_ms": 373.4573000110686
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 3.310344827586207,
+          "latency_ms": 7079.881399986334,
+          "heartbeat_wait_ms": 10006.238200003281,
+          "heartbeat_io_ms": 347.5012000417337
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 3.6413793103448273,
+          "latency_ms": 6748.469699989073,
+          "heartbeat_wait_ms": 10009.003399987705,
+          "heartbeat_io_ms": 344.5655000396073
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 3.9724137931034478,
+          "latency_ms": 6414.23869994469,
+          "heartbeat_wait_ms": 10010.603299946524,
+          "heartbeat_io_ms": 343.233700026758
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 4.303448275862069,
+          "latency_ms": 6097.334099933505,
+          "heartbeat_wait_ms": 10012.653899961151,
+          "heartbeat_io_ms": 349.17860000859946
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 4.63448275862069,
+          "latency_ms": 5747.393499943428,
+          "heartbeat_wait_ms": 10016.240499913692,
+          "heartbeat_io_ms": 347.6165001047775
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 4.9655172413793105,
+          "latency_ms": 5427.64599993825,
+          "heartbeat_wait_ms": 10019.250100012869,
+          "heartbeat_io_ms": 340.60629992745817
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 5.296551724137931,
+          "latency_ms": 5121.355199953541,
+          "heartbeat_wait_ms": 10022.94349996373,
+          "heartbeat_io_ms": 348.1063999934122
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 5.627586206896551,
+          "latency_ms": 4781.78449999541,
+          "heartbeat_wait_ms": 10026.282000006177,
+          "heartbeat_io_ms": 335.3410999989137
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 5.958620689655172,
+          "latency_ms": 4449.188400059938,
+          "heartbeat_wait_ms": 10028.045499930158,
+          "heartbeat_io_ms": 358.7088000494987
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 6.289655172413793,
+          "latency_ms": 4123.623699997552,
+          "heartbeat_wait_ms": 10028.356699971482,
+          "heartbeat_io_ms": 362.0909999590367
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 6.620689655172414,
+          "latency_ms": 3859.5144000137225,
+          "heartbeat_wait_ms": 10014.839299954474,
+          "heartbeat_io_ms": 377.7642999775708
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 6.951724137931034,
+          "latency_ms": 3462.4298000708222,
+          "heartbeat_wait_ms": 10017.40630005952,
+          "heartbeat_io_ms": 373.3801000053063
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 7.282758620689655,
+          "latency_ms": 3189.228400005959,
+          "heartbeat_wait_ms": 10019.759500049986,
+          "heartbeat_io_ms": 374.5290000224486
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 7.613793103448275,
+          "latency_ms": 2921.086300048046,
+          "heartbeat_wait_ms": 10021.860799985006,
+          "heartbeat_io_ms": 399.97370005585253
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 7.9448275862068956,
+          "latency_ms": 2526.6048000194132,
+          "heartbeat_wait_ms": 10025.251099956222,
+          "heartbeat_io_ms": 393.65940005518496
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 8.275862068965518,
+          "latency_ms": 2202.368300058879,
+          "heartbeat_wait_ms": 10028.079899959266,
+          "heartbeat_io_ms": 393.4272000333294
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 8.606896551724137,
+          "latency_ms": 1874.2487000999972,
+          "heartbeat_wait_ms": 10031.92920004949,
+          "heartbeat_io_ms": 389.3807999556884
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 8.937931034482759,
+          "latency_ms": 1598.9358000224456,
+          "heartbeat_wait_ms": 10035.577300004661,
+          "heartbeat_io_ms": 392.1979999868199
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 9.26896551724138,
+          "latency_ms": 1265.3181999921799,
+          "heartbeat_wait_ms": 10037.461400032043,
+          "heartbeat_io_ms": 391.1727999802679
+        },
+        {
+          "implementation": "reference",
+          "phase_seconds": 9.6,
+          "latency_ms": 937.7540999557823,
+          "heartbeat_wait_ms": 10037.787599954754,
+          "heartbeat_io_ms": 443.1327000493184
+        }
+      ]
+    },
+    {
+      "implementation": "on",
+      "redis_disconnected": true,
+      "p95_ms": 10076.832700055093,
+      "max_ms": 10393.98490008898,
+      "samples": [
+        {
+          "implementation": "on",
+          "phase_seconds": 0.0,
+          "latency_ms": 10393.98490008898,
+          "heartbeat_wait_ms": 10015.45469998382,
+          "heartbeat_io_ms": 357.22360003273934
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 0.3310344827586207,
+          "latency_ms": 10076.832700055093,
+          "heartbeat_wait_ms": 10015.958999982104,
+          "heartbeat_io_ms": 356.5499000251293
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 0.6620689655172414,
+          "latency_ms": 9748.65610001143,
+          "heartbeat_wait_ms": 10016.4748999523,
+          "heartbeat_io_ms": 374.88849996589124
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 0.9931034482758619,
+          "latency_ms": 9415.912099997513,
+          "heartbeat_wait_ms": 10019.711799919605,
+          "heartbeat_io_ms": 369.1556000849232
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 1.3241379310344827,
+          "latency_ms": 9084.074500016868,
+          "heartbeat_wait_ms": 10022.72130001802,
+          "heartbeat_io_ms": 368.82440000772476
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 1.6551724137931034,
+          "latency_ms": 8770.776099991053,
+          "heartbeat_wait_ms": 10025.866299984045,
+          "heartbeat_io_ms": 367.3593000276014
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 1.9862068965517239,
+          "latency_ms": 8461.047900025733,
+          "heartbeat_wait_ms": 10029.20779993292,
+          "heartbeat_io_ms": 365.2692000614479
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 2.317241379310345,
+          "latency_ms": 8109.980100067332,
+          "heartbeat_wait_ms": 10032.951300032437,
+          "heartbeat_io_ms": 371.9640999333933
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 2.6482758620689655,
+          "latency_ms": 7776.771600008942,
+          "heartbeat_wait_ms": 10033.450499991886,
+          "heartbeat_io_ms": 372.5319999502972
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 2.979310344827586,
+          "latency_ms": 7459.771899972111,
+          "heartbeat_wait_ms": 10033.756299992092,
+          "heartbeat_io_ms": 372.45939997956157
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 3.310344827586207,
+          "latency_ms": 7072.226599906571,
+          "heartbeat_wait_ms": 10007.749400101602,
+          "heartbeat_io_ms": 344.4706998998299
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 3.6413793103448273,
+          "latency_ms": 6743.478999938816,
+          "heartbeat_wait_ms": 10010.139100020751,
+          "heartbeat_io_ms": 343.18720002193004
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 3.9724137931034478,
+          "latency_ms": 6429.314599954523,
+          "heartbeat_wait_ms": 10010.864500072785,
+          "heartbeat_io_ms": 357.4233999243006
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 4.303448275862069,
+          "latency_ms": 6079.672900028527,
+          "heartbeat_wait_ms": 10014.195600058883,
+          "heartbeat_io_ms": 347.2786999773234
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 4.63448275862069,
+          "latency_ms": 5743.464300059713,
+          "heartbeat_wait_ms": 10017.757100053132,
+          "heartbeat_io_ms": 346.7002999968827
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 4.9655172413793105,
+          "latency_ms": 5430.444400059059,
+          "heartbeat_wait_ms": 10020.759899984114,
+          "heartbeat_io_ms": 346.9373000552878
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 5.296551724137931,
+          "latency_ms": 5113.631600048393,
+          "heartbeat_wait_ms": 10024.727700045332,
+          "heartbeat_io_ms": 343.7577999429777
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 5.627586206896551,
+          "latency_ms": 4785.507199936546,
+          "heartbeat_wait_ms": 10027.794199995697,
+          "heartbeat_io_ms": 360.649700043723
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 5.958620689655172,
+          "latency_ms": 4449.1893000667915,
+          "heartbeat_wait_ms": 10028.207700001076,
+          "heartbeat_io_ms": 359.9378999788314
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 6.289655172413793,
+          "latency_ms": 4117.797199985944,
+          "heartbeat_wait_ms": 10028.499700012617,
+          "heartbeat_io_ms": 361.7537999525666
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 6.620689655172414,
+          "latency_ms": 3798.738199984655,
+          "heartbeat_wait_ms": 10016.244099941105,
+          "heartbeat_io_ms": 373.03520005661994
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 6.951724137931034,
+          "latency_ms": 3516.42170001287,
+          "heartbeat_wait_ms": 10018.66219996009,
+          "heartbeat_io_ms": 374.2273000534624
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 7.282758620689655,
+          "latency_ms": 3183.7071999907494,
+          "heartbeat_wait_ms": 10020.077399909496,
+          "heartbeat_io_ms": 398.34710001014173
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 7.613793103448275,
+          "latency_ms": 2852.675700094551,
+          "heartbeat_wait_ms": 10023.354599950835,
+          "heartbeat_io_ms": 390.8213999820873
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 7.9448275862068956,
+          "latency_ms": 2525.44549992308,
+          "heartbeat_wait_ms": 10026.671599945985,
+          "heartbeat_io_ms": 392.0069000450894
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 8.275862068965518,
+          "latency_ms": 2190.896900021471,
+          "heartbeat_wait_ms": 10029.744899948128,
+          "heartbeat_io_ms": 391.2832000060007
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 8.606896551724137,
+          "latency_ms": 1934.5009999815375,
+          "heartbeat_wait_ms": 10033.900799928233,
+          "heartbeat_io_ms": 387.7311999676749
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 8.937931034482759,
+          "latency_ms": 1595.0525000225753,
+          "heartbeat_wait_ms": 10037.196799996309,
+          "heartbeat_io_ms": 387.9972998984158
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 9.26896551724138,
+          "latency_ms": 1265.7226000446826,
+          "heartbeat_wait_ms": 10037.629699916579,
+          "heartbeat_io_ms": 391.88440004363656
+        },
+        {
+          "implementation": "on",
+          "phase_seconds": 9.6,
+          "latency_ms": 964.9525000713766,
+          "heartbeat_wait_ms": 10037.932099890895,
+          "heartbeat_io_ms": 448.71460006106645
+        }
+      ]
+    }
+  ],
+  "limitations": "Pairs share the same host/time window/API configuration; preclaim excludes recovery and queue scanning. Handler cancellation is dispatch stop, not external cleanup. Both arms use new API commit hooks; active Worker reference vs O5 is the comparison. Redis refusal is TCP localhost port 1, not Redis server timeout.",
+  "source_sha256": {
+    "output/o5_cancel_paired_pg.py": "80caa81b08fbd636e1de313e74adbf248f76deb8f1594fdebc32c86911fdcc5c",
+    "src/evoagent/workers/main.py": "10383506eb753b2474aa2f75ea0bcb628ccf174685ab89e9fbcded661fdbbb2c",
+    "src/evoagent/workers/heartbeat.py": "46833c515ff270b8d999fa9908c86aaf6f7c3d08bc84acd85c19a1027f1462a4",
+    "src/evoagent/tasks/lease.py": "73f6151f912223b25e0eb46281bba633d2742c8cfbece311787a7483729542c3",
+    "tests/fixtures/runtime/reference_worker.py": "ba6d01d6a3a04404973f409eca28bdc5bc74415271777e89ab73163d3210bd38"
+  }
+}

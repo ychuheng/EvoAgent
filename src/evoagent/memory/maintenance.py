@@ -31,16 +31,19 @@ from evoagent.workers.rate_limit import RateLimited
 
 
 class MaintenanceWorker:
-    def __init__(self, factory, artifact_store, index_service=None):
+    def __init__(self, factory, artifact_store, index_service=None, *, lane="all"):
+        if lane not in {"all", "critical", "background"}:
+            raise ValueError("invalid maintenance lane")
         self.factory = factory
         self.store = artifact_store
         self.owner = f"maintenance:{uuid4().hex}"
         self.index_service = index_service
+        self.lane = lane
 
     async def claim(self):
         async with self.factory() as session:
             now = await database_now(session)
-            job = await session.scalar(
+            statement = (
                 select(MaintenanceJobRecord)
                 .where(
                     or_(
@@ -63,6 +66,11 @@ class MaintenanceWorker:
                 .with_for_update(skip_locked=True)
                 .limit(1)
             )
+            if self.lane == "critical":
+                statement = statement.where(MaintenanceJobRecord.kind == "erase")
+            elif self.lane == "background":
+                statement = statement.where(MaintenanceJobRecord.kind != "erase")
+            job = await session.scalar(statement)
             if job is None:
                 return None
             if job.attempts >= 3:

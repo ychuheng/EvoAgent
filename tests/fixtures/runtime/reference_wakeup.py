@@ -1,3 +1,4 @@
+# Frozen pre-P6a reference: 7610cd596b085e0dadf791bf582db7fa8266d156
 """Redis 消息只是提示；订阅中断或丢消息后仍按固定周期扫描数据库。"""
 
 import asyncio
@@ -8,34 +9,12 @@ from redis.exceptions import RedisError
 
 
 class Wakeup:
-    def __init__(
-        self, client: Redis | None, namespace: str, *, post_commit_hooks_enabled: bool = False
-    ):
+    def __init__(self, client: Redis | None, namespace: str):
         self.client = client
         self.channel = f"{namespace}:queue-wakeup"
         self.event = asyncio.Event()
-        self.post_commit_hooks_enabled = post_commit_hooks_enabled
-        self._requested = False
-        self._publisher: asyncio.Task | None = None
-        self._closed = False
-
-    def schedule_publish(self):
-        if self._closed:
-            return
-        self._requested = True
-        if self._publisher is None or self._publisher.done():
-            self._publisher = asyncio.create_task(self._publish_pending())
-
-    async def _publish_pending(self):
-        while self._requested:
-            self._requested = False
-            await self.publish()
 
     async def publish(self):
-        if self._closed:
-            return
-        if self.post_commit_hooks_enabled:
-            self.event.set()
         if self.client is not None:
             with suppress(RedisError, OSError, TimeoutError):
                 async with asyncio.timeout(1):
@@ -44,7 +23,7 @@ class Wakeup:
     async def listen(self):
         if self.client is None:
             return
-        while not self._closed:
+        while True:
             try:
                 async with self.client.pubsub() as subscription:
                     await subscription.subscribe(self.channel)
@@ -57,22 +36,12 @@ class Wakeup:
     async def wait(self, stopping: asyncio.Event, seconds: float):
         tasks = [asyncio.create_task(event.wait()) for event in (self.event, stopping)]
         try:
-            done, _ = await asyncio.wait(
-                tasks, timeout=seconds, return_when=asyncio.FIRST_COMPLETED
-            )
+            await asyncio.wait(tasks, timeout=seconds, return_when=asyncio.FIRST_COMPLETED)
             self.event.clear()
-            return tasks[0] in done and tasks[0].result()
         finally:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def close(self):
-        self._closed = True
-        self._requested = False
-        if self._publisher is not None:
-            self._publisher.cancel()
-            await asyncio.gather(self._publisher, return_exceptions=True)
 
 
 def redis_client(settings):

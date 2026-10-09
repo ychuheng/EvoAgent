@@ -1,0 +1,95 @@
+{
+  "fixture": "real revoked Memory erasure, blocked background maintenance, no queue hints",
+  "database": "isolated PostgreSQL",
+  "paid_calls": 0,
+  "p95_ms": 966.0111999837682,
+  "max_ms": 1072.7676000678912,
+  "samples": [
+    {
+      "phase_seconds": 0.0,
+      "latency_ms": 1072.7676000678912
+    },
+    {
+      "phase_seconds": 0.049999999999999996,
+      "latency_ms": 966.0111999837682
+    },
+    {
+      "phase_seconds": 0.09999999999999999,
+      "latency_ms": 902.1412000292912
+    },
+    {
+      "phase_seconds": 0.15,
+      "latency_ms": 897.3181000910699
+    },
+    {
+      "phase_seconds": 0.19999999999999998,
+      "latency_ms": 844.4148000562564
+    },
+    {
+      "phase_seconds": 0.25,
+      "latency_ms": 798.0689000105485
+    },
+    {
+      "phase_seconds": 0.3,
+      "latency_ms": 703.9318000897765
+    },
+    {
+      "phase_seconds": 0.35,
+      "latency_ms": 679.0195000357926
+    },
+    {
+      "phase_seconds": 0.39999999999999997,
+      "latency_ms": 612.7161999465898
+    },
+    {
+      "phase_seconds": 0.44999999999999996,
+      "latency_ms": 568.5379999922588
+    },
+    {
+      "phase_seconds": 0.5,
+      "latency_ms": 503.8128000451252
+    },
+    {
+      "phase_seconds": 0.5499999999999999,
+      "latency_ms": 458.6886999895796
+    },
+    {
+      "phase_seconds": 0.6,
+      "latency_ms": 426.05260002892464
+    },
+    {
+      "phase_seconds": 0.65,
+      "latency_ms": 397.876099916175
+    },
+    {
+      "phase_seconds": 0.7,
+      "latency_ms": 322.0569998957217
+    },
+    {
+      "phase_seconds": 0.75,
+      "latency_ms": 280.7327000191435
+    },
+    {
+      "phase_seconds": 0.7999999999999999,
+      "latency_ms": 209.69109993893653
+    },
+    {
+      "phase_seconds": 0.85,
+      "latency_ms": 144.69410001765937
+    },
+    {
+      "phase_seconds": 0.8999999999999999,
+      "latency_ms": 137.527099926956
+    },
+    {
+      "phase_seconds": 0.9500000000000001,
+      "latency_ms": 73.40200000908226
+    }
+  ],
+  "source_sha256": {
+    "output/o5_cleanup_measure.py": "e8fb6aecc8583dc9924697419450911a519c41134b599e91d8e1b82e6b19404d",
+    "src/evoagent/memory/maintenance.py": "ab9ce0911697e5680f10cecfa0c4072bbc6c4653c3aa0d63e4635e52d9f3a904",
+    "src/evoagent/workers/maintenance.py": "d21dc5571949edf92d3adc9bc75147b2556c6ad2710479363a51ecd23619b067"
+  },
+  "limitations": "One empty-source Memory version per sample, no large derived artifact cleanup. Timer starts immediately before enqueue commit and ends after erasure transaction commits; not browser rendering."
+}

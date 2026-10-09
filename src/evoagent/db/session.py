@@ -22,6 +22,10 @@ def _queue_changed(session, context):
             isinstance(row, MaintenanceJobRecord) and row.status == "pending"
         ):
             session.info["queue_changed"] = True
+            wakeup = session.info.get("wakeup")
+            if getattr(wakeup, "post_commit_hooks_enabled", False):
+                transaction = session.get_nested_transaction() or session.get_transaction()
+                session.info.setdefault("queue_transactions", set()).add(transaction)
         if isinstance(row, (RunEventRecord, RunRecord)) and "event_notifier" in session.info:
             transaction = session.get_nested_transaction() or session.get_transaction()
             pending = session.info.setdefault("event_notifications", {})
@@ -35,9 +39,18 @@ def _events_committed(session):
     transaction = session.get_nested_transaction() or session.get_transaction()
     pending = session.info.get("event_notifications", {})
     run_ids = pending.pop(transaction, set())
+    queue_transactions = session.info.get("queue_transactions", set())
     if transaction is not None and transaction.nested:
         pending.setdefault(transaction.parent, set()).update(run_ids)
+        if transaction in queue_transactions:
+            queue_transactions.discard(transaction)
+            queue_transactions.add(transaction.parent)
         return
+    if transaction in queue_transactions:
+        queue_transactions.discard(transaction)
+        wakeup = session.info.get("wakeup")
+        if wakeup is not None:
+            wakeup.schedule_publish()
     notifier = session.info.get("event_notifier")
     if notifier is not None and run_ids:
         notifier.schedule_publish(run_ids)
@@ -46,6 +59,7 @@ def _events_committed(session):
 @event.listens_for(Session, "after_soft_rollback")
 def _events_rolled_back(session, previous_transaction):
     session.info.get("event_notifications", {}).pop(previous_transaction, None)
+    session.info.get("queue_transactions", set()).discard(previous_transaction)
 
 
 class QueueSession(AsyncSession):
@@ -53,7 +67,11 @@ class QueueSession(AsyncSession):
         await super().commit()
         changed = self.info.pop("queue_changed", False)
         wakeup = self.info.get("wakeup")
-        if changed and wakeup is not None:
+        if (
+            changed
+            and wakeup is not None
+            and not getattr(wakeup, "post_commit_hooks_enabled", False)
+        ):
             await wakeup.publish()
 
     async def rollback(self):
@@ -77,9 +95,21 @@ class Database:
     async def configured(cls, settings):
         """独立事件生产者复用相同提交后 helper，并拥有其通知资源。"""
         from evoagent.trace.notifications import RunEventNotifier
-        from evoagent.workers.wakeup import redis_client
+        from evoagent.workers.wakeup import Wakeup, redis_client
 
-        client = redis_client(settings) if settings.runtime_shared_notifications_enabled else None
+        client = (
+            redis_client(settings)
+            if (
+                settings.runtime_shared_notifications_enabled
+                or settings.runtime_maintenance_idle_backoff_enabled
+            )
+            else None
+        )
+        wakeup = (
+            Wakeup(client, settings.redis_namespace, post_commit_hooks_enabled=True)
+            if settings.runtime_maintenance_idle_backoff_enabled
+            else None
+        )
         notifier = (
             RunEventNotifier(client, settings.redis_namespace)
             if settings.runtime_shared_notifications_enabled
@@ -87,10 +117,16 @@ class Database:
         )
         try:
             async with cls(settings.database_url.get_secret_value()) as database:
-                if notifier is not None:
-                    database.session_factory.configure(info={"event_notifier": notifier})
+                database.session_factory.configure(
+                    info={
+                        **({"event_notifier": notifier} if notifier is not None else {}),
+                        **({"wakeup": wakeup} if wakeup is not None else {}),
+                    }
+                )
                 yield database
         finally:
+            if wakeup is not None:
+                await wakeup.close()
             if notifier is not None:
                 await notifier.close()
             if client is not None:

@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     runtime_event_batching_enabled: bool = False
     runtime_shared_notifications_enabled: bool = False
     runtime_recovery_scan_decoupled_enabled: bool = False
+    runtime_maintenance_idle_backoff_enabled: bool = False
     worker_runtime_experiment_id: UUID | None = None
     worker_runtime_arm: Literal["control", "treatment"] | None = None
     redis_url: SecretStr | None = None

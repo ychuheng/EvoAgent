@@ -346,7 +346,11 @@ async def run_worker() -> None:
     settings = Settings()
     embedding_provider = provider_from_settings(settings)
     client = redis_client(settings)
-    wakeup = Wakeup(client, settings.redis_namespace)
+    wakeup = Wakeup(
+        client,
+        settings.redis_namespace,
+        post_commit_hooks_enabled=settings.runtime_maintenance_idle_backoff_enabled,
+    )
     notifier = (
         RunEventNotifier(client, settings.redis_namespace)
         if settings.runtime_shared_notifications_enabled
@@ -379,6 +383,7 @@ async def run_worker() -> None:
             poll_seconds=settings.worker_poll_seconds,
             snapshot_schema_version=settings.snapshot_schema_version,
             recovery_scan_decoupled=settings.runtime_recovery_scan_decoupled_enabled,
+            maintenance_idle_backoff=settings.runtime_maintenance_idle_backoff_enabled,
         )
         loop = asyncio.get_running_loop()
         with suppress(NotImplementedError):
@@ -408,12 +413,21 @@ async def run_maintenance_worker():
         if settings.runtime_shared_notifications_enabled
         else None
     )
+    wakeup = Wakeup(
+        client,
+        settings.redis_namespace,
+        post_commit_hooks_enabled=settings.runtime_maintenance_idle_backoff_enabled,
+    )
     task = asyncio.current_task()
     with suppress(NotImplementedError):
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
     async with Database(settings.database_url.get_secret_value()) as database:
-        if notifier is not None:
-            database.session_factory.configure(info={"event_notifier": notifier})
+        database.session_factory.configure(
+            info={
+                **({"wakeup": wakeup} if settings.runtime_maintenance_idle_backoff_enabled else {}),
+                **({"event_notifier": notifier} if notifier is not None else {}),
+            }
+        )
         worker = MaintenanceWorker(
             database.session_factory,
             LocalArtifactStore(settings.artifact_root),
@@ -426,7 +440,40 @@ async def run_maintenance_worker():
                 preprocessing=settings.embedding_preprocessing,
             ),
         )
+        listener = None
+        lanes = []
         try:
+            if settings.runtime_maintenance_idle_backoff_enabled:
+                from evoagent.workers.maintenance import MaintenanceLane
+
+                stopping = asyncio.Event()
+                critical = MaintenanceWorker(
+                    database.session_factory, worker.store, worker.index_service, lane="critical"
+                )
+                background = MaintenanceWorker(
+                    database.session_factory, worker.store, worker.index_service, lane="background"
+                )
+                listener = asyncio.create_task(wakeup.listen())
+                lanes = [
+                    asyncio.create_task(
+                        MaintenanceLane(
+                            critical,
+                            wakeup,
+                            poll_seconds=min(settings.worker_poll_seconds, 1),
+                            drain_immediately=True,
+                        ).run(stopping)
+                    ),
+                    asyncio.create_task(
+                        MaintenanceLane(
+                            background,
+                            wakeup,
+                            poll_seconds=1,
+                            idle_backoff=True,
+                        ).run(stopping)
+                    ),
+                ]
+                await asyncio.gather(*lanes)
+                return
             while True:
                 from sqlalchemy.exc import SQLAlchemyError
 
@@ -437,6 +484,12 @@ async def run_maintenance_worker():
                 if not handled:
                     await asyncio.sleep(settings.worker_poll_seconds)
         finally:
+            if listener is not None:
+                lanes.append(listener)
+            for lane in lanes:
+                lane.cancel()
+            await asyncio.gather(*lanes, return_exceptions=True)
+            await wakeup.close()
             if notifier is not None:
                 await notifier.close()
             if client is not None:

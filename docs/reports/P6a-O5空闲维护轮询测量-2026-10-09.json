@@ -1,0 +1,29 @@
+{
+  "fixture": "empty-maintenance-lane",
+  "database": "temporary SQLite",
+  "paid_calls": 0,
+  "seconds_per_arm": 60,
+  "samples": [
+    {
+      "enabled": false,
+      "elapsed_seconds": 60.01600209996104,
+      "sql": 60,
+      "commits": 0,
+      "claim_attempts": 60
+    },
+    {
+      "enabled": true,
+      "elapsed_seconds": 60.01370400004089,
+      "sql": 10,
+      "commits": 0,
+      "claim_attempts": 10
+    }
+  ],
+  "source_sha256": {
+    "D:\\EvoAgent\\scripts\\benchmark_maintenance_polling.py": "e88599f61cd4db75f7f0f7272b544143329fedfe5435ea9a2e01de83370e3d15",
+    "src\\evoagent\\workers\\maintenance.py": "d21dc5571949edf92d3adc9bc75147b2556c6ad2710479363a51ecd23619b067",
+    "src\\evoagent\\workers\\wakeup.py": "adf109ab42929d874c2830a077be535c71816ae69479ab50b5b046fb69dc60a8",
+    "src\\evoagent\\memory\\maintenance.py": "26d730283453706121d651b29db333e952890275abc80b09fdc22bc7cc48ca7f"
+  },
+  "limits": "Single lane; idle polling only. Does not measure cancellation or erasure latency."
+}

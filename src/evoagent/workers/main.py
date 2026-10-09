@@ -16,6 +16,7 @@ from evoagent.tasks.lease import (
 )
 from evoagent.tasks.state_machine import PersistentRunStatus
 from evoagent.workers.heartbeat import LeaseHeartbeat
+from evoagent.workers.maintenance import MaintenanceLane
 from evoagent.workers.presence import WorkerPresence
 from evoagent.workers.recovery import RecoveryScanner
 from evoagent.workers.wakeup import Wakeup
@@ -42,9 +43,11 @@ class JobWorker:
         wakeup: Wakeup | None = None,
         presence: WorkerPresence | None = None,
         recovery_scan_decoupled: bool = False,
+        maintenance_idle_backoff: bool = False,
     ) -> None:
         self._worker_id = f"{worker_id[:95]}:{uuid4().hex}"
         self._maintenance_worker = maintenance_worker
+        self._maintenance_idle_backoff = maintenance_idle_backoff
         if concurrency < 1:
             raise ValueError("concurrency must be positive")
         self._concurrency = concurrency
@@ -106,8 +109,19 @@ class JobWorker:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             self._background_recovery = False
+            await self._wakeup.close()
 
     async def _maintenance_lane(self):
+        if self._maintenance_idle_backoff:
+            background = getattr(self._maintenance_worker, "lane", "all") == "background"
+            await MaintenanceLane(
+                self._maintenance_worker,
+                self._wakeup,
+                poll_seconds=min(self._poll_seconds, 1),
+                idle_backoff=background,
+                drain_immediately=True,
+            ).run(self._stopping)
+            return
         while not self._stopping.is_set():
             with suppress(LeaseLostError, SQLAlchemyError):
                 await self._maintenance_worker.run_once()

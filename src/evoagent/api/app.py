@@ -130,9 +130,14 @@ def create_app(
         if notifier is not None:
             await notifier.start()
         app.state.event_notifier = notifier
+        wakeup = Wakeup(
+            client,
+            resolved_settings.redis_namespace,
+            post_commit_hooks_enabled=resolved_settings.runtime_maintenance_idle_backoff_enabled,
+        )
         resolved_database.session_factory.configure(
             info={
-                "wakeup": Wakeup(client, resolved_settings.redis_namespace),
+                "wakeup": wakeup,
                 **({"event_notifier": notifier} if notifier is not None else {}),
             }
         )
@@ -150,6 +155,7 @@ def create_app(
             yield
         finally:
             resolved_database.session_factory.configure(info={})
+            await wakeup.close()
             if notifier is not None:
                 await notifier.close()
             if client is not None:
