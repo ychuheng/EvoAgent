@@ -23,6 +23,20 @@ class ValidationCriterion(BaseModel):
     def require_authoritative_judge(self):
         if (self.kind == "machine") != (self.validator is not None):
             raise ValueError("machine criterion requires a registered validator")
+        if (
+            self.business_criterion
+            and self.validator is not None
+            and self.validator.name
+            in {
+                "run_completed",
+                "expected_status",
+                "no_unknown_effects",
+                "no_duplicate_effects",
+                "tool_policy",
+                "max_tool_calls",
+            }
+        ):
+            raise ValueError("runtime completion or safety alone is not business verification")
         body = json.dumps(self.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
         if len(body.encode()) > 8192 or detect_sensitive(body):
             raise ValueError("validation criterion exceeds the safe bound")
@@ -74,6 +88,12 @@ class ValidationSubmission(BaseModel):
             raise ValueError("personal validation needs positive and counterexample cases")
         if not any(item.business_criterion for case in self.cases for item in case.criteria):
             raise ValueError("explicit business acceptance criterion is required")
+        if any(
+            case.task_family == "research"
+            and not any(item.kind == "user" and item.business_criterion for item in case.criteria)
+            for case in self.cases
+        ):
+            raise ValueError("research requires user verification of factual support")
         # A title-only change cannot turn one input into two independent cases.
         fingerprints = [
             json.dumps(

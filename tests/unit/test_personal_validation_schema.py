@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
+from evoagent.evals.schema import ValidatorSpec
 from evoagent.learning.validation_schema import (
     PersonalValidationCase,
     ValidationCriterion,
@@ -37,6 +38,44 @@ def test_freezes_concrete_positive_negative_and_explicit_business_criteria():
     assert len(request.cases) == 2
     with pytest.raises(ValidationError):
         ValidationSubmission.model_validate({**request.model_dump(), "verdict": "pass"})
+
+
+def test_completion_cannot_be_declared_business_success():
+    with pytest.raises(ValidationError, match="not business verification"):
+        ValidationCriterion(
+            criterion_id="completion",
+            kind="machine",
+            expected=True,
+            description="task completed",
+            validator=ValidatorSpec(name="run_completed"),
+            business_criterion=True,
+        )
+
+
+def test_research_citation_or_structure_checks_cannot_replace_user_fact_verification():
+    criterion = ValidationCriterion(
+        criterion_id="report_structure",
+        kind="machine",
+        expected=True,
+        description="report has sections",
+        validator=ValidatorSpec(name="contains_sections", parameters={"sections": ["References"]}),
+        business_criterion=True,
+    )
+    cases = tuple(
+        PersonalValidationCase(
+            case_key=key,
+            case_kind=kind,
+            task_family="research",
+            public_input={"goal": "Compare evidence", "inputs": {"topic": topic}},
+            criteria=(criterion,),
+        )
+        for key, kind, topic in (
+            ("positive", "positive", "first topic"),
+            ("negative", "counterexample", "second topic"),
+        )
+    )
+    with pytest.raises(ValidationError, match="user verification"):
+        ValidationSubmission(client_request_id="research", cases=cases)
 
 
 def test_title_change_does_not_make_a_new_input_or_supply_business_success():
