@@ -13,7 +13,9 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import io
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -114,6 +116,59 @@ def test_permission_denied_is_not_silently_ignored(monkeypatch) -> None:
 
     with pytest.raises(CommandUnobservableError):
         _session_process_count(SESSION)
+
+
+def test_reaped_entry_after_open_is_skipped(monkeypatch) -> None:
+    """stat 已打开但进程随后被回收：Linux read 返回 ESRCH，而不是 ENOENT。"""
+
+    _fake_proc(monkeypatch, {"10": _stat(10, SESSION), "11": b""})
+    original_open = commands.open
+
+    class ReapedStat(io.BytesIO):
+        def read(self, *_args, **_kwargs):
+            raise ProcessLookupError(errno.ESRCH, "No such process")
+
+    def open_with_reaped_entry(path, *args, **kwargs):
+        if str(path) == "/proc/11/stat":
+            return ReapedStat()
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(commands, "open", open_with_reaped_entry)
+    assert _session_process_count(SESSION) == 1
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="需要真实 /proc ESRCH 语义")
+def test_real_stat_read_after_process_reaping(monkeypatch) -> None:
+    """用实际已回收进程的 stat 描述符，确定性复现 CI 中的退出竞态。"""
+
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.buffer.read(1)"],
+        stdin=subprocess.PIPE,
+    )
+    try:
+        with open(f"/proc/{process.pid}/stat", "rb") as handle:
+            assert process.stdin is not None
+            process.stdin.close()
+            process.wait(timeout=5)
+            with pytest.raises(ProcessLookupError) as raised:
+                handle.read()
+            assert raised.value.errno == errno.ESRCH
+            monkeypatch.setattr(commands.os, "listdir", lambda _path: [str(process.pid)])
+
+            # 不关闭真实描述符；计数器只负责本次读取。
+            class HeldStat:
+                def __enter__(self):
+                    return handle
+
+                def __exit__(self, *_args):
+                    return False
+
+            monkeypatch.setattr(commands, "open", lambda *_a, **_kw: HeldStat(), raising=False)
+            assert _session_process_count(process.pid) == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
 
 
 def test_unparsable_live_entry_is_not_silently_ignored(monkeypatch) -> None:

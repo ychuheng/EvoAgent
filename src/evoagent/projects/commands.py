@@ -593,7 +593,8 @@ def _session_process_count(session_id: int) -> int:
 
     要么给出数字，要么抛"不可观测"——**不用 0 假装健康**（K2 / §13.4）：
 
-    - 恰好在读取瞬间退出的条目允许跳过（`FileNotFoundError`）；
+    - 恰好在读取瞬间退出的条目允许跳过（`FileNotFoundError` 或
+      `ProcessLookupError`；Linux 在已打开 stat 的进程被回收后返回 ESRCH）；
     - `/proc` 目录不可读、权限拒绝，或**仍存活**条目的关键字段读不到/解析不了，
       一律抛 `CommandUnobservableError`，不得静默忽略。
     """
@@ -609,8 +610,9 @@ def _session_process_count(session_id: int) -> int:
         try:
             with open(f"/proc/{entry}/stat", "rb") as handle:
                 raw = handle.read()
-        except FileNotFoundError:
-            # 条目在 listdir 与 open 之间退出：这是允许跳过的竞态。
+        except (FileNotFoundError, ProcessLookupError):
+            # 进程可以在 listdir→open 或 open→read 之间退出并被回收。
+            # /proc 对后一种情况返回 ESRCH；它不是权限/可观测性丢失。
             continue
         except OSError as error:
             raise CommandUnobservableError(f"无法读取 /proc/{entry}/stat：{error}") from error
