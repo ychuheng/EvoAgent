@@ -20,7 +20,7 @@ def parser() -> argparse.ArgumentParser:
 async def run(path: Path, *, freeze: bool) -> None:
     settings = Settings()
     definition = load_dataset_definition(path, root=settings.eval_dataset_root)
-    async with Database(settings.database_url.get_secret_value()) as database:
+    async with Database.configured(settings) as database:
         service = EvalDatasetService(database.session_factory)
         dataset = await service.import_definition(definition)
         if freeze and dataset.status.value == "draft":

@@ -53,6 +53,7 @@ from evoagent.tools.output_store import ToolOutputStore
 from evoagent.tools.registry import ToolRegistry
 from evoagent.tools.sandbox import RunSandbox
 from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
+from evoagent.trace.notifications import RunEventNotifier
 from evoagent.workers.main import JobWorker
 from evoagent.workers.rate_limit import BudgetedProvider, GatedProvider, ServiceGate
 from evoagent.workers.wakeup import Wakeup, redis_client
@@ -346,6 +347,11 @@ async def run_worker() -> None:
     embedding_provider = provider_from_settings(settings)
     client = redis_client(settings)
     wakeup = Wakeup(client, settings.redis_namespace)
+    notifier = (
+        RunEventNotifier(client, settings.redis_namespace)
+        if settings.runtime_shared_notifications_enabled
+        else None
+    )
     from evoagent.workers.presence import WorkerPresence
 
     presence = WorkerPresence(client, settings.redis_namespace)
@@ -356,7 +362,12 @@ async def run_worker() -> None:
             runtime_experiment_id=settings.worker_runtime_experiment_id,
             runtime_arm=settings.worker_runtime_arm,
         )
-        database.session_factory.configure(info={"wakeup": wakeup})
+        database.session_factory.configure(
+            info={
+                "wakeup": wakeup,
+                **({"event_notifier": notifier} if notifier is not None else {}),
+            }
+        )
         worker = JobWorker(
             worker_id=settings.worker_id,
             lease_manager=manager,
@@ -374,6 +385,8 @@ async def run_worker() -> None:
         try:
             await worker.run_forever()
         finally:
+            if notifier is not None:
+                await notifier.close()
             if client is not None:
                 await client.aclose()
             if hasattr(embedding_provider, "aclose"):
@@ -389,10 +402,17 @@ async def run_maintenance_worker():
     settings = Settings()
     provider = provider_from_settings(settings)
     client = redis_client(settings)
+    notifier = (
+        RunEventNotifier(client, settings.redis_namespace)
+        if settings.runtime_shared_notifications_enabled
+        else None
+    )
     task = asyncio.current_task()
     with suppress(NotImplementedError):
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
     async with Database(settings.database_url.get_secret_value()) as database:
+        if notifier is not None:
+            database.session_factory.configure(info={"event_notifier": notifier})
         worker = MaintenanceWorker(
             database.session_factory,
             LocalArtifactStore(settings.artifact_root),
@@ -416,6 +436,8 @@ async def run_maintenance_worker():
                 if not handled:
                     await asyncio.sleep(settings.worker_poll_seconds)
         finally:
+            if notifier is not None:
+                await notifier.close()
             if client is not None:
                 await client.aclose()
             if hasattr(provider, "aclose"):

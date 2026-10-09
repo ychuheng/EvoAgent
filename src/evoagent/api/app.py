@@ -120,8 +120,21 @@ def create_app(
 
         client = redis_client(resolved_settings)
         app.state.worker_presence = WorkerPresence(client, resolved_settings.redis_namespace)
+        from evoagent.trace.notifications import RunEventNotifier
+
+        notifier = (
+            RunEventNotifier(client, resolved_settings.redis_namespace)
+            if resolved_settings.runtime_shared_notifications_enabled
+            else None
+        )
+        if notifier is not None:
+            await notifier.start()
+        app.state.event_notifier = notifier
         resolved_database.session_factory.configure(
-            info={"wakeup": Wakeup(client, resolved_settings.redis_namespace)}
+            info={
+                "wakeup": Wakeup(client, resolved_settings.redis_namespace),
+                **({"event_notifier": notifier} if notifier is not None else {}),
+            }
         )
         app.state.settings = resolved_settings
         app.state.memory_generator = memory_generator
@@ -137,6 +150,8 @@ def create_app(
             yield
         finally:
             resolved_database.session_factory.configure(info={})
+            if notifier is not None:
+                await notifier.close()
             if client is not None:
                 await client.aclose()
             await app.state.mcp_manager.aclose()

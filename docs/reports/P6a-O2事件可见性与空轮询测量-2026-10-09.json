@@ -1,0 +1,47 @@
+{
+  "created_at": "2026-10-09T07:14:03.595508+00:00",
+  "python": "3.13.5",
+  "platform": "Windows",
+  "database": "postgresql",
+  "transport": "isolated Redis pubsub, two coordinator instances",
+  "samples": [
+    43.448,
+    15.628,
+    15.011,
+    25.905,
+    15.85,
+    16.004,
+    15.334,
+    13.84,
+    13.726,
+    14.801,
+    13.626,
+    34.299,
+    39.154,
+    50.296,
+    25.735,
+    17.475,
+    15.339,
+    15.685,
+    15.564,
+    14.813
+  ],
+  "p50_ms": 15.628,
+  "p95_ms": 43.448,
+  "ten_idle_connections_sql_over_4_seconds": {
+    "off": 155,
+    "on": 40
+  },
+  "paid_calls": 0,
+  "runtime_source_sha256": {
+    "src/evoagent/trace/notifications.py": "cbdff566abfb1cd63b3c47046c8f7d9b5b4e8b5f0ad6a51a25c328ecb5ef3287",
+    "src/evoagent/trace/sse.py": "f3631c1742a6d5e1f6c3bca91f281c15d134743863a13665083a2f2eb3136e8c",
+    "src/evoagent/db/session.py": "f53a3712c442df3f98679da78b1327fae14667324d912b23e9c3f36b4da01d5a",
+    "src/evoagent/db/repositories/events.py": "1a0335a58a24eba45dbdfc55f570f8f5f8eecf47573a883911f372d9a7b3cc4f"
+  },
+  "limits": [
+    "local Docker PostgreSQL/Redis; no production SLO claim",
+    "commit transaction start to next SSE item; no browser rendering/network latency",
+    "10 generators in one API process, two independent coordinators on same event loop"
+  ]
+}

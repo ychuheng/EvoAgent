@@ -26,6 +26,7 @@ async def stream_task_events(
         request.app.state.database.session_factory,
         poll_seconds=settings.sse_poll_seconds,
         heartbeat_seconds=settings.sse_heartbeat_seconds,
+        notifier=request.app.state.event_notifier,
     )
     async for event in service.stream(aggregate.run.id, after_sequence=last_event_id or 0):
         yield event

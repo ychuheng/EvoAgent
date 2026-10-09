@@ -7,6 +7,21 @@ function event(sequence: number, type: string, payload: Record<string, unknown> 
 }
 
 describe("事件投影（I-01）", () => {
+  it("连续模型进度折叠展示，重连游标仍覆盖每个已提交事件", () => {
+    const plan = applyEvents(EMPTY_PROGRESS, [
+      event(1, "model.requested"),
+      event(2, "model.delta", { text_delta: "first" }),
+      event(3, "model.delta", { text_delta: "latest" }),
+      event(4, "model.completed"),
+      event(5, "tool.started", { name: "file_read" }),
+      event(6, "model.delta", { text_delta: "legacy" }),
+    ]);
+    expect(plan.steps.map((step) => step.sequence)).toEqual([1, 3, 4, 5, 6]);
+    expect(plan.steps[1].detail).toBe("latest");
+    expect(plan.steps[4].detail).toBe("legacy");
+    expect(plan.lastSequence).toBe(6);
+    expect(applyEvent(plan, event(3, "model.delta"))).toBe(plan);
+  });
   it("按序号去重，重连补发不会重复显示同一工具", () => {
     const plan = applyEvents(EMPTY_PROGRESS, [
       event(1, "task.queued"),

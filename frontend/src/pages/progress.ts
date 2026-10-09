@@ -143,8 +143,11 @@ export function stepLabel(event: StreamEvent): { label: string; detail?: string 
 export function applyEvent(plan: ProgressPlan, event: StreamEvent): ProgressPlan {
   if (event.sequence <= plan.lastSequence) return plan;
   const { label, detail } = stepLabel(event);
+  const step = { sequence: event.sequence, type: event.type, label, detail };
+  // 展示合并不改变已提交游标；审批、工具结果等边界仍单独保留。
+  const consecutiveDelta = event.type === "model.delta" && plan.steps.at(-1)?.type === "model.delta";
   const next: ProgressPlan = {
-    steps: [...plan.steps, { sequence: event.sequence, type: event.type, label, detail }],
+    steps: consecutiveDelta ? [...plan.steps.slice(0, -1), step] : [...plan.steps, step],
     lastSequence: event.sequence,
     terminal: plan.terminal || RUN_TERMINAL.has(event.type),
     current: plan.current,

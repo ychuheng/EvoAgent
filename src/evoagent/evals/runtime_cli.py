@@ -21,7 +21,7 @@ async def run(args):
     definition = load_dataset_definition(
         Path(args.dataset.name), root=args.dataset.resolve().parent
     )
-    async with Database(settings.database_url.get_secret_value()) as database:
+    async with Database.configured(settings) as database:
         datasets = EvalDatasetService(database.session_factory)
         dataset = await datasets.import_definition(definition)
         if dataset.status.value == "draft":

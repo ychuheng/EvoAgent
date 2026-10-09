@@ -13,7 +13,7 @@ from evoagent.evals.validators import default_validator_registry
 async def run_eval_worker() -> None:
     settings = Settings()
     owner = f"{settings.worker_id[:80]}:eval:{uuid4().hex}"
-    async with Database(settings.database_url.get_secret_value()) as database:
+    async with Database.configured(settings) as database:
         coordinator = EvalCoordinator(
             database.session_factory,
             default_validator_registry(),

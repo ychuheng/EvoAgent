@@ -18,6 +18,8 @@ from evoagent.tasks.state_machine import PersistentRunStatus
 @asynccontextmanager
 async def client_with_completed_task(
     tmp_path: Path,
+    *,
+    shared_notifications: bool = False,
 ) -> AsyncIterator[tuple[AsyncClient, str, str]]:
     database = Database(f"sqlite+aiosqlite:///{tmp_path / 'sse.db'}")
     async with database.engine.begin() as connection:
@@ -27,6 +29,7 @@ async def client_with_completed_task(
         workspace=tmp_path / "workspace",
         sse_poll_seconds=0.01,
         sse_heartbeat_seconds=0.02,
+        runtime_shared_notifications_enabled=shared_notifications,
     )
     service = TaskService(database.session_factory)
     session = await service.create_session("SSE 测试")
@@ -64,6 +67,21 @@ async def test_sse_replays_committed_events_and_supports_last_event_id(tmp_path:
     assert "id: 3" in full.text
     assert "id: 1" not in resumed.text
     assert "id: 3" in resumed.text
+
+
+async def test_api_shared_notifications_keep_replay_and_terminal_close(tmp_path: Path):
+    async with client_with_completed_task(tmp_path, shared_notifications=True) as (
+        client,
+        task_id,
+        _run_id,
+    ):
+        full = await asyncio.wait_for(client.get(f"/api/v1/tasks/{task_id}/events"), timeout=2)
+        resumed = await client.get(
+            f"/api/v1/tasks/{task_id}/events", headers={"Last-Event-ID": "2"}
+        )
+    assert full.status_code == resumed.status_code == 200
+    assert "id: 1" in full.text and "id: 3" in full.text
+    assert "id: 1" not in resumed.text and "id: 3" in resumed.text
 
 
 @pytest.mark.asyncio

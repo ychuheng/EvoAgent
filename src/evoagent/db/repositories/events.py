@@ -104,3 +104,16 @@ class RunEventRepository:
             .order_by(RunEventRecord.sequence)
         )
         return tuple(result)
+
+    async def page_for_run(
+        self, run_id: UUID, *, after_sequence: int = 0, limit: int = 200
+    ) -> tuple[RunEventRecord, ...]:
+        if after_sequence < 0 or not 1 <= limit <= 200:
+            raise ValueError("invalid event cursor/page size")
+        result = await self._session.scalars(
+            select(RunEventRecord)
+            .where(RunEventRecord.run_id == run_id, RunEventRecord.sequence > after_sequence)
+            .order_by(RunEventRecord.sequence)
+            .limit(limit)
+        )
+        return tuple(result)

@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = Field(default=1.0, gt=0, le=60)
     worker_concurrency: int = Field(default=1, ge=1, le=64)
     runtime_event_batching_enabled: bool = False
+    runtime_shared_notifications_enabled: bool = False
     worker_runtime_experiment_id: UUID | None = None
     worker_runtime_arm: Literal["control", "treatment"] | None = None
     redis_url: SecretStr | None = None

@@ -253,7 +253,7 @@ async def run_demo(settings: Settings, dataset_path: Path) -> dict[str, object]:
         max_steps=settings.skill_max_steps,
         max_risk=settings.skill_max_effective_risk,
     )
-    async with Database(settings.database_url.get_secret_value()) as database:
+    async with Database.configured(settings) as database:
         datasets = EvalDatasetService(database.session_factory)
         dataset = await datasets.import_definition(definition)
         if dataset.status.value == "draft":
