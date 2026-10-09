@@ -248,6 +248,7 @@ class LearningRepository:
             learning_payload_hash=learning_hash,
             request_body_hash=body_hash,
             intent=body["intent"],
+            learn_from_feedback=body["learn_from_feedback"],
             verdict=body["verdict"],
             comment=body["comment"],
             correction=body["correction"],

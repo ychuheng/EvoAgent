@@ -23,9 +23,10 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ApiErrorBody;
+    const detail = typeof body.detail === "object" && body.detail !== null ? body.detail : undefined;
     throw new ApiError(
-      body.error?.message ?? (typeof body.detail === "string" ? body.detail : `请求失败：HTTP ${response.status}`),
-      body.error?.code ?? "http_error",
+      body.error?.message ?? detail?.message ?? (typeof body.detail === "string" ? body.detail : `请求失败：HTTP ${response.status}`),
+      body.error?.code ?? detail?.code ?? "http_error",
       response.status,
     );
   }

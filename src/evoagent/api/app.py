@@ -15,6 +15,7 @@ from evoagent.api.routes import (
     artifacts,
     evals,
     events,
+    learning,
     memory,
     projects,
     sessions,
@@ -170,6 +171,7 @@ def create_app(
 
     app = FastAPI(title="EvoAgent API", version="0.4.0.dev0", lifespan=lifespan)
     app.include_router(memory.router, prefix="/api/v1")
+    app.include_router(learning.router, prefix="/api/v1")
     from evoagent.api.routes import mcp, retrieval, runtime_evals
 
     app.include_router(mcp.router, prefix="/api/v1")

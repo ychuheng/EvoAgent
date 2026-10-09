@@ -196,3 +196,63 @@ async def test_initial_migration_on_real_postgresql() -> None:
     assert await table_names(database_url) == EXPECTED_TABLES
     await asyncio.to_thread(command.check, config)
     await asyncio.to_thread(command.downgrade, config, "base")
+
+
+async def test_feedback_consent_migration_keeps_history_unconsented(tmp_path):
+    from evoagent.db.models import RunRecord, SessionRecord, TaskRecord
+    from evoagent.db.session import Database
+
+    url = f"sqlite+aiosqlite:///{tmp_path / 'feedback-legacy.db'}"
+    config = alembic_config(url)
+    await asyncio.to_thread(command.upgrade, config, "20261009_0023")
+    db = Database(url)
+    async with db.session_factory() as session:
+        chat = SessionRecord(title="old")
+        session.add(chat)
+        await session.flush()
+        task = TaskRecord(session_id=chat.id, goal="old")
+        session.add(task)
+        await session.flush()
+        run = RunRecord(
+            task_id=task.id,
+            provider="mock",
+            model="mock",
+            data_role="personal",
+            next_feedback_revision=2,
+        )
+        session.add(run)
+        await session.commit()
+    async with db.engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO run_feedback "
+                "(id,run_id,revision,learning_revision,learning_payload_hash,request_body_hash,intent,"
+                "client_request_id,verdict,comment,correction,evidence_refs,actor_id,created_at) "
+                "VALUES (:id,:run,1,1,:semantic,:body,'method','old','helpful',"
+                "'note','method','[]','human',:at)"
+            ),
+            {
+                "id": "f" * 32,
+                "run": run.id.hex,
+                "semantic": "sha256:" + "a" * 64,
+                "body": "sha256:" + "b" * 64,
+                "at": "2026-01-01 00:00:00",
+            },
+        )
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with db.engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT learn_from_feedback,request_body_hash,comment,correction "
+                    "FROM run_feedback"
+                )
+            )
+        ).one()
+        assert not row[0] and row[1:] == ("sha256:" + "b" * 64, "note", "method")
+    await asyncio.to_thread(command.downgrade, config, "20261009_0023")
+    async with db.engine.connect() as connection:
+        columns = await connection.run_sync(lambda conn: inspect(conn).get_columns("run_feedback"))
+        assert "learn_from_feedback" not in {column["name"] for column in columns}
+        assert await connection.scalar(text("SELECT count(*) FROM run_feedback")) == 1
+    await db.dispose()

@@ -3,8 +3,9 @@ import os
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from evoagent.db.base import Base
 from evoagent.db.counters import allocate
@@ -26,11 +27,26 @@ from evoagent.skills.canonical import content_hash
 @pytest.fixture(params=["sqlite", "postgres"])
 async def learning_db(tmp_path, request):
     url = f"sqlite+aiosqlite:///{tmp_path / 'learning.db'}"
+    schema = None
     if request.param == "postgres":
         url = os.getenv("EVOAGENT_TEST_DATABASE_URL")
         if not url:
             pytest.skip("PostgreSQL learning contracts require an isolated test database")
+        schema = "learning_contract_" + uuid4().hex
     database = Database(url)
+    if schema is not None:
+        async with database.engine.begin() as connection:
+            await connection.execute(
+                text("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public")
+            )
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        await database.dispose()
+        database.engine = create_async_engine(
+            url,
+            connect_args={"server_settings": {"search_path": f"{schema},public"}},
+            execution_options={"schema_translate_map": {None: schema}},
+        )
+        database.session_factory.configure(bind=database.engine)
     async with database.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     async with database.session_factory() as session:
@@ -44,8 +60,13 @@ async def learning_db(tmp_path, request):
         session.add(run)
         await session.commit()
         run_id = run.id
-    yield database, run_id
-    await database.dispose()
+    try:
+        yield database, run_id
+    finally:
+        if schema is not None:
+            async with database.engine.begin() as connection:
+                await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        await database.dispose()
 
 
 async def append(database, run_id, key, **values):
@@ -228,3 +249,17 @@ async def test_sensitive_feedback_is_rejected_before_counter_allocation(learning
     with pytest.raises(ValueError, match="sensitive_feedback_content"):
         await append(db, run_id, "secret", comment="password: hidden-value")
     assert (await append(db, run_id, "safe")).revision == 1
+
+
+async def test_learning_consent_persists_without_reclassifying_semantics(learning_db):
+    db, run_id = learning_db
+    old = await append(db, run_id, "no-consent")
+    allowed = await append(db, run_id, "consent", learn_from_feedback=True)
+    assert not old.learn_from_feedback and allowed.learn_from_feedback
+    assert old.learning_revision == allowed.learning_revision
+    assert old.learning_payload_hash == allowed.learning_payload_hash
+    assert old.request_body_hash != allowed.request_body_hash
+    replay = await append(db, run_id, "consent", learn_from_feedback=True)
+    assert replay.id == allowed.id and replay.learn_from_feedback
+    with pytest.raises(ConcurrentUpdateError, match="feedback_conflict"):
+        await append(db, run_id, "consent", learn_from_feedback=False)

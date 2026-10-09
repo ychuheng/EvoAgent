@@ -394,7 +394,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
         </details>}
         {streamError && <p role="alert" className="state">{streamError}</p>}
       </div>
-      {selectedTask && <TaskInspector key={selectedTask} taskId={selectedTask} onOpenVersion={onOpenVersion} onOpenContext={onOpenContext} />}
+      {selectedTask && <TaskInspector key={selectedTask} taskId={selectedTask} workspaceId={workspaceId} onOpenVersion={onOpenVersion} onOpenContext={onOpenContext} />}
       {error && <p role="alert" className="error">{error}</p>}
       <form onSubmit={(event) => { void send(event); }} className="chat-compose">
         <label htmlFor="chat-input">发送消息</label>

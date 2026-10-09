@@ -100,13 +100,22 @@ def _promotion(result: PromotionResult) -> PromotionResponse:
 
 
 async def _extract(payload: SkillExtractionRequest, request: Request) -> SkillExtractionResponse:
+    settings = request.app.state.settings
+    if not settings.learning_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "learning_disabled"})
+    if settings.provider.value != "mock":
+        # The synchronous legacy path has no per-workspace learning reservation.
+        # Do not allow paid calls to bypass the new durable learning pipeline.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "legacy_paid_extraction_requires_learning_pipeline"},
+        )
     generator: CandidateGenerator | None = request.app.state.candidate_generator
     registry: ToolRegistry | None = request.app.state.skill_tool_registry
     if generator is None or registry is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "skill extraction is not configured"
         )
-    settings = request.app.state.settings
     database = request.app.state.database
     artifacts = ArtifactService(
         LocalArtifactStore(settings.artifact_root), database.session_factory

@@ -4,6 +4,7 @@ import { chat, type ApprovalPreview, type ArtifactDetail, type ChatTask, type Ta
 import { ApiError } from "../api/client";
 import { phase4, type RetrievalEvidence } from "../api/phase4";
 import { errorLabel, taskStatusLabel } from "./taskLabels";
+import { FeedbackPanel } from "./FeedbackPanel";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const TOOL_STATUS: Record<string, string> = {
@@ -21,7 +22,7 @@ function sourceLink(url: string) {
   return <span>{url}</span>;
 }
 
-export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId: string; onOpenVersion: (id: string) => void; onOpenContext: (id: string) => void }) {
+export function TaskInspector({ taskId, onOpenVersion, onOpenContext, workspaceId = "00000000-0000-0000-0000-000000000001" }: { taskId: string; onOpenVersion: (id: string) => void; onOpenContext: (id: string) => void; workspaceId?: string }) {
   const [task, setTask] = useState<ChatTask | null>(null);
   const [trace, setTrace] = useState<TaskTrace | null>(null);
   const [retrieval, setRetrieval] = useState<RetrievalEvidence | null>(null);
@@ -276,6 +277,7 @@ export function TaskInspector({ taskId, onOpenVersion, onOpenContext }: { taskId
         </div>
       </div>;
     })}
+    {task && TERMINAL.has(task.status) && <FeedbackPanel key={task.latest_run.id} runId={task.latest_run.id} workspaceId={workspaceId} />}
     {error && <p role="alert" className="error">{error}</p>}
   </section>;
 }

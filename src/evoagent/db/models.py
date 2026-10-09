@@ -422,6 +422,9 @@ class RunFeedbackRecord(Base):
     learning_payload_hash: Mapped[str] = mapped_column(String(71))
     request_body_hash: Mapped[str] = mapped_column(String(71))
     intent: Mapped[str] = mapped_column(String(32))
+    learn_from_feedback: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     client_request_id: Mapped[str] = mapped_column(String(128))
     verdict: Mapped[str] = mapped_column(String(32))
     comment: Mapped[str] = mapped_column(Text, default="")

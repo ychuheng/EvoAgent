@@ -81,5 +81,5 @@ export interface ReportEnvelope {
 
 export interface ApiErrorBody {
   error?: { code?: string; message?: string };
-  detail?: string;
+  detail?: string | { code?: string; message?: string };
 }
