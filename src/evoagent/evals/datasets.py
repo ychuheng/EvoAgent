@@ -38,43 +38,52 @@ class EvalDatasetService:
         self._session_factory = session_factory
 
     async def import_definition(self, definition: EvalDatasetDefinition) -> EvalDatasetRecord:
-        digest = content_hash(definition.model_dump(mode="json"))
         async with UnitOfWork(self._session_factory) as unit:
-            existing = await unit.session.scalar(
-                select(EvalDatasetRecord).where(
-                    EvalDatasetRecord.name == definition.name,
-                    EvalDatasetRecord.version == definition.version,
-                )
-            )
-            if existing is not None:
-                if existing.content_hash != digest:
-                    raise DatasetConflictError("dataset version is immutable")
-                return existing
-            dataset = EvalDatasetRecord(
-                name=definition.name,
-                purpose=definition.purpose,
-                version=definition.version,
-                content_hash=digest,
-                status=DatasetStatus.DRAFT,
-            )
-            unit.evals.add_dataset(dataset)
-            await unit.session.flush()
-            for case in definition.cases:
-                unit.evals.add_case(
-                    EvalCaseRecord(
-                        dataset_id=dataset.id,
-                        case_key=case.case_key,
-                        task_family=case.task_family,
-                        split=case.split,
-                        public_input=case.public_input,
-                        private_validators=[
-                            spec.model_dump(mode="json") for spec in case.private_validators
-                        ],
-                        risk_profile=case.risk_profile,
-                    )
-                )
+            dataset = await self.import_in_session(unit.session, definition)
             await unit.commit()
             return dataset
+
+    async def import_in_session(
+        self, session: AsyncSession, definition: EvalDatasetDefinition
+    ) -> EvalDatasetRecord:
+        """Import atomically with its admitting request; caller owns the transaction."""
+
+        digest = content_hash(definition.model_dump(mode="json"))
+        existing = await session.scalar(
+            select(EvalDatasetRecord).where(
+                EvalDatasetRecord.name == definition.name,
+                EvalDatasetRecord.version == definition.version,
+            )
+        )
+        if existing is not None:
+            if existing.content_hash != digest:
+                raise DatasetConflictError("dataset version is immutable")
+            return existing
+        dataset = EvalDatasetRecord(
+            name=definition.name,
+            purpose=definition.purpose,
+            version=definition.version,
+            content_hash=digest,
+            status=DatasetStatus.DRAFT,
+        )
+        session.add(dataset)
+        await session.flush()
+        for case in definition.cases:
+            session.add(
+                EvalCaseRecord(
+                    dataset_id=dataset.id,
+                    case_key=case.case_key,
+                    task_family=case.task_family,
+                    split=case.split,
+                    public_input=case.public_input,
+                    private_validators=[
+                        spec.model_dump(mode="json") for spec in case.private_validators
+                    ],
+                    risk_profile=case.risk_profile,
+                )
+            )
+        await session.flush()
+        return dataset
 
     async def freeze(self, dataset_id: UUID) -> EvalDatasetRecord:
         async with UnitOfWork(self._session_factory) as unit:

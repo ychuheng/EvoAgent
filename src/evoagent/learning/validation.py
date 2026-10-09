@@ -1,0 +1,305 @@
+"""Freeze user-supplied personal cases atomically; execution is a separate stage.
+
+This service is a trusted local control-plane entry, never a model tool. Until
+replica/project dispatch and result collection are connected it is not exposed
+as an HTTP route and it neither enqueues execution nor opens trial admission.
+"""
+
+from uuid import UUID
+
+from pydantic import Field, model_validator
+from sqlalchemy import select
+
+from evoagent.db.models import ArtifactRecord, LearningSourceRecord
+from evoagent.db.repositories.base import ConcurrentUpdateError
+from evoagent.db.repositories.events import RunEventRepository
+from evoagent.evals.datasets import EvalDatasetService
+from evoagent.evals.lifecycle import DatasetStatus
+from evoagent.evals.schema import EvalCaseDefinition, EvalDatasetDefinition, ValidatorSpec
+from evoagent.learning.repository import LearningRepository
+from evoagent.learning.schema import LearningError
+from evoagent.learning.service import LearningService, request_view
+from evoagent.learning.sources import PersonalSourceService
+from evoagent.learning.validation_schema import ValidationSubmission
+from evoagent.privacy.redaction import detect_sensitive
+from evoagent.skills.access import SkillAccessPolicy
+from evoagent.skills.canonical import content_hash
+from evoagent.skills.lifecycle import SkillVersionStatus
+from evoagent.skills.trials import TrialScope
+from evoagent.tasks.lease_guard import database_now
+
+
+class ValidationAdmission(ValidationSubmission):
+    expected_parent_lock_version: int = Field(ge=0)
+    reviewed_source_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    independence_reason: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def explicit_safe_review(self):
+        if not self.independence_reason.strip() or detect_sensitive(self.independence_reason):
+            raise ValueError("validation requires a safe explicit source/input review")
+        return self
+
+
+class PersonalValidationService:
+    def __init__(self, factory, store, validators, *, learning_enabled=False):
+        self.factory, self.store, self.validators = factory, store, validators
+        self.enabled = learning_enabled
+
+    def _require_meaningful_spec(self, criterion):
+        spec = criterion.validator
+        if spec is None:
+            return
+        if not self.validators.supports(spec.name, spec.version):
+            raise LearningError("validation_validator_not_registered")
+        if criterion.business_criterion and spec.name in {
+            "artifact_exists",
+            "minimum_citations",
+            "contains_sections",
+        }:
+            raise LearningError("validation_structure_is_not_business_verification")
+        parameters = spec.parameters
+        text_lists = {
+            "covers_items": ("items",),
+            "contains_sections": ("sections",),
+            "preserves_constraints": ("required", "forbidden"),
+            "tool_policy": ("allowed_tools",),
+        }
+        if spec.name in text_lists:
+            keys = text_lists[spec.name]
+            if set(parameters) - set(keys) or not parameters.get(keys[0]):
+                raise LearningError("validation_empty_or_unknown_parameters")
+            for values in parameters.values():
+                if (
+                    type(values) is not list
+                    or len(values) > 64
+                    or any(
+                        type(value) is not str or not value.strip() or len(value) > 1000
+                        for value in values
+                    )
+                    or len(set(values)) != len(values)
+                ):
+                    raise LearningError("validation_parameters_invalid")
+        elif spec.name in {"run_completed", "no_unknown_effects", "no_duplicate_effects"}:
+            if parameters:
+                raise LearningError("validation_parameters_invalid")
+        elif spec.name in {"max_tool_calls", "minimum_citations"}:
+            key = "maximum" if spec.name == "max_tool_calls" else "minimum"
+            value = parameters.get(key)
+            minimum = 0 if spec.name == "max_tool_calls" else 1
+            if set(parameters) != {key} or type(value) is not int or not minimum <= value <= 64:
+                raise LearningError("validation_parameters_invalid")
+        elif spec.name == "expected_status":
+            if (
+                set(parameters) != {"status"}
+                or type(parameters.get("status")) is not str
+                or parameters["status"]
+                not in {
+                    "completed",
+                    "failed",
+                    "cancelled",
+                }
+            ):
+                raise LearningError("validation_parameters_invalid")
+        elif spec.name == "artifact_exists":
+            if (
+                set(parameters) != {"type"}
+                or type(parameters["type"]) is not str
+                or not 1 <= len(parameters["type"]) <= 128
+            ):
+                raise LearningError("validation_parameters_invalid")
+        else:
+            # A registered extension still needs an explicit parameter contract
+            # before this service can accept user-frozen cases for it.
+            raise LearningError("validation_parameter_contract_not_registered")
+
+    async def prepare_cases(self, parent_id: UUID, payload: ValidationAdmission):
+        if not self.enabled:
+            raise LearningError("learning_disabled")
+        control = LearningService(self.factory, learning_enabled=self.enabled)
+        async with self.factory() as session:
+            initial = await control._locked_request(
+                session, parent_id, payload.expected_parent_lock_version
+            )
+            source = await session.scalar(
+                select(LearningSourceRecord).where(
+                    LearningSourceRecord.run_id == initial.origin_run_id,
+                    LearningSourceRecord.source_revision
+                    == initial.frozen_inputs.get("source_revision"),
+                )
+            )
+            if source is None or source.status != "valid":
+                raise LearningError("learning_source_revoked")
+            source_id, source_epoch, source_hash = (
+                source.id,
+                source.revocation_epoch,
+                source.content_hash,
+            )
+            max_risk = initial.policy_snapshot["max_source_risk"]
+        # Whole-source current-policy review happens outside a database lock;
+        # admission rechecks the source identity and authorization below.
+        sources = PersonalSourceService(
+            self.factory, artifact_store=self.store, max_source_risk=max_risk
+        )
+        evidence = await sources.read_frozen(source_id, expected_revocation_epoch=source_epoch)
+        if payload.reviewed_source_hash != source_hash:
+            raise LearningError("validation_source_review_stale")
+        if any(case.fixture_id is not None for case in payload.cases):
+            raise LearningError("validation_fixture_dispatch_not_connected")
+        for case in payload.cases:
+            for item in case.criteria:
+                self._require_meaningful_spec(item)
+            if case.task_family in {"coding", "data", "document", "file_management"} and not any(
+                item.kind == "user" and item.business_criterion for item in case.criteria
+            ):
+                # The current registry inspects text/runtime structure, not
+                # artifact business contents or independently rerun assertions.
+                raise LearningError("validation_business_judge_required")
+        if sum(len(case.criteria) for case in payload.cases) * payload.repeats * 2 > 100:
+            raise LearningError("validation_report_item_bound")
+        input_hashes = {item.get("hash") for item in evidence.input_refs}
+        case_fingerprints = {
+            case.case_key: content_hash(case.public_input["inputs"]) for case in payload.cases
+        }
+        if any(value in input_hashes for value in case_fingerprints.values()):
+            raise LearningError("validation_input_reuses_source")
+        body = payload.model_dump(mode="json", exclude={"client_request_id"})
+        criteria = {
+            case.case_key: [item.model_dump(mode="json") for item in case.criteria]
+            for case in payload.cases
+        }
+        async with self.factory() as session:
+            parent = await control._locked_request(
+                session, parent_id, payload.expected_parent_lock_version
+            )
+            if (
+                parent.request_kind != "propose"
+                or parent.status != "completed"
+                or parent.stage != "reviewed"
+            ):
+                raise LearningError("validation_candidate_review_required")
+            if parent.project_id is not None:
+                raise LearningError("validation_project_replica_required")
+            policy = await control._policy(session, parent.workspace_id)
+            if policy["mode"] == "off":
+                raise LearningError("learning_policy_off")
+            source = await session.get(LearningSourceRecord, source_id, populate_existing=True)
+            artifact = await session.get(ArtifactRecord, source.artifact_id) if source else None
+            if (
+                source is None
+                or source.status != "valid"
+                or source.revocation_epoch != source_epoch
+                or source.content_hash != source_hash
+                or artifact is None
+                or artifact.attributes.get("erased")
+                or artifact.redaction_status == "quarantined"
+                or artifact.content_hash != source_hash
+            ):
+                raise LearningError("learning_source_revoked")
+            sources.max_source_risk = min(max_risk, policy["max_source_risk"])
+            await sources.check_in_session(
+                session,
+                parent.origin_run_id,
+                source.feedback_id,
+                "feedback" if source.feedback_id else "manual",
+            )
+            candidate = await SkillAccessPolicy().check(
+                session,
+                parent.candidate_version_id,
+                workspace_id=parent.workspace_id,
+                project_id=parent.project_id,
+            )
+            if candidate.lifecycle_status is not SkillVersionStatus.DRAFT:
+                raise LearningError("validation_candidate_not_draft")
+            if (
+                parent.validation_report is None
+                or content_hash(parent.validation_report) != parent.validation_report_hash
+                or parent.validation_report.get("static_validation", {}).get("passed") is not True
+            ):
+                raise LearningError("validation_static_evidence_required")
+            policy_snapshot = {
+                **policy,
+                "max_source_risk": sources.max_source_risk,
+                "validation_mode": "personal_validation",
+                "provider": "mock",
+                "model": "mock",
+                "repeats": payload.repeats,
+                "input_review": {
+                    "origin": "user",
+                    "actor": "local-user",
+                    "source_hash": source_hash,
+                    "reason": payload.independence_reason,
+                },
+                "independence_scope": "user_review_plus_exact_known_input_hashes",
+            }
+            definition = EvalDatasetDefinition(
+                purpose="personal_dev",
+                name="pv_" + content_hash({"parent_id": str(parent.id), "body": body})[7:39],
+                version=1,
+                cases=tuple(
+                    EvalCaseDefinition(
+                        case_key=case.case_key,
+                        task_family=case.task_family,
+                        split="train",
+                        public_input=case.public_input,
+                        private_validators=tuple(
+                            item.validator for item in case.criteria if item.validator is not None
+                        )
+                        or (ValidatorSpec(name="run_completed"),),
+                        risk_profile={
+                            "case_kind": case.case_kind,
+                            "input_fingerprint": case_fingerprints[case.case_key],
+                        },
+                    )
+                    for case in payload.cases
+                ),
+            )
+            dataset = await EvalDatasetService(self.factory).import_in_session(session, definition)
+            dataset.status = DatasetStatus.FROZEN
+            frozen = {
+                **parent.frozen_inputs,
+                "parent_request_id": str(parent.id),
+                "candidate_version_id": str(candidate.id),
+                "candidate_content_hash": candidate.content_hash,
+                "validation_input_manifest_hash": dataset.content_hash,
+                "validation_criteria_hash": content_hash(criteria),
+                "validation_policy_hash": content_hash(policy_snapshot),
+                "validator_version": "personal:v1",
+                "target_scope_key": TrialScope(parent.workspace_id).key,
+                "validation_dataset_id": str(dataset.id),
+                "validation_cases": [case.model_dump(mode="json") for case in payload.cases],
+                "input_fingerprints": case_fingerprints,
+                "source_id": str(source_id),
+                "source_hash": source_hash,
+            }
+            row = await LearningRepository(session).append_request(
+                workspace_id=parent.workspace_id,
+                origin_run_id=parent.origin_run_id,
+                client_request_id=payload.client_request_id,
+                kind="validate",
+                frozen_inputs=frozen,
+                policy_snapshot=policy_snapshot,
+                request_body=body,
+                parent_request_id=parent.id,
+                target_skill_id=candidate.skill_id,
+                base_version_id=parent.base_version_id,
+            )
+            if row.candidate_version_id is None:
+                row.candidate_version_id, row.stage = candidate.id, "task_validate"
+                await RunEventRepository(session).append(
+                    run_id=parent.origin_run_id,
+                    event_type="learning.validation_inputs_frozen",
+                    payload={
+                        "request_id": str(row.id),
+                        "dataset_id": str(dataset.id),
+                        "criteria_hash": frozen["validation_criteria_hash"],
+                        "review_origin": "user",
+                        "execution_started": False,
+                    },
+                    created_at=await database_now(session),
+                )
+            elif row.candidate_version_id != candidate.id:
+                raise ConcurrentUpdateError("validation_candidate_conflict")
+            result = request_view(row)
+            await session.commit()
+            return result
