@@ -209,6 +209,49 @@ async def test_running_job_cleanup_and_failure_evidence(sandbox_env, reason):
     assert not driver.names
 
 
+async def test_cancel_during_connection_ping_releases_reader_before_cleanup(
+    sandbox_env, monkeypatch
+):
+    from sqlalchemy.util.concurrency import await_only
+
+    db, settings, driver, request, lease = sandbox_env
+    service = SandboxService(settings, db.session_factory, driver)
+    started, release = asyncio.Event(), asyncio.Event()
+    original_ping = db.engine.dialect.do_ping
+    gated = False
+
+    def ping(connection):
+        nonlocal gated
+        if gated:
+            return original_ping(connection)
+        gated = True
+        cursor = connection.cursor()
+        cursor.execute("SELECT id FROM tasks")
+        cursor.fetchone()
+        started.set()
+        # Like the dialect's ping, close follows awaited driver I/O. Cancellation
+        # here must not strand a cursor holding a SQLite read lock.
+        await_only(release.wait())
+        cursor.close()
+        return True
+
+    monkeypatch.setattr(db.engine.dialect, "do_ping", ping)
+    checking = asyncio.create_task(service.check(service.guard(request)))
+    await asyncio.wait_for(started.wait(), 2)
+    checking.cancel()
+    try:
+        await asyncio.sleep(0.05)
+        assert not checking.done(), "cancel escaped before the checked-out reader closed"
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await checking
+    async with db.session_factory() as session:
+        task = await session.get(TaskRecord, lease.task_id)
+        task.cancel_requested = True
+        await session.commit()
+
+
 async def test_input_must_belong_to_run_and_is_readonly_staged(sandbox_env):
     db, settings, driver, request, _ = sandbox_env
     service = SandboxService(settings, db.session_factory, driver)

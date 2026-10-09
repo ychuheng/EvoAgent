@@ -36,6 +36,7 @@ from evoagent.evals.lifecycle import (
 )
 from evoagent.projects import ProjectAuthorization, ProjectStatus
 from evoagent.skills.lifecycle import SkillStatus, SkillVersionStatus
+from evoagent.tasks.cancel_notifications import FUNCTION_SQL, TRIGGER_SQL
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
 
@@ -1425,4 +1426,18 @@ event.listen(
     RunRecord.__table__,
     "after_drop",
     DDL("DROP FUNCTION IF EXISTS protect_run_data_role()").execute_if(dialect="postgresql"),
+)
+
+# NOTIFY is delivered only after the cancelling transaction commits. The hint
+# carries a UUID, never the goal, tool arguments, credentials or authorization.
+event.listen(
+    TaskRecord.__table__, "after_create", DDL(FUNCTION_SQL).execute_if(dialect="postgresql")
+)
+event.listen(
+    TaskRecord.__table__, "after_create", DDL(TRIGGER_SQL).execute_if(dialect="postgresql")
+)
+event.listen(
+    TaskRecord.__table__,
+    "after_drop",
+    DDL("DROP FUNCTION IF EXISTS evoagent_notify_task_cancel()").execute_if(dialect="postgresql"),
 )

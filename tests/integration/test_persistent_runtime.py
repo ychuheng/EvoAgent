@@ -166,7 +166,9 @@ async def test_second_task_receives_committed_session_conversation(runtime_envir
 
 
 @pytest.mark.asyncio
-async def test_recovery_resumes_from_latest_legal_snapshot(runtime_environment) -> None:
+async def test_recovery_resumes_from_latest_legal_snapshot(
+    runtime_environment, monkeypatch
+) -> None:
     database, settings, service, session_id = runtime_environment
     aggregate = await service.create_task(
         session_id=session_id,
@@ -176,6 +178,17 @@ async def test_recovery_resumes_from_latest_legal_snapshot(runtime_environment) 
     )
     manager = JobLeaseManager(database.session_factory, lease_seconds=1)
     claimed_at = datetime.now(UTC)
+    clock = claimed_at
+
+    async def controlled_now(session):
+        return clock
+
+    # This test drives Runner directly without a Worker heartbeat. Freeze lease
+    # time while producing the snapshot, then explicitly advance past expiry;
+    # machine/scan speed must not decide whether the intended crash is reached.
+    monkeypatch.setattr("evoagent.tasks.lease_guard.database_now", controlled_now)
+    monkeypatch.setattr("evoagent.tasks.lease.database_now", controlled_now)
+    monkeypatch.setattr("evoagent.runtime.recovery.database_now", controlled_now)
     first_lease = await manager.claim_next("worker-crashed", now=claimed_at)
     assert first_lease is not None
     call = ToolCall(call_id="call-1", name="calculator", arguments={"expression": "20+22"})
@@ -188,7 +201,8 @@ async def test_recovery_resumes_from_latest_legal_snapshot(runtime_environment) 
         first_lease
     )
     assert failed_attempt.status is PersistentRunStatus.FAILED
-    assert await manager.recover_expired(now=claimed_at + timedelta(seconds=2)) == 1
+    clock = claimed_at + timedelta(seconds=2)
+    assert await manager.recover_expired(now=clock) == 1
 
     decision = await RecoveryService(
         database.session_factory,

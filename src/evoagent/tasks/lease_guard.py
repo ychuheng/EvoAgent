@@ -31,6 +31,12 @@ class LeaseGuard:
     async def check(
         self, session: AsyncSession, *, now: datetime | None = None
     ) -> tuple[TaskRecord, RunRecord]:
+        task, run, _ = await self.check_with_time(session, now=now)
+        return task, run
+
+    async def check_with_time(
+        self, session: AsyncSession, *, now: datetime | None = None
+    ) -> tuple[TaskRecord, RunRecord, datetime]:
         # 固定 Task -> Run 锁序。SQLite 只用于功能验证，不提供行锁并发保证。
         task = await session.scalar(
             select(TaskRecord).where(TaskRecord.id == self.lease.task_id).with_for_update()
@@ -53,4 +59,4 @@ class LeaseGuard:
         )
         if run is None or run.task_id != task.id or run.status is not PersistentRunStatus.RUNNING:
             raise LeaseLostError("run is no longer active under this lease")
-        return task, run
+        return task, run, current

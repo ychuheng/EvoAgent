@@ -384,6 +384,7 @@ async def run_worker() -> None:
             snapshot_schema_version=settings.snapshot_schema_version,
             recovery_scan_decoupled=settings.runtime_recovery_scan_decoupled_enabled,
             maintenance_idle_backoff=settings.runtime_maintenance_idle_backoff_enabled,
+            heartbeat_status_merge=settings.runtime_heartbeat_status_merge_enabled,
         )
         loop = asyncio.get_running_loop()
         with suppress(NotImplementedError):

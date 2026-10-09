@@ -15,6 +15,7 @@ from evoagent.tasks.lease import (
     TaskExecutionResult,
 )
 from evoagent.tasks.state_machine import PersistentRunStatus
+from evoagent.workers.cancellation import CancellationNotifier
 from evoagent.workers.heartbeat import LeaseHeartbeat
 from evoagent.workers.maintenance import MaintenanceLane
 from evoagent.workers.presence import WorkerPresence
@@ -44,6 +45,8 @@ class JobWorker:
         presence: WorkerPresence | None = None,
         recovery_scan_decoupled: bool = False,
         maintenance_idle_backoff: bool = False,
+        heartbeat_status_merge: bool = False,
+        cancellation_notifier: CancellationNotifier | None = None,
     ) -> None:
         self._worker_id = f"{worker_id[:95]}:{uuid4().hex}"
         self._maintenance_worker = maintenance_worker
@@ -56,9 +59,15 @@ class JobWorker:
         self._snapshot_schema_version = snapshot_schema_version
         self._lease_manager = lease_manager
         self._handler = handler
+        self._cancellation = (
+            (cancellation_notifier or CancellationNotifier(lease_manager._session_factory))
+            if heartbeat_status_merge
+            else None
+        )
         self._heartbeat = LeaseHeartbeat(
             lease_manager,
             interval_seconds=heartbeat_seconds,
+            cancellation_notifier=self._cancellation,
         )
         self._poll_seconds = poll_seconds
         self._stopping = asyncio.Event()
@@ -77,6 +86,8 @@ class JobWorker:
     async def run_forever(self) -> None:
         self._background_recovery = self._recovery is not None
         tasks = [asyncio.create_task(self._lane()) for _ in range(self._concurrency)]
+        if self._cancellation is not None:
+            tasks.append(asyncio.create_task(self._cancellation.run(self._stopping)))
         if self._recovery is not None:
             tasks.append(
                 asyncio.create_task(
@@ -108,6 +119,8 @@ class JobWorker:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            if self._cancellation is not None:
+                await self._cancellation.close()
             self._background_recovery = False
             await self._wakeup.close()
 

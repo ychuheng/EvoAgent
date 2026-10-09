@@ -46,6 +46,12 @@ class JobLease:
 
 
 @dataclass(frozen=True, slots=True)
+class HeartbeatStatus:
+    lease: JobLease
+    cancel_requested: bool
+
+
+@dataclass(frozen=True, slots=True)
 class TaskExecutionResult:
     """TaskHandler 交给 Worker 持久化的执行结果。"""
 
@@ -210,6 +216,26 @@ class JobLeaseManager:
         async with self._session_factory() as session:
             task, _ = await LeaseGuard(lease).check(session)
             return task.cancel_requested
+
+    async def heartbeat_and_status(
+        self, lease: JobLease, *, now: datetime | None = None
+    ) -> HeartbeatStatus:
+        """同一短事务内续租、读取取消；只取一次数据库时钟。"""
+        async with self._session_factory() as session, session.begin():
+            task, _, current = await LeaseGuard(lease).check_with_time(session, now=now)
+            expires_at = current + self._lease_duration
+            task.heartbeat_at = current
+            task.lease_expires_at = expires_at
+            cancelled = task.cancel_requested
+        renewed = JobLease(
+            task_id=lease.task_id,
+            run_id=lease.run_id,
+            owner=lease.owner,
+            expires_at=expires_at,
+            attempt=lease.attempt,
+            epoch=lease.epoch,
+        )
+        return HeartbeatStatus(renewed, cancelled)
 
     async def finalize(
         self,

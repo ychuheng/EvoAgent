@@ -77,6 +77,12 @@ class SandboxService:
         )
 
     async def check(self, guard):
+        # A cancellation during pool pre-ping / driver I/O can leave a reader
+        # alive before a session owns the connection. Complete this short read
+        # and its close before the caller starts the cleanup write transaction.
+        await finish_on_cancel(self._check(guard))
+
+    async def _check(self, guard):
         async with self.factory() as session:
             task, _ = await guard.check(session)
             if task.cancel_requested:
