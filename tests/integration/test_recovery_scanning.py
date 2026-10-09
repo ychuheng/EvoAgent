@@ -2,7 +2,7 @@ import asyncio
 import os
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from evoagent.db.base import Base
 from evoagent.db.models import RunEventRecord, RunRecord, SessionRecord, TaskRecord
@@ -45,8 +45,28 @@ async def recovering_db(tmp_path, request):
         await session.commit()
         ids = [t.id for t in tasks]
         run_ids = [r.id for r in runs]
-    yield db, ids, run_ids
-    await db.dispose()
+    try:
+        yield db, ids, run_ids
+    finally:
+        # Recovered tasks are globally claimable. Do not leave synthetic jobs in
+        # the shared, isolated PostgreSQL test database for the next worker test.
+        try:
+            async with db.session_factory() as session:
+                await session.execute(
+                    delete(RunEventRecord).where(RunEventRecord.run_id.in_(run_ids))
+                )
+                await session.execute(delete(RunRecord).where(RunRecord.id.in_(run_ids)))
+                await session.execute(delete(TaskRecord).where(TaskRecord.id.in_(ids)))
+                await session.execute(delete(SessionRecord).where(SessionRecord.id == chat.id))
+                await session.commit()
+                assert (
+                    await session.scalar(
+                        select(func.count()).select_from(TaskRecord).where(TaskRecord.id.in_(ids))
+                    )
+                    == 0
+                )
+        finally:
+            await db.dispose()
 
 
 async def test_pending_scan_obeys_limit_and_preserves_recovery_decisions(recovering_db):
