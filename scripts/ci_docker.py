@@ -69,7 +69,18 @@ def configure():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(cache_configuration(existing)) + "\n")
     subprocess.run(["systemctl", "restart", "docker"], check=True, timeout=60)
+    metadata = json.loads(docker("info", "--format", "{{json .}}"))
+    verify_loaded_cache(metadata)
+    print("CI Docker server", metadata.get("ServerVersion"), "driver", metadata.get("Driver"))
     print("Configured official Docker Hub cache on this isolated CI runner")
+
+
+def verify_loaded_cache(metadata):
+    if not any(
+        isinstance(item, str) and item.rstrip("/") == MIRROR
+        for item in (metadata.get("RegistryConfig", {}).get("Mirrors") or [])
+    ):
+        raise RuntimeError("Docker daemon did not load the required official cache")
 
 
 def start(name, image, port, *extra):

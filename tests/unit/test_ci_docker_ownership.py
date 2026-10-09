@@ -20,6 +20,12 @@ def test_cache_preserves_existing_daemon_settings_and_is_idempotent():
     assert ci_docker.cache_configuration(result) == result
 
 
+def test_cache_must_be_loaded_by_daemon_not_merely_written_to_config():
+    with pytest.raises(RuntimeError, match="did not load"):
+        ci_docker.verify_loaded_cache({"RegistryConfig": {"Mirrors": []}})
+    ci_docker.verify_loaded_cache({"RegistryConfig": {"Mirrors": [ci_docker.MIRROR + "/"]}})
+
+
 @pytest.mark.parametrize("value", [None, [], {"registry-mirrors": "bad"}])
 def test_bad_daemon_configuration_is_not_overwritten(value):
     with pytest.raises(ValueError):

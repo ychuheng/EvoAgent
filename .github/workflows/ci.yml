@@ -54,7 +54,13 @@ jobs:
         with:
           fetch-depth: 0
       - name: Configure official Docker Hub cache on isolated runner
-        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_JOB python3 scripts/ci_docker.py configure
+        # Public pulls must not inherit the runner's Docker Hub account.
+        # This directory belongs only to this disposable job.
+        run: |
+          public_config="$RUNNER_TEMP/evoagent-public-images"
+          install -d -m 700 "$public_config"
+          echo "DOCKER_CONFIG=$public_config" >> "$GITHUB_ENV"
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_JOB python3 scripts/ci_docker.py configure
       - name: Start job-owned PostgreSQL and Redis
         run: python3 scripts/ci_docker.py test-services
       - name: Set up Python
@@ -96,7 +102,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
       - name: Configure official Docker Hub cache on isolated runner
-        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_JOB python3 scripts/ci_docker.py configure
+        run: |
+          public_config="$RUNNER_TEMP/evoagent-public-images"
+          install -d -m 700 "$public_config"
+          echo "DOCKER_CONFIG=$public_config" >> "$GITHUB_ENV"
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_JOB python3 scripts/ci_docker.py configure
       - name: Cache application base images before build
         run: docker pull node:24-alpine && docker pull python:3.13-slim
       - name: Validate Compose
@@ -109,7 +119,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure official Docker Hub cache on isolated runner
-        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_JOB python3 scripts/ci_docker.py configure
+        run: |
+          public_config="$RUNNER_TEMP/evoagent-public-images"
+          install -d -m 700 "$public_config"
+          echo "DOCKER_CONFIG=$public_config" >> "$GITHUB_ENV"
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_JOB python3 scripts/ci_docker.py configure
       - name: Start job-owned execution registry
         run: python3 scripts/ci_docker.py registry
       - name: Cache sandbox base images before build
