@@ -38,11 +38,20 @@ from evoagent.workers.background import (
 
 class LearningJobHandler:
     def __init__(
-        self, factory, store, generator_factory, validator, *, learning_enabled=False, budget=None
+        self,
+        factory,
+        store,
+        generator_factory,
+        validator,
+        *,
+        learning_enabled=False,
+        budget=None,
+        code_version="0.4.0.dev0",
     ):
         self.factory, self.store = factory, store
         self.generator_factory, self.validator = generator_factory, validator
         self.enabled, self.budget = learning_enabled, budget
+        self.code_version = code_version
         self.planner = SkillEvolutionPlanner()
 
     async def execute(self, job_id, owner, epoch):
@@ -52,6 +61,8 @@ class LearningJobHandler:
             kind, request_id = job.kind, job.learning_request_id
         if kind == "learning_revoke":
             return await self.revoke_sources(lease)
+        if kind == "learning_validation_completed":
+            return await self.enqueue_collection(lease)
         if kind == "learning_budget_reconcile":
             changed = await self.budget.reconcile_stale() if self.budget else 0
             async with self.factory() as session:
@@ -71,6 +82,33 @@ class LearningJobHandler:
                 await self.propose(request_id, guard)
             elif stage == "static_validate":
                 await self.validate(request_id, guard)
+            elif stage in {"task_validate", "waiting_validation"}:
+                from evoagent.evals.validators import default_validator_registry
+                from evoagent.learning.validation_execution import PersonalValidationExecution
+
+                execution = PersonalValidationExecution(
+                    self.factory, self.store, default_validator_registry(), self._check
+                )
+
+                async def complete(session, guard, request, next_stage, **result):
+                    await self._advance(
+                        session,
+                        guard,
+                        request,
+                        next_stage,
+                        status="ready_for_review"
+                        if next_stage == "validation_review"
+                        else "running",
+                        queue_next=False,
+                        result=result,
+                    )
+
+                if stage == "task_validate":
+                    await execution.start(
+                        request_id, guard, complete, code_version=self.code_version
+                    )
+                else:
+                    await execution.collect(request_id, guard, complete)
             else:
                 raise LearningError("invalid_learning_stage")
         except LearningError as error:
@@ -128,11 +166,13 @@ class LearningJobHandler:
                 raise LearningError("learning_source_revoked")
         return job, request, source
 
-    async def _advance(self, session, guard, request, stage, *, status="running", result=None):
+    async def _advance(
+        self, session, guard, request, stage, *, status="running", result=None, queue_next=True
+    ):
         request.stage, request.status = stage, status
         request.error_code = None
         request.lock_version += 1
-        if status == "running":
+        if status == "running" and queue_next:
             session.add(
                 MaintenanceJobRecord(
                     dedupe_key=f"learning:{request.id}:{stage}:{request.lock_version}",
@@ -156,6 +196,50 @@ class LearningJobHandler:
             payload={"request_id": str(request.id), "stage": stage, "status": status},
             created_at=await database_now(session),
         )
+
+    async def enqueue_collection(self, lease):
+        from evoagent.db.models import EvalExperimentRecord
+        from evoagent.learning.service import LearningService
+
+        async with self.factory() as session:
+            found = await session.get(MaintenanceJobRecord, lease.job_id)
+            request_id, experiment_id = (
+                UUID(found.payload["request_id"]),
+                UUID(found.payload["experiment_id"]),
+            )
+            # Run -> Workspace -> Request -> Job. Never hold the experiment
+            # or validation Task lock while acquiring the origin request lock.
+            request = await LearningService(self.factory)._locked_request(session, request_id, None)
+            await MaintenanceLeaseGuard(lease).check(session)
+            experiment = await session.get(EvalExperimentRecord, experiment_id)
+            if (
+                experiment is None
+                or str(experiment.status) != "completed"
+                or experiment.purpose != "personal_validation"
+                or experiment.learning_request_id != request.id
+                or request.validation_experiment_id != experiment.id
+            ):
+                raise LearningError("validation_completion_identity_invalid")
+            queued = request.status == "running" and request.stage == "waiting_validation"
+            if queued:
+                dedupe = f"learning:{request.id}:waiting_validation:{request.lock_version}"
+                if not await session.scalar(
+                    select(MaintenanceJobRecord.id).where(MaintenanceJobRecord.dedupe_key == dedupe)
+                ):
+                    session.add(
+                        MaintenanceJobRecord(
+                            dedupe_key=dedupe,
+                            kind="learning_validate",
+                            learning_request_id=request.id,
+                            payload={
+                                "request_id": str(request.id),
+                                "stage": "waiting_validation",
+                                "request_lock_version": request.lock_version,
+                            },
+                        )
+                    )
+            await finish_in_transaction(session, lease, {"collection_queued": queued})
+            await session.commit()
 
     async def prepare(self, request_id, guard):
         async with self.factory() as session:

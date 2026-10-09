@@ -142,6 +142,37 @@ class ConfiguredTaskHandler:
         async with self._database.session_factory() as session:
             run = await session.get(RunRecord, lease.run_id)
             task = await session.get(TaskRecord, lease.task_id)
+        validation_guard = None
+        if run is not None and run.data_role == "dev":
+            from evoagent.learning.validation_guard import PersonalValidationRunGuard
+            from evoagent.memory.schema import MemoryError as ContextAuthorizationError
+
+            try:
+                validation_guard = await PersonalValidationRunGuard.for_run(
+                    self._database.session_factory,
+                    LocalArtifactStore(self._settings.artifact_root),
+                    lease.run_id,
+                    learning_enabled=self._settings.learning_enabled,
+                )
+                if validation_guard is not None:
+                    await validation_guard.check()
+                    self._settings = self._settings.model_copy(
+                        update={
+                            "provider": ProviderName.MOCK,
+                            "model": "mock",
+                            "search_provider": "mock",
+                            "memory_retrieval_enabled": False,
+                            "archive_retrieval_enabled": False,
+                            "retrieval_backend": "bm25",
+                        }
+                    )
+            except ContextAuthorizationError as error:
+                return TaskExecutionResult(
+                    status=PersistentRunStatus.FAILED,
+                    error_code=error.code,
+                    error_message="personal validation authorization is unavailable",
+                )
+
         expected_model = self._settings.model or "mock-model"
         if (
             run is None
@@ -167,6 +198,8 @@ class ConfiguredTaskHandler:
         async def check():
             async with self._database.session_factory() as session:
                 await LeaseGuard(lease).check(session)
+            if validation_guard is not None:
+                await validation_guard.check()
 
         gated = GatedProvider(provider, self._gate, f"model:{self._settings.model}", check)
         # Mock Provider 不产生真实费用，因此不经过预算闸门；付费路径才需要额度。
@@ -214,6 +247,22 @@ class ConfiguredTaskHandler:
                 ),
             ]
         )
+        project_check = (
+            authorization_guard(
+                self._database.session_factory,
+                project_id=task.project_id,
+                expected_authorization_version=task.project_authorization_version,
+            )
+            if task is not None
+            else None
+        )
+
+        async def authorize():
+            if project_check is not None:
+                await project_check()
+            if validation_guard is not None:
+                await validation_guard.check()
+
         runner = PersistentAgentRunner(
             settings=self._settings,
             session_factory=self._database.session_factory,
@@ -221,15 +270,7 @@ class ConfiguredTaskHandler:
             provider=gated,
             registry=registry,
             service_gate=self._gate,
-            authorization_check=(
-                authorization_guard(
-                    self._database.session_factory,
-                    project_id=task.project_id,
-                    expected_authorization_version=task.project_authorization_version,
-                )
-                if task is not None
-                else None
-            ),
+            authorization_check=authorize if validation_guard is not None else project_check,
         )
         try:
             return await runner.handle(lease)
@@ -449,6 +490,7 @@ async def run_maintenance_worker():
         handlers = {
             "learning_revoke": learning_handler,
             "learning_budget_reconcile": learning_handler,
+            "learning_validation_completed": learning_handler,
         }
         if settings.learning_enabled:
             handlers.update(learning_propose=learning_handler, learning_validate=learning_handler)

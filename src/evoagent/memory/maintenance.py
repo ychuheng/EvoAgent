@@ -80,7 +80,12 @@ class MaintenanceWorker:
             if self.lane == "critical":
                 statement = statement.where(
                     MaintenanceJobRecord.kind.in_(
-                        {"erase", "learning_revoke", "learning_budget_reconcile"}
+                        {
+                            "erase",
+                            "learning_revoke",
+                            "learning_budget_reconcile",
+                            "learning_validation_completed",
+                        }
                     )
                 )
             elif self.lane == "background":

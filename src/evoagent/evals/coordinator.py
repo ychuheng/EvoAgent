@@ -329,6 +329,28 @@ class EvalCoordinator:
                 experiment.lease_owner = None
                 experiment.lease_expires_at = None
                 experiment.heartbeat_at = None
+                if experiment.purpose == "personal_validation":
+                    from evoagent.db.models import MaintenanceJobRecord
+
+                    dedupe = f"validation-completed:{experiment.id}"
+                    if not await unit.session.scalar(
+                        select(MaintenanceJobRecord.id).where(
+                            MaintenanceJobRecord.dedupe_key == dedupe
+                        )
+                    ):
+                        # Durable completion outbox: no origin Request lock in
+                        # this transaction, which also updates paired Tasks.
+                        unit.session.add(
+                            MaintenanceJobRecord(
+                                dedupe_key=dedupe,
+                                kind="learning_validation_completed",
+                                priority=100,
+                                payload={
+                                    "request_id": str(experiment.learning_request_id),
+                                    "experiment_id": str(experiment.id),
+                                },
+                            )
+                        )
             await unit.commit()
             return completed
 
@@ -382,6 +404,12 @@ class EvalCoordinator:
             return experiment
 
     async def _ensure_pairs(self, unit, experiment, cases, config) -> None:
+        personal_workspace_id = None
+        if experiment.purpose == "personal_validation":
+            from evoagent.db.models import LearningRequestRecord
+
+            request = await unit.session.get(LearningRequestRecord, experiment.learning_request_id)
+            personal_workspace_id = request.workspace_id
         for case in cases:
             goal = (
                 json.dumps(case.public_input, ensure_ascii=False, sort_keys=True)
@@ -406,7 +434,12 @@ class EvalCoordinator:
                     )
                     queued = position == 1
                     session = SessionRecord(
-                        title=f"Eval {experiment.id}: {case.case_key} #{repeat_index}"
+                        title=f"Eval {experiment.id}: {case.case_key} #{repeat_index}",
+                        **(
+                            {"workspace_id": personal_workspace_id}
+                            if personal_workspace_id is not None
+                            else {}
+                        ),
                     )
                     unit.session.add(session)
                     await unit.session.flush()

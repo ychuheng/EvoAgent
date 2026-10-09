@@ -66,5 +66,6 @@ def assemble_learning(factory, store, settings, service_gate):
         validator,
         learning_enabled=settings.learning_enabled,
         budget=budget,
+        code_version=settings.code_version,
     )
     return handler, provider
