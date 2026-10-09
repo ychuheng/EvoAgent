@@ -4,7 +4,8 @@ from uuid import uuid4
 
 import pytest
 from redis.asyncio import Redis
-from sqlalchemy import delete
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from evoagent.db.base import Base
 from evoagent.db.models import MaintenanceJobRecord
@@ -23,6 +24,18 @@ async def test_committed_queue_notice_between_independent_coordinators(mode):
     if not database_url or not redis_url:
         pytest.skip("requires isolated PostgreSQL and Redis")
     db = Database(database_url)
+    # Migration tests use the shared database's pristine public schema. Own our
+    # schema instead of creating unversioned tables before their initial upgrade.
+    schema = "maintenance_contract_" + uuid4().hex
+    async with db.engine.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    await db.dispose()
+    db.engine = create_async_engine(
+        database_url,
+        connect_args={"server_settings": {"search_path": f"{schema},public"}},
+        execution_options={"schema_translate_map": {None: schema}},
+    )
+    db.session_factory.configure(bind=db.engine)
     async with db.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     first, second = Redis.from_url(redis_url), Redis.from_url(redis_url)
@@ -76,11 +89,8 @@ async def test_committed_queue_notice_between_independent_coordinators(mode):
         await asyncio.gather(listener, return_exceptions=True)
         await producer.close()
         await consumer.close()
-        async with db.session_factory() as session:
-            await session.execute(
-                delete(MaintenanceJobRecord).where(MaintenanceJobRecord.id == job_id)
-            )
-            await session.commit()
+        async with db.engine.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         await db.dispose()
         await first.aclose()
         await second.aclose()
