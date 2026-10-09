@@ -1,8 +1,8 @@
 """评测数据集、Case 与私有验证器的严格输入契约。"""
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from evoagent.core.models import ContractModel
 from evoagent.evals.lifecycle import EvalSplit
@@ -24,9 +24,17 @@ class EvalCaseDefinition(ContractModel):
 
 
 class EvalDatasetDefinition(ContractModel):
+    purpose: Literal["formal", "personal_dev"] = "formal"
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,127}$")
     version: int = Field(ge=1)
     cases: tuple[EvalCaseDefinition, ...] = Field(min_length=1)
+
+    @model_serializer(mode="wrap")
+    def versioned_body(self, handler):
+        body = handler(self)
+        if self.purpose == "formal":
+            body.pop("purpose", None)  # preserve every existing dataset hash
+        return body
 
     @model_validator(mode="after")
     def case_keys_are_unique(self) -> "EvalDatasetDefinition":

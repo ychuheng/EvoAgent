@@ -126,6 +126,8 @@ class EvalCoordinator:
             )
             if version is None:
                 raise ValueError(f"skill version does not exist: {skill_version_id}")
+            if dataset.purpose != "formal":
+                raise ValueError("formal evaluation rejects personal development datasets")
             if dataset.status is not DatasetStatus.FROZEN:
                 raise ValueError("comparison evaluation requires a frozen dataset")
             if version.lifecycle_status is not SkillVersionStatus.DRAFT:
@@ -149,6 +151,109 @@ class EvalCoordinator:
             await unit.session.flush()
             await self._ensure_pairs(unit, experiment, cases, config)
             version.lifecycle_status = SkillVersionStatus.EVALUATING
+            await unit.commit()
+            return experiment
+
+    async def create_personal_validation(
+        self,
+        *,
+        learning_request_id,
+        dataset_id,
+        candidate_version_id,
+        comparison_version_id=None,
+        provider,
+        model,
+        repeats,
+        code_version,
+        job_guard,
+        complete_stage=None,
+    ):
+        # This coordinator is not a payment authorization boundary. Until the
+        # task dispatch reservation adapter is wired, only offline runs enter.
+        if provider != "mock":
+            raise EvalCoordinatorError("personal_paid_dispatch_not_connected")
+        config = EvalExperimentConfig(
+            provider=provider, model=model, repeats=repeats, code_version=code_version
+        )
+        async with UnitOfWork(self._session_factory) as unit:
+            from evoagent.db.models import LearningRequestRecord
+            from evoagent.learning.sources import PersonalSourceService
+
+            initial = await unit.session.get(LearningRequestRecord, learning_request_id)
+            if initial is None:
+                raise EvalCoordinatorError("personal_validation_request_missing")
+            await PersonalSourceService(self._session_factory)._lock_run_scope(
+                unit.session, initial.origin_run_id
+            )
+            _, request = await job_guard.check(unit.session)
+            if (
+                request.id != learning_request_id
+                or request.request_kind != "validate"
+                or request.candidate_version_id != candidate_version_id
+                or request.base_version_id != comparison_version_id
+            ):
+                raise EvalCoordinatorError("personal_validation_identity_conflict")
+            if request.validation_experiment_id is not None:
+                existing = await unit.evals.get_experiment(request.validation_experiment_id)
+                if (
+                    existing.purpose != "personal_validation"
+                    or existing.dataset_id != dataset_id
+                    or existing.skill_version_id != candidate_version_id
+                    or existing.comparison_version_id != comparison_version_id
+                    or existing.learning_request_id != request.id
+                    or existing.config_hash != content_hash(config.model_dump(mode="json"))
+                ):
+                    raise EvalCoordinatorError("personal_validation_config_conflict")
+                return existing
+            dataset = await unit.evals.get_dataset(dataset_id)
+            if (
+                dataset.status is not DatasetStatus.FROZEN
+                or dataset.purpose != "personal_dev"
+                or dataset.content_hash
+                != request.frozen_inputs.get("validation_input_manifest_hash")
+            ):
+                raise EvalCoordinatorError("personal_validation_dataset_required")
+            from evoagent.skills.access import SkillAccessPolicy
+
+            version = await SkillAccessPolicy().check(
+                unit.session,
+                candidate_version_id,
+                workspace_id=request.workspace_id,
+                project_id=request.project_id,
+            )
+            if version.lifecycle_status is SkillVersionStatus.REJECTED:
+                raise EvalCoordinatorError("personal_validation_candidate_rejected")
+            if comparison_version_id is not None:
+                control = await SkillAccessPolicy().check(
+                    unit.session,
+                    comparison_version_id,
+                    workspace_id=request.workspace_id,
+                    project_id=request.project_id,
+                )
+                if control.skill_id != version.skill_id:
+                    raise EvalCoordinatorError("personal_validation_control_skill_mismatch")
+            cases = await unit.evals.list_cases(dataset.id)
+            if not cases or any(case.split is not EvalSplit.TRAIN for case in cases):
+                raise EvalCoordinatorError("personal_validation_rejects_holdout")
+            experiment = EvalExperimentRecord(
+                purpose="personal_validation",
+                kind=EvalExperimentKind.SKILL_COMPARISON,
+                skill_version_id=candidate_version_id,
+                comparison_version_id=comparison_version_id,
+                learning_request_id=request.id,
+                dataset_id=dataset.id,
+                status=EvalExperimentStatus.QUEUED,
+                config_snapshot=config.model_dump(mode="json"),
+                config_hash=content_hash(config.model_dump(mode="json")),
+            )
+            unit.evals.add_experiment(experiment)
+            await unit.session.flush()
+            await self._ensure_pairs(unit, experiment, cases, config)
+            request.validation_experiment_id = experiment.id
+            # Formal lifecycle/gate hashes are deliberately untouched.
+            await job_guard.check(unit.session)
+            if complete_stage is not None:
+                await complete_stage(unit.session, request, experiment)
             await unit.commit()
             return experiment
 
@@ -278,15 +383,27 @@ class EvalCoordinator:
 
     async def _ensure_pairs(self, unit, experiment, cases, config) -> None:
         for case in cases:
-            goal = self._case_goal(case.public_input)
+            goal = (
+                json.dumps(case.public_input, ensure_ascii=False, sort_keys=True)
+                if experiment.purpose == "personal_validation"
+                else self._case_goal(case.public_input)
+            )
             for repeat_index in range(config.repeats):
                 order = (
-                    (EvalRunMode.BASELINE, EvalRunMode.PINNED_SKILL)
-                    if repeat_index % 2 == 0
-                    else (EvalRunMode.PINNED_SKILL, EvalRunMode.BASELINE)
+                    ("control", "treatment") if repeat_index % 2 == 0 else ("treatment", "control")
                 )
-                records: dict[EvalRunMode, EvalRunRecord] = {}
-                for position, mode in enumerate(order, start=1):
+                records: dict[str, EvalRunRecord] = {}
+                for position, arm in enumerate(order, start=1):
+                    selected_version = (
+                        experiment.skill_version_id
+                        if arm == "treatment"
+                        else experiment.comparison_version_id
+                    )
+                    mode = (
+                        EvalRunMode.PINNED_SKILL
+                        if selected_version is not None
+                        else EvalRunMode.BASELINE
+                    )
                     queued = position == 1
                     session = SessionRecord(
                         title=f"Eval {experiment.id}: {case.case_key} #{repeat_index}"
@@ -301,7 +418,9 @@ class EvalCoordinator:
                     unit.tasks.add(task)
                     await unit.session.flush()
                     run = RunRecord(
-                        data_role=case.split.value,
+                        data_role="dev"
+                        if experiment.purpose == "personal_validation"
+                        else case.split.value,
                         task_id=task.id,
                         status=(
                             PersistentRunStatus.QUEUED if queued else PersistentRunStatus.PAUSED
@@ -313,11 +432,7 @@ class EvalCoordinator:
                             if mode is EvalRunMode.BASELINE
                             else RunMode.PINNED_SKILL.value
                         ),
-                        pinned_skill_version_id=(
-                            experiment.skill_version_id
-                            if mode is EvalRunMode.PINNED_SKILL
-                            else None
-                        ),
+                        pinned_skill_version_id=selected_version,
                     )
                     unit.runs.add(run)
                     await unit.session.flush()
@@ -343,14 +458,11 @@ class EvalCoordinator:
                         experiment_id=experiment.id,
                         eval_case_id=case.id,
                         mode=mode,
+                        arm=arm,
                         repeat_index=repeat_index,
                         task_id=task.id,
                         run_id=run.id,
-                        skill_version_id=(
-                            experiment.skill_version_id
-                            if mode is EvalRunMode.PINNED_SKILL
-                            else None
-                        ),
+                        skill_version_id=selected_version,
                         metrics={"state": "pending", "position": position},
                         validation_results=[],
                         passed=False,
@@ -358,13 +470,9 @@ class EvalCoordinator:
                     )
                     unit.evals.add_run(eval_run)
                     await unit.session.flush()
-                    records[mode] = eval_run
-                records[EvalRunMode.BASELINE].paired_eval_run_id = records[
-                    EvalRunMode.PINNED_SKILL
-                ].id
-                records[EvalRunMode.PINNED_SKILL].paired_eval_run_id = records[
-                    EvalRunMode.BASELINE
-                ].id
+                    records[arm] = eval_run
+                records["control"].paired_eval_run_id = records["treatment"].id
+                records["treatment"].paired_eval_run_id = records["control"].id
 
     async def _require_lease(self, lease: EvalLease, now: datetime) -> None:
         async with UnitOfWork(self._session_factory) as unit:

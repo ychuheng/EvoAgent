@@ -13,6 +13,8 @@ from evoagent.db.models import (
     ApprovalStatus,
     ArtifactRecord,
     EvalCaseRecord,
+    EvalDatasetRecord,
+    EvalExperimentRecord,
     EvalRunRecord,
     ToolApprovalRecord,
     ToolCallRecord,
@@ -63,6 +65,17 @@ class TraceEligibilityChecker:
             eval_run = await unit.evals.get_run(eval_run_id)
             case = await unit.session.get(EvalCaseRecord, eval_run.eval_case_id)
             run = await unit.runs.get(eval_run.run_id)
+            experiment = await unit.session.get(EvalExperimentRecord, eval_run.experiment_id)
+            dataset = await unit.session.get(EvalDatasetRecord, case.dataset_id) if case else None
+            if (
+                experiment is None
+                or experiment.purpose != "formal"
+                or dataset is None
+                or dataset.purpose != "formal"
+            ):
+                raise IneligibleSkillSourceError(
+                    "personal validation is development material, not a formal TRAIN source"
+                )
             if case is None or case.split is not EvalSplit.TRAIN:
                 raise IneligibleSkillSourceError("only TRAIN eval runs may become sources")
             if not eval_run.passed or run.status is not PersistentRunStatus.COMPLETED:

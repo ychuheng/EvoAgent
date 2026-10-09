@@ -52,6 +52,7 @@ class EvalDatasetService:
                 return existing
             dataset = EvalDatasetRecord(
                 name=definition.name,
+                purpose=definition.purpose,
                 version=definition.version,
                 content_hash=digest,
                 status=DatasetStatus.DRAFT,

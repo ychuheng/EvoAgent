@@ -72,9 +72,13 @@ class QualityGate:
         self._minimum_sources = minimum_sources
 
     async def evaluate(self, report: EvaluationReport) -> GateReport:
+        if report.purpose != "formal":
+            raise ValueError("formal quality gate rejects personal validation reports")
         async with UnitOfWork(self._session_factory) as unit:
             version = await unit.skill_versions.get(report.skill_version_id)
             experiment = await unit.evals.get_experiment(report.experiment_id)
+            if experiment.purpose != "formal":
+                raise ValueError("formal quality gate rejects personal validation reports")
             definition = SkillDefinition.model_validate(version.definition)
             sources = tuple(
                 await unit.session.scalars(
@@ -303,6 +307,8 @@ class SkillEvaluationService:
     async def finalize(self, experiment_id: UUID) -> tuple[GateReport, str]:
         async with UnitOfWork(self._session_factory) as unit:
             experiment = await unit.evals.get_experiment(experiment_id)
+            if experiment.purpose != "formal":
+                raise ValueError("formal finalization rejects personal validation experiments")
             if experiment.status is not EvalExperimentStatus.COMPLETED:
                 raise ValueError("evaluation experiment has not completed")
             if experiment.gate_report is not None and experiment.gate_report_hash is not None:
@@ -317,6 +323,8 @@ class SkillEvaluationService:
         gate_hash = gate.report_hash()
         async with UnitOfWork(self._session_factory) as unit:
             experiment = await unit.evals.get_experiment(experiment_id)
+            if experiment.purpose != "formal":
+                raise ValueError("formal finalization rejects personal validation experiments")
             if experiment.gate_report is not None:
                 raise ValueError("quality gate was concurrently finalized")
             version = await unit.skill_versions.get(report.skill_version_id)

@@ -965,6 +965,7 @@ class SkillVersionRecord(Base):
 class EvalDatasetRecord(Base):
     __tablename__ = "eval_datasets"
     __table_args__ = (
+        CheckConstraint("purpose IN ('formal','personal_dev')", name="purpose_valid"),
         UniqueConstraint("name", "version"),
         CheckConstraint("version >= 1", name="version_positive"),
         CheckConstraint(
@@ -974,6 +975,7 @@ class EvalDatasetRecord(Base):
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    purpose: Mapped[str] = mapped_column(String(32), default="formal", server_default="formal")
     name: Mapped[str] = mapped_column(String(128))
     version: Mapped[int] = mapped_column(Integer)
     content_hash: Mapped[str] = mapped_column(String(71))
@@ -1001,9 +1003,20 @@ class EvalCaseRecord(Base):
 
 class EvalExperimentRecord(Base):
     __tablename__ = "eval_experiments"
+    __table_args__ = (
+        CheckConstraint("purpose IN ('formal','personal_validation')", name="purpose_valid"),
+    )
     lease_epoch: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    purpose: Mapped[str] = mapped_column(String(32), default="formal", server_default="formal")
+    comparison_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("skill_versions.id"))
+    learning_request_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "learning_requests.id", use_alter=True, name="fk_eval_experiments_learning_request"
+        ),
+        unique=True,
+    )
     kind: Mapped[EvalExperimentKind] = mapped_column(
         enum_column(EvalExperimentKind, "eval_experiment_kind")
     )
@@ -1059,7 +1072,8 @@ class RuntimeEvalRunRecord(Base):
 class EvalRunRecord(Base):
     __tablename__ = "eval_runs"
     __table_args__ = (
-        UniqueConstraint("experiment_id", "eval_case_id", "mode", "repeat_index"),
+        UniqueConstraint("experiment_id", "eval_case_id", "arm", "repeat_index"),
+        CheckConstraint("arm IN ('control','treatment')", name="arm_valid"),
         CheckConstraint("repeat_index >= 0", name="repeat_index_non_negative"),
         CheckConstraint(
             "(mode = 'baseline' AND skill_version_id IS NULL) OR "
@@ -1074,6 +1088,14 @@ class EvalRunRecord(Base):
     )
     eval_case_id: Mapped[UUID] = mapped_column(
         ForeignKey("eval_cases.id", ondelete="RESTRICT"), index=True
+    )
+    arm: Mapped[str] = mapped_column(
+        String(16),
+        default=lambda context: (
+            "control"
+            if str(context.get_current_parameters().get("mode")) == "baseline"
+            else "treatment"
+        ),
     )
     mode: Mapped[EvalRunMode] = mapped_column(enum_column(EvalRunMode, "eval_run_mode"))
     repeat_index: Mapped[int] = mapped_column(Integer, default=0)
@@ -1350,6 +1372,9 @@ def protect_experiment_reports(
         record,
         (
             "kind",
+            "purpose",
+            "comparison_version_id",
+            "learning_request_id",
             "skill_version_id",
             "dataset_id",
             "config_snapshot",
@@ -1376,7 +1401,7 @@ def protect_dataset_version(
 ) -> None:
     """数据集版本只能改变生命周期状态，内容变化必须创建新版本。"""
 
-    _reject_changed_fields(record, ("name", "version", "content_hash", "created_at"))
+    _reject_changed_fields(record, ("purpose", "name", "version", "content_hash", "created_at"))
 
 
 @event.listens_for(EvalCaseRecord, "before_update")

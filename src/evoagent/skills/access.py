@@ -7,6 +7,8 @@ from sqlalchemy import select
 from evoagent.db.models import (
     ArtifactRecord,
     EvalCaseRecord,
+    EvalDatasetRecord,
+    EvalExperimentRecord,
     EvalRunRecord,
     LearningSourceRecord,
     ProjectRecord,
@@ -128,8 +130,20 @@ class SkillAccessPolicy:
                         if evaluation
                         else None
                     )
+                    experiment = (
+                        await session.get(EvalExperimentRecord, evaluation.experiment_id)
+                        if evaluation
+                        else None
+                    )
+                    dataset = (
+                        await session.get(EvalDatasetRecord, case.dataset_id) if case else None
+                    )
                     if (
-                        evaluation is None
+                        experiment is None
+                        or experiment.purpose != "formal"
+                        or dataset is None
+                        or dataset.purpose != "formal"
+                        or evaluation is None
                         or case is None
                         or str(case.split) != "train"
                         or not evaluation.passed

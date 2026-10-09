@@ -3,10 +3,10 @@
 from collections import Counter, defaultdict
 from datetime import datetime
 from statistics import mean, median
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_serializer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -26,7 +26,7 @@ from evoagent.db.models import (
     TurnRecord,
 )
 from evoagent.db.unit_of_work import UnitOfWork
-from evoagent.evals.lifecycle import EvalRunMode
+from evoagent.evals.lifecycle import EvalExperimentStatus
 from evoagent.skills.canonical import canonical_json, content_hash
 from evoagent.trace.artifacts import ArtifactService
 
@@ -72,14 +72,25 @@ class PairMetrics(BaseModel):
     task_family: str
     repeat_index: int
     comparable: bool
-    baseline: RunMetrics
-    skill: RunMetrics
+    control_version_id: UUID | None = None
+    treatment_version_id: UUID | None = None
+    control_mode: Literal["baseline", "pinned_skill"] | None = None
+    baseline: RunMetrics  # legacy field alias for control
+    skill: RunMetrics  # legacy field alias for treatment
     success_delta: int
     token_delta: int | None
     tool_call_delta: int | None
     latency_delta_ms: float | None
     safety_regression: bool
     efficiency_comparable: bool
+
+    @model_serializer(mode="wrap")
+    def preserve_formal_shape(self, handler):
+        body = handler(self)
+        for key in ("control_version_id", "treatment_version_id", "control_mode"):
+            if getattr(self, key) is None:
+                body.pop(key, None)
+        return body
 
 
 class TaskFamilyMetrics(BaseModel):
@@ -104,6 +115,7 @@ class EvaluationReport(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     schema_version: int = 1
+    purpose: Literal["formal", "personal_validation"] = "formal"
     experiment_id: UUID
     dataset_id: UUID
     skill_version_id: UUID
@@ -118,6 +130,13 @@ class EvaluationReport(BaseModel):
     efficiency_comparable_pairs: int
     families: tuple[TaskFamilyMetrics, ...]
     pairs: tuple[PairMetrics, ...]
+
+    @model_serializer(mode="wrap")
+    def preserve_formal_shape(self, handler):
+        body = handler(self)
+        if self.purpose == "formal":
+            body.pop("purpose", None)
+        return body
 
     def report_hash(self) -> str:
         return content_hash(self.model_dump(mode="json"))
@@ -282,18 +301,18 @@ class EvaluationReportService:
             experiment = await unit.evals.get_experiment(experiment_id)
             eval_runs = await unit.evals.list_runs(experiment_id)
             cases = {item.id: item for item in await unit.evals.list_cases(experiment.dataset_id)}
-        grouped: dict[tuple[UUID, int], dict[EvalRunMode, EvalRunRecord]] = defaultdict(dict)
+        grouped: dict[tuple[UUID, int], dict[str, EvalRunRecord]] = defaultdict(dict)
         for item in eval_runs:
-            grouped[(item.eval_case_id, item.repeat_index)][item.mode] = item
+            grouped[(item.eval_case_id, item.repeat_index)][item.arm] = item
 
         pairs: list[PairMetrics] = []
         for (case_id, repeat_index), modes in sorted(
             grouped.items(), key=lambda item: (cases[item[0][0]].case_key, item[0][1])
         ):
-            if set(modes) != {EvalRunMode.BASELINE, EvalRunMode.PINNED_SKILL}:
+            if set(modes) != {"control", "treatment"}:
                 raise ValueError("evaluation experiment contains an incomplete pair")
-            baseline_record = modes[EvalRunMode.BASELINE]
-            skill_record = modes[EvalRunMode.PINNED_SKILL]
+            baseline_record = modes["control"]
+            skill_record = modes["treatment"]
             baseline = await self._run_metrics(baseline_record)
             skill = await self._run_metrics(skill_record)
             comparable = baseline_record.comparable and skill_record.comparable
@@ -303,6 +322,15 @@ class EvaluationReportService:
             case: EvalCaseRecord = cases[case_id]
             pairs.append(
                 PairMetrics(
+                    control_version_id=baseline_record.skill_version_id
+                    if experiment.purpose == "personal_validation"
+                    else None,
+                    treatment_version_id=skill_record.skill_version_id
+                    if experiment.purpose == "personal_validation"
+                    else None,
+                    control_mode=baseline_record.mode.value
+                    if experiment.purpose == "personal_validation"
+                    else None,
                     case_id=case_id,
                     case_key=case.case_key,
                     task_family=case.task_family,
@@ -343,6 +371,8 @@ class EvaluationReportService:
         for pair in pairs:
             by_family[pair.task_family].append(pair)
         return EvaluationReport(
+            schema_version=2 if experiment.purpose == "personal_validation" else 1,
+            purpose=experiment.purpose,
             experiment_id=experiment.id,
             dataset_id=experiment.dataset_id,
             skill_version_id=experiment.skill_version_id,
@@ -370,6 +400,11 @@ class EvaluationReportService:
     ) -> tuple[EvaluationReport, str, UUID]:
         async with UnitOfWork(self._session_factory) as unit:
             experiment = await unit.evals.get_experiment(experiment_id)
+            if (
+                experiment.purpose == "personal_validation"
+                and experiment.status is not EvalExperimentStatus.COMPLETED
+            ):
+                raise ValueError("personal validation report requires completed experiment")
             if experiment.report_artifact_id is not None:
                 artifact = await unit.session.get(ArtifactRecord, experiment.report_artifact_id)
                 if artifact is None or experiment.report_hash is None:
@@ -404,7 +439,7 @@ class EvaluationReportService:
             version: SkillVersionRecord | None = await unit.session.get(
                 SkillVersionRecord, experiment.skill_version_id
             )
-            if version is not None:
+            if version is not None and experiment.purpose == "formal":
                 version.evaluation_report_hash = digest
             await unit.commit()
         return report, digest, artifact.id

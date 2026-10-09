@@ -1,0 +1,96 @@
+{
+  "dataset": {
+    "name": "legacy_sample",
+    "version": 1,
+    "cases": [
+      {
+        "case_key": "sample",
+        "task_family": "data",
+        "split": "train",
+        "public_input": {
+          "goal": "Preserve 001",
+          "inputs": {
+            "rows": [
+              "001"
+            ]
+          }
+        },
+        "private_validators": [
+          {
+            "name": "run_completed"
+          }
+        ]
+      }
+    ]
+  },
+  "report": {
+    "experiment_id": "00000000-0000-0000-0000-000000000003",
+    "dataset_id": "00000000-0000-0000-0000-000000000004",
+    "skill_version_id": "00000000-0000-0000-0000-000000000005",
+    "config_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "pair_count": 1,
+    "comparable_pairs": 1,
+    "baseline_successes": 1,
+    "skill_successes": 1,
+    "baseline_success_rate": 1,
+    "skill_success_rate": 1,
+    "safety_regressions": 0,
+    "efficiency_comparable_pairs": 1,
+    "families": [],
+    "pairs": [
+      {
+        "case_id": "00000000-0000-0000-0000-000000000002",
+        "case_key": "sample",
+        "task_family": "data",
+        "repeat_index": 0,
+        "comparable": true,
+        "baseline": {
+          "run_id": "00000000-0000-0000-0000-000000000001",
+          "status": "completed",
+          "validator_passed": true,
+          "input_tokens": 1,
+          "output_tokens": 2,
+          "total_tokens": 3,
+          "tool_calls": 0,
+          "tool_succeeded": 0,
+          "tool_failed": 0,
+          "tool_calls_by_name": {},
+          "latency_ms": 1.0,
+          "approvals": 0,
+          "permission_denied": 0,
+          "unknown_effects": 0,
+          "recovery_count": 0,
+          "skill_version_id": null,
+          "retrieval_score": null,
+          "failure_code": null
+        },
+        "skill": {
+          "run_id": "00000000-0000-0000-0000-000000000001",
+          "status": "completed",
+          "validator_passed": true,
+          "input_tokens": 1,
+          "output_tokens": 2,
+          "total_tokens": 3,
+          "tool_calls": 0,
+          "tool_succeeded": 0,
+          "tool_failed": 0,
+          "tool_calls_by_name": {},
+          "latency_ms": 1.0,
+          "approvals": 0,
+          "permission_denied": 0,
+          "unknown_effects": 0,
+          "recovery_count": 0,
+          "skill_version_id": null,
+          "retrieval_score": null,
+          "failure_code": null
+        },
+        "success_delta": 0,
+        "token_delta": 0,
+        "tool_call_delta": 0,
+        "latency_delta_ms": 0,
+        "safety_regression": false,
+        "efficiency_comparable": true
+      }
+    ]
+  }
+}
