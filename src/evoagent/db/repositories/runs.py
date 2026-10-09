@@ -17,6 +17,16 @@ class RunRepository:
     def add(self, run: RunRecord) -> None:
         self._session.add(run)
 
+    async def allocate_feedback_revision(self, run_id: UUID) -> int:
+        from evoagent.db.counters import allocate
+
+        return await allocate(self._session, RunRecord, run_id, "next_feedback_revision")
+
+    async def allocate_context_revision(self, run_id: UUID) -> int:
+        from evoagent.db.counters import allocate
+
+        return await allocate(self._session, RunRecord, run_id, "next_context_revision")
+
     async def get(self, run_id: UUID) -> RunRecord:
         run = await self._session.get(RunRecord, run_id)
         if run is None:

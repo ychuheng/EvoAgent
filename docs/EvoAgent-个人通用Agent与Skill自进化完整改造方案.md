@@ -212,6 +212,8 @@ flowchart TB
 
 `scope_key` 由后端生成 `workspace:<id>` 或 `project:<id>`，不接受前端任意字符串；project 必须属于同一 workspace。所有跨表归属在事务中检查，能建立复合外键的地方建立复合外键。SkillTrial.version_id 必须属于其 skill_id。
 
+S1 实施补充：新增 `LearningRequestAliasRecord / learning_request_aliases` 技术辅助表，主键 `(workspace_id, client_request_id)`，保存 request_id、request_body_hash 和 created_at。同一 source_key 可被不同客户端 ID 重放；必须为每个 ID 保留不可变映射，否则第二个 ID 被语义去重后，其后改正文将无法检测冲突。别名与请求在工作区锁下同事务写入，不增加新的业务生命周期。
+
 ### 4.2 修改已有 Record
 
 | Record | 精确修改 |

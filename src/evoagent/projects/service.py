@@ -181,7 +181,9 @@ class ProjectService:
         """提升或降低授权级别；自增授权版本，使在跑 Task 立即受影响。"""
 
         async with UnitOfWork(self._session_factory) as unit:
-            record = await unit.session.get(ProjectRecord, project_id)
+            record = await unit.session.scalar(
+                select(ProjectRecord).where(ProjectRecord.id == project_id).with_for_update()
+            )
             if record is None:
                 raise ProjectNotFoundError(f"项目不存在：{project_id}")
             if record.status is ProjectStatus.REVOKED:
@@ -203,7 +205,9 @@ class ProjectService:
         """撤销授权：新 Task 不得再进入旧根；在跑 Task 下一次工具调用被拒绝。"""
 
         async with UnitOfWork(self._session_factory) as unit:
-            record = await unit.session.get(ProjectRecord, project_id)
+            record = await unit.session.scalar(
+                select(ProjectRecord).where(ProjectRecord.id == project_id).with_for_update()
+            )
             if record is None:
                 raise ProjectNotFoundError(f"项目不存在：{project_id}")
             record.status = ProjectStatus.REVOKED
@@ -243,18 +247,13 @@ class ProjectService:
         event_type: str,
         payload: dict,
     ) -> None:
-        sequence = (
-            await unit.session.scalar(
-                select(ProjectEventRecord.sequence)
-                .where(ProjectEventRecord.project_id == record.id)
-                .order_by(ProjectEventRecord.sequence.desc())
-                .limit(1)
-            )
-        ) or 0
+        from evoagent.db.counters import allocate
+
+        sequence = await allocate(unit.session, ProjectRecord, record.id, "next_event_sequence")
         unit.session.add(
             ProjectEventRecord(
                 project_id=record.id,
-                sequence=sequence + 1,
+                sequence=sequence,
                 event_type=event_type,
                 authorization=record.authorization,
                 authorization_version=record.authorization_version,

@@ -100,6 +100,7 @@ class RuntimeExperimentService:
                         db.add(task)
                         await db.flush()
                         run = RunRecord(
+                            data_role="runtime_eval",
                             task_id=task.id,
                             status=PersistentRunStatus.PAUSED,
                             provider=spec.provider,

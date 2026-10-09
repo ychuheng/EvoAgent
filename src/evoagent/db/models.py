@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    DDL,
     JSON,
     Boolean,
     CheckConstraint,
@@ -144,6 +145,7 @@ class ProjectRecord(Base):
     status: Mapped[ProjectStatus] = mapped_column(
         enum_column(ProjectStatus, "project_status"), default=ProjectStatus.AVAILABLE
     )
+    next_event_sequence: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     authorization_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     workspace_id: Mapped[UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="RESTRICT"), default=DEFAULT_WORKSPACE_ID
@@ -256,6 +258,10 @@ class RunRecord(Base):
         CheckConstraint("next_event_sequence >= 1", name="next_event_sequence_positive"),
         CheckConstraint("lock_version >= 0", name="lock_version_non_negative"),
         CheckConstraint(
+            "data_role IN ('personal','dev','train','holdout','runtime_eval','legacy')",
+            name="data_role_valid",
+        ),
+        CheckConstraint(
             "run_mode != 'pinned_skill' OR pinned_skill_version_id IS NOT NULL",
             name="pinned_skill_present",
         ),
@@ -273,6 +279,9 @@ class RunRecord(Base):
     provider: Mapped[str] = mapped_column(String(64))
     model: Mapped[str] = mapped_column(String(256))
     run_mode: Mapped[str] = mapped_column(String(32), default="retrieval")
+    data_role: Mapped[str] = mapped_column(String(32), default="legacy", server_default="legacy")
+    next_feedback_revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    next_context_revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     pinned_skill_version_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("skill_versions.id", ondelete="RESTRICT")
     )
@@ -310,6 +319,11 @@ class SpendRecord(Base):
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    purpose: Mapped[str] = mapped_column(String(32), default="legacy", server_default="legacy")
+    learning_request_id: Mapped[UUID | None] = mapped_column(ForeignKey("learning_requests.id"))
+    reservation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("learning_spend_reservations.id"), unique=True
+    )
     scope: Mapped[str] = mapped_column(String(32))
     task_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("tasks.id", ondelete="RESTRICT"), index=True
@@ -388,6 +402,155 @@ class RunEventRecord(Base):
     dedupe_key: Mapped[str | None] = mapped_column(String(71), nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RunFeedbackRecord(Base):
+    __tablename__ = "run_feedback"
+    __table_args__ = (
+        UniqueConstraint("run_id", "revision", name="uq_run_feedback_revision"),
+        UniqueConstraint("run_id", "client_request_id", name="uq_run_feedback_client_request"),
+        CheckConstraint("revision >= 1 AND learning_revision >= 1", name="revisions_positive"),
+        CheckConstraint("intent IN ('method','fact','unsure','mixed')", name="intent_valid"),
+        CheckConstraint("verdict IN ('helpful','needs_fix','incorrect')", name="verdict_valid"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    learning_revision: Mapped[int] = mapped_column(Integer)
+    learning_payload_hash: Mapped[str] = mapped_column(String(71))
+    request_body_hash: Mapped[str] = mapped_column(String(71))
+    intent: Mapped[str] = mapped_column(String(32))
+    client_request_id: Mapped[str] = mapped_column(String(128))
+    verdict: Mapped[str] = mapped_column(String(32))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    correction: Mapped[str] = mapped_column(Text, default="")
+    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    supersedes_id: Mapped[UUID | None] = mapped_column(ForeignKey("run_feedback.id"))
+    actor_id: Mapped[str] = mapped_column(String(128), default="human")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LearningPolicyRecord(Base):
+    __tablename__ = "learning_policies"
+    __table_args__ = (
+        CheckConstraint("mode IN ('off','manual','suggest')", name="mode_valid"),
+        CheckConstraint(
+            "daily_limit_micros IS NULL OR daily_limit_micros >= 0", name="daily_budget_valid"
+        ),
+        CheckConstraint(
+            "request_limit_micros IS NULL OR request_limit_micros >= 0", name="request_budget_valid"
+        ),
+    )
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    mode: Mapped[str] = mapped_column(String(32), default="off")
+    daily_limit_micros: Mapped[int | None] = mapped_column(Integer)
+    request_limit_micros: Mapped[int | None] = mapped_column(Integer)
+    daily_candidate_limit: Mapped[int] = mapped_column(Integer, default=3)
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, default=86400)
+    max_source_risk: Mapped[str] = mapped_column(String(8), default="R1")
+    lock_version: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class LearningRequestRecord(Base):
+    __tablename__ = "learning_requests"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "source_key", name="uq_learning_requests_source_key"),
+        UniqueConstraint(
+            "workspace_id", "client_request_id", name="uq_learning_requests_client_request"
+        ),
+        CheckConstraint(
+            "(request_kind = 'propose' AND source_key LIKE 'propose:v1:%') OR "
+            "(request_kind = 'validate' AND source_key LIKE 'validate:v1:%')",
+            name="identity_namespace",
+        ),
+        Index("ix_learning_requests_scope_status", "workspace_id", "status", "created_at"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    request_kind: Mapped[str] = mapped_column(String(16))
+    parent_request_id: Mapped[UUID | None] = mapped_column(ForeignKey("learning_requests.id"))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id"))
+    origin_run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"))
+    trigger: Mapped[str] = mapped_column(String(32))
+    source_key: Mapped[str] = mapped_column(String(160))
+    client_request_id: Mapped[str] = mapped_column(String(128))
+    request_body_hash: Mapped[str] = mapped_column(String(71))
+    feedback_revision: Mapped[int] = mapped_column(Integer, default=0)
+    target_skill_id: Mapped[UUID | None] = mapped_column(ForeignKey("skills.id"))
+    base_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("skill_versions.id"))
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    stage: Mapped[str] = mapped_column(String(32), default="prepare")
+    policy_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
+    policy_hash: Mapped[str] = mapped_column(String(71))
+    frozen_inputs: Mapped[dict[str, Any]] = mapped_column(JSON)
+    candidate_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("skill_versions.id"))
+    validation_experiment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "eval_experiments.id",
+            name="fk_learning_requests_validation_experiment_id_eval_experiments",
+            use_alter=True,
+        )
+    )
+    validation_report: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    validation_report_hash: Mapped[str | None] = mapped_column(String(71))
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    lock_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class LearningRequestAliasRecord(Base):
+    """同一学习语义的多个客户端幂等键都必须保留，不能仅记住首个键。"""
+
+    __tablename__ = "learning_request_aliases"
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    client_request_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    request_id: Mapped[UUID] = mapped_column(ForeignKey("learning_requests.id"))
+    request_body_hash: Mapped[str] = mapped_column(String(71))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LearningSourceRecord(Base):
+    __tablename__ = "learning_sources"
+    __table_args__ = (UniqueConstraint("run_id", "source_revision"),)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"), index=True)
+    feedback_id: Mapped[UUID | None] = mapped_column(ForeignKey("run_feedback.id"))
+    source_revision: Mapped[str] = mapped_column(String(71))
+    source_role: Mapped[str] = mapped_column(String(32))
+    parent_skill_versions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    evidence_manifest: Mapped[dict[str, Any]] = mapped_column(JSON)
+    artifact_id: Mapped[UUID] = mapped_column(ForeignKey("artifacts.id"))
+    content_hash: Mapped[str] = mapped_column(String(71))
+    status: Mapped[str] = mapped_column(String(32), default="valid")
+    revocation_epoch: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LearningSpendReservationRecord(Base):
+    __tablename__ = "learning_spend_reservations"
+    __table_args__ = (
+        CheckConstraint("reserved_micros >= 0", name="reserved_nonnegative"),
+        CheckConstraint(
+            "status IN ('reserved','settled','unknown','released')", name="status_valid"
+        ),
+        Index("ix_learning_spend_day", "workspace_id", "budget_day", "status"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    request_id: Mapped[UUID] = mapped_column(ForeignKey("learning_requests.id"))
+    call_key: Mapped[str] = mapped_column(String(160), unique=True)
+    budget_day: Mapped[str] = mapped_column(String(10))
+    reserved_micros: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default="reserved")
+    actual_micros: Mapped[int | None] = mapped_column(Integer)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -528,6 +691,10 @@ class MaintenanceJobRecord(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     dedupe_key: Mapped[str] = mapped_column(String(256), unique=True)
     kind: Mapped[str] = mapped_column(String(32))
+    priority: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    learning_request_id: Mapped[UUID | None] = mapped_column(ForeignKey("learning_requests.id"))
+    result_schema_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     lease_owner: Mapped[str | None] = mapped_column(String(128))
@@ -719,11 +886,21 @@ class ArtifactRecord(Base):
 
 class SkillRecord(Base):
     __tablename__ = "skills"
-    __table_args__ = (CheckConstraint("lock_version >= 0", name="lock_version_non_negative"),)
+    __table_args__ = (
+        CheckConstraint("lock_version >= 0", name="lock_version_non_negative"),
+        UniqueConstraint("workspace_id", "slug", name="uq_skills_workspace_slug"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(128))
-    slug: Mapped[str] = mapped_column(String(64), unique=True)
+    slug: Mapped[str] = mapped_column(String(64))
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id"), default=DEFAULT_WORKSPACE_ID
+    )
+    project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id"))
+    superseded_by_skill_id: Mapped[UUID | None] = mapped_column(ForeignKey("skills.id"))
+    next_version_number: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    next_event_sequence: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     description: Mapped[str] = mapped_column(Text)
     status: Mapped[SkillStatus] = mapped_column(
         enum_column(SkillStatus, "skill_status"), default=SkillStatus.ENABLED
@@ -747,6 +924,7 @@ class SkillVersionRecord(Base):
     __tablename__ = "skill_versions"
     __table_args__ = (
         UniqueConstraint("skill_id", "version"),
+        UniqueConstraint("id", "skill_id", name="uq_skill_versions_id_skill"),
         CheckConstraint("version >= 1", name="version_positive"),
         CheckConstraint("schema_version >= 1", name="schema_version_positive"),
         CheckConstraint(
@@ -906,14 +1084,29 @@ class EvalRunRecord(Base):
 
 class SkillSourceRecord(Base):
     __tablename__ = "skill_sources"
-    __table_args__ = (UniqueConstraint("skill_version_id", "source_run_id"),)
+    __table_args__ = (
+        UniqueConstraint("skill_version_id", "source_run_id"),
+        CheckConstraint(
+            (
+                "(source_kind = 'train_eval' AND source_eval_run_id IS NOT NULL AND "
+                "learning_source_id IS NULL) OR "
+                "(source_kind = 'personal' AND source_eval_run_id IS NULL AND "
+                "learning_source_id IS NOT NULL)"
+            ),
+            name="source_kind_exclusive",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     skill_version_id: Mapped[UUID] = mapped_column(
         ForeignKey("skill_versions.id", ondelete="RESTRICT"), index=True
     )
     source_run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
-    source_eval_run_id: Mapped[UUID] = mapped_column(
+    source_kind: Mapped[str] = mapped_column(
+        String(32), default="train_eval", server_default="train_eval"
+    )
+    learning_source_id: Mapped[UUID | None] = mapped_column(ForeignKey("learning_sources.id"))
+    source_eval_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("eval_runs.id", ondelete="RESTRICT")
     )
     trace_artifact_id: Mapped[UUID] = mapped_column(ForeignKey("artifacts.id", ondelete="RESTRICT"))
@@ -1147,3 +1340,89 @@ class SandboxExecutionRecord(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+@event.listens_for(RunRecord, "before_update")
+def protect_run_data_role(_mapper, _connection, record):
+    _reject_changed_fields(record, ("data_role",))
+
+
+@event.listens_for(RunFeedbackRecord, "before_update")
+def protect_feedback(_mapper, _connection, _record):
+    raise ValueError("feedback is append-only")
+
+
+@event.listens_for(LearningRequestRecord, "before_update")
+def protect_learning_request_identity(_mapper, _connection, record):
+    _reject_changed_fields(
+        record,
+        (
+            "request_kind",
+            "parent_request_id",
+            "workspace_id",
+            "project_id",
+            "origin_run_id",
+            "trigger",
+            "source_key",
+            "client_request_id",
+            "request_body_hash",
+            "feedback_revision",
+            "target_skill_id",
+            "base_version_id",
+            "policy_snapshot",
+            "policy_hash",
+            "frozen_inputs",
+            "created_at",
+        ),
+    )
+
+
+@event.listens_for(LearningSourceRecord, "before_update")
+def protect_learning_source(_mapper, _connection, record):
+    _reject_changed_fields(
+        record,
+        (
+            "run_id",
+            "feedback_id",
+            "source_revision",
+            "source_role",
+            "parent_skill_versions",
+            "evidence_manifest",
+            "artifact_id",
+            "content_hash",
+            "created_at",
+        ),
+    )
+
+
+event.listen(
+    RunRecord.__table__,
+    "after_create",
+    DDL(
+        "CREATE TRIGGER runs_data_role_immutable BEFORE UPDATE OF data_role ON runs "
+        "WHEN NEW.data_role != OLD.data_role BEGIN "
+        "SELECT RAISE(ABORT, 'run data_role is immutable'); END"
+    ).execute_if(dialect="sqlite"),
+)
+event.listen(
+    RunRecord.__table__,
+    "after_create",
+    DDL(
+        "CREATE OR REPLACE FUNCTION protect_run_data_role() RETURNS trigger LANGUAGE plpgsql AS $$ "
+        "BEGIN IF NEW.data_role IS DISTINCT FROM OLD.data_role THEN "
+        "RAISE EXCEPTION 'run data_role is immutable'; END IF; RETURN NEW; END $$"
+    ).execute_if(dialect="postgresql"),
+)
+event.listen(
+    RunRecord.__table__,
+    "after_create",
+    DDL(
+        "CREATE TRIGGER runs_data_role_immutable BEFORE UPDATE OF data_role ON runs "
+        "FOR EACH ROW EXECUTE FUNCTION protect_run_data_role()"
+    ).execute_if(dialect="postgresql"),
+)
+event.listen(
+    RunRecord.__table__,
+    "after_drop",
+    DDL("DROP FUNCTION IF EXISTS protect_run_data_role()").execute_if(dialect="postgresql"),
+)

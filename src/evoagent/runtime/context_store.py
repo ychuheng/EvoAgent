@@ -11,7 +11,12 @@ from evoagent.core.context_policy import (
     MessageGroupBuilder,
 )
 from evoagent.core.models import Message, MessageRole
-from evoagent.db.models import ArtifactRecord, ContextRevisionRecord, RunSnapshotRecord, utc_now
+from evoagent.db.models import (
+    ArtifactRecord,
+    ContextRevisionRecord,
+    RunSnapshotRecord,
+    utc_now,
+)
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.policy import redact_value
 from evoagent.memory.repository import check_run_references
@@ -176,7 +181,7 @@ class ContextStore:
                 ContextRevisionRecord(
                     id=revision_id,
                     run_id=run_id,
-                    revision=latest.revision + 1 if latest else 1,
+                    revision=await unit.runs.allocate_context_revision(run_id),
                     parent_id=state.context_revision_id,
                     dedupe_key=dedupe,
                     input_hash=input_hash,

@@ -2,10 +2,11 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from evoagent.db.models import SkillRecord, SkillVersionRecord
+from evoagent.db.counters import allocate
+from evoagent.db.models import DEFAULT_WORKSPACE_ID, SkillRecord, SkillVersionRecord
 from evoagent.db.repositories.base import RecordNotFoundError
 from evoagent.skills.lifecycle import SkillStatus, SkillVersionStatus
 
@@ -26,16 +27,23 @@ class SkillRepository:
             raise RecordNotFoundError(f"skill does not exist: {skill_id}")
         return record
 
-    async def find_by_slug(self, slug: str) -> SkillRecord | None:
-        return await self._session.scalar(select(SkillRecord).where(SkillRecord.slug == slug))
-
-    async def next_version(self, skill_id: UUID) -> int:
-        value = await self._session.scalar(
-            select(func.coalesce(func.max(SkillVersionRecord.version), 0)).where(
-                SkillVersionRecord.skill_id == skill_id
+    async def find_by_slug(
+        self, slug: str, *, workspace_id: UUID = DEFAULT_WORKSPACE_ID
+    ) -> SkillRecord | None:
+        return await self._session.scalar(
+            select(SkillRecord).where(
+                SkillRecord.slug == slug, SkillRecord.workspace_id == workspace_id
             )
         )
-        return int(value or 0) + 1
+
+    async def next_version(self, skill_id: UUID) -> int:
+        return await self.allocate_version(skill_id)
+
+    async def allocate_version(self, skill_id: UUID) -> int:
+        return await allocate(self._session, SkillRecord, skill_id, "next_version_number")
+
+    async def allocate_event_sequence(self, skill_id: UUID) -> int:
+        return await allocate(self._session, SkillRecord, skill_id, "next_event_sequence")
 
     async def active_versions(self) -> tuple[tuple[SkillRecord, SkillVersionRecord], ...]:
         rows = await self._session.execute(

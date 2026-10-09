@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.db.models import (
@@ -433,17 +433,7 @@ class SkillService:
                 select(SkillVersionRecord.id).where(SkillVersionRecord.skill_id == skill_id)
             ):
                 await enqueue_source(unit.session, f"skill:{version_id}")
-        sequence = (
-            int(
-                await unit.session.scalar(
-                    select(func.coalesce(func.max(SkillEventRecord.sequence), 0)).where(
-                        SkillEventRecord.skill_id == skill_id
-                    )
-                )
-                or 0
-            )
-            + 1
-        )
+        sequence = await unit.skills.allocate_event_sequence(skill_id)
         unit.session.add(
             SkillEventRecord(
                 skill_id=skill_id,

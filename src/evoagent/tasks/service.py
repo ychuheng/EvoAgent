@@ -191,6 +191,7 @@ class TaskService:
             unit.tasks.add(task)
             await unit.session.flush()
             run = RunRecord(
+                data_role="personal",
                 task_id=task.id,
                 status=PersistentRunStatus.QUEUED,
                 provider=normalized_provider,

@@ -301,6 +301,7 @@ class EvalCoordinator:
                     unit.tasks.add(task)
                     await unit.session.flush()
                     run = RunRecord(
+                        data_role=case.split.value,
                         task_id=task.id,
                         status=(
                             PersistentRunStatus.QUEUED if queued else PersistentRunStatus.PAUSED

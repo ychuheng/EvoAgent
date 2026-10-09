@@ -7,7 +7,6 @@ from typing import Protocol
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.core.models import Message, MessageRole, ModelRequest, ProviderEventType
@@ -236,17 +235,7 @@ class SkillExtractionService:
                         source_trace_hash=source.source_trace_hash,
                     )
                 )
-            sequence = (
-                int(
-                    await unit.session.scalar(
-                        select(func.coalesce(func.max(SkillEventRecord.sequence), 0)).where(
-                            SkillEventRecord.skill_id == skill.id
-                        )
-                    )
-                    or 0
-                )
-                + 1
-            )
+            sequence = await unit.skills.allocate_event_sequence(skill.id)
             unit.session.add(
                 SkillEventRecord(
                     skill_id=skill.id,
