@@ -51,6 +51,18 @@ export type TrialReadiness = {
   ready: boolean; evidence_ready: boolean; reasons: string[]; report_hash: string | null;
   skill_lock_version: number | null;
 };
+export type SkillUsageSummary = {
+  selected_count: number; projected_count: number; unprojected_count: number;
+  outcomes: { verified_success: number; verified_failure: number; unknown: number };
+  skill_related_failures: number; tool_call_count: number;
+  accounted_input_tokens: number; accounted_output_tokens: number;
+  token_coverage: string; elapsed_sample_count: number; elapsed_sample_truncated: boolean;
+  elapsed_mean_seconds: number | null; causal_benefit_established: boolean;
+};
+export type SkillUsageEvidencePage = {
+  items: { id: string; run_id: string; feedback_revision: number; outcome: string; attribution: string; verification_origin: string }[];
+  next_cursor: string | null;
+};
 export type ValidationProfile = {
   profile_id: "offline-mock-v1" | "host-real-v1"; available: boolean;
   provider?: string; model?: string; profile_hash?: string; reason?: string;
@@ -59,6 +71,8 @@ export type ValidationProfile = {
 
 const post = <T,>(path: string, body: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
 export const learning = {
+  usageSummary: (trial: SkillTrial) => request<SkillUsageSummary>(`/skills/${trial.skill_id}/usage-summary?workspace_id=${encodeURIComponent(trial.workspace_id)}${trial.project_id ? `&project_id=${encodeURIComponent(trial.project_id)}` : ""}`),
+  usageEvidence: (trial: SkillTrial, cursor: string | null = null) => request<SkillUsageEvidencePage>(`/skill-versions/${trial.version_id}/usage-evidence?workspace_id=${encodeURIComponent(trial.workspace_id)}${trial.project_id ? `&project_id=${encodeURIComponent(trial.project_id)}` : ""}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}&limit=20`),
   validationProfiles: () => request<ValidationProfile[]>("/personal-validation-profiles"),
   trialReadiness: (version: string, validation: string) => request<TrialReadiness>(`/skill-versions/${version}/trial-readiness?validation_request_id=${encodeURIComponent(validation)}`),
   activateTrial: (version: string, body: unknown) => post<SkillTrial>(`/skill-versions/${version}/trial`, body),

@@ -30,6 +30,18 @@ class SkillUsageService:
     def __init__(self, factory):
         self.factory = factory
 
+    async def summarize(self, skill_id, scope, since=None):
+        from evoagent.skills.usage_reports import SkillUsageReports
+
+        return await SkillUsageReports(self.factory).summarize(skill_id, scope, since)
+
+    async def list_evidence(self, version_id, scope, *, cursor=None, limit=50):
+        from evoagent.skills.usage_reports import SkillUsageReports
+
+        return await SkillUsageReports(self.factory).list_evidence(
+            version_id, scope, cursor=cursor, limit=limit
+        )
+
     @staticmethod
     def pending_projection_query():
         latest_revision = (

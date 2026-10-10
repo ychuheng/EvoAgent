@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SkillUsagePanel } from "./SkillUsagePanel";
 import { chat, type Project } from "../api/chat";
 import { learning, learningError, type LearningRequest, type SkillTrial, type TrialReadiness } from "../api/learning";
 
@@ -63,6 +64,7 @@ export function SkillTrialPanel({ workspaceId }: { workspaceId: string }) {
     {rows?.length === 0 && <p>当前所选范围没有限定试用。</p>}
     {rows?.map(row => <article key={row.id}>
       <p>试用 {row.id} / 版本 {row.version_id} / 状态 {row.status}</p>
+      <SkillUsagePanel key={row.id} trial={row} />
       {row.suspension_reason && <p>挂起原因：{row.suspension_reason}</p>}
       <label>操作依据<textarea aria-label={`试用操作依据 ${row.id}`} maxLength={1000} value={reasons[row.id] ?? ""} onChange={event => setReasons(values => ({ ...values, [row.id]: event.target.value }))} /></label>
       {row.status !== "suspended" && <button type="button" disabled={busy || !(reasons[row.id] ?? "").trim()} onClick={() => void act(() => learning.suspendTrial(row, reasons[row.id]))}>挂起试用 {row.id}</button>}

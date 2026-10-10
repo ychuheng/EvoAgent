@@ -1,5 +1,6 @@
 """Skill 提炼、查询、评审、发布与回滚 HTTP 入口。"""
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -267,3 +268,44 @@ async def review_version(
         reason=payload.reason,
     )
     return _promotion(result)
+
+
+@router.get("/{skill_id}/usage-summary")
+async def usage_summary(
+    skill_id: UUID,
+    request: Request,
+    workspace_id: UUID,
+    project_id: UUID | None = None,
+    since: datetime | None = None,
+):
+    from evoagent.learning.schema import LearningError
+    from evoagent.skills.trials import TrialScope
+    from evoagent.skills.usage import SkillUsageService
+
+    try:
+        return await SkillUsageService(request.app.state.database.session_factory).summarize(
+            skill_id, TrialScope(workspace_id, project_id), since
+        )
+    except LearningError as error:
+        raise HTTPException(422, detail={"code": error.code}) from None
+
+
+@versions_router.get("/{version_id}/usage-evidence")
+async def usage_evidence(
+    version_id: UUID,
+    request: Request,
+    workspace_id: UUID,
+    project_id: UUID | None = None,
+    cursor: UUID | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    from evoagent.learning.schema import LearningError
+    from evoagent.skills.trials import TrialScope
+    from evoagent.skills.usage import SkillUsageService
+
+    try:
+        return await SkillUsageService(request.app.state.database.session_factory).list_evidence(
+            version_id, TrialScope(workspace_id, project_id), cursor=cursor, limit=limit
+        )
+    except LearningError as error:
+        raise HTTPException(422, detail={"code": error.code}) from None
