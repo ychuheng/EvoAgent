@@ -96,6 +96,15 @@ async def test_bound_resume_preserves_outputs_and_does_not_depend_on_current_reg
     assert resumed == replica
     assert (resumed.root / "inputs/rows.csv").read_bytes() == b"legitimate edit"
     assert (resumed.root / "result.txt").read_bytes() == b"completed output"
+    with pytest.raises(LearningError, match="input_changed"):
+        await factory.resume(
+            request,
+            "case_one",
+            "treatment",
+            0,
+            expected_manifest=descriptor,
+            verify_initial_inputs=True,
+        )
 
 
 async def test_resume_rejects_cross_arm_binding_or_changed_manifest_without_rewriting(tmp_path):
@@ -118,6 +127,30 @@ async def test_resume_never_creates_a_missing_bound_replica(tmp_path):
     with pytest.raises(LearningError, match="path_unsafe"):
         await factory.resume(uuid4(), "case_one", "control", 0, expected_manifest={})
     assert not factory.root.exists()
+
+
+async def test_unexpected_initial_file_is_rejected_even_when_registered_bytes_match(tmp_path):
+    factory = ValidationReplicaFactory(tmp_path, (fixture(),))
+    request = uuid4()
+    replica = await factory.create(request, "case_one", "control", 0, "rows_positive")
+    (replica.root / "extra.txt").write_bytes(b"unregistered input")
+    with pytest.raises(LearningError, match="input_changed"):
+        await factory.resume(
+            request,
+            "case_one",
+            "control",
+            0,
+            expected_manifest=replica.binding_manifest,
+            verify_initial_inputs=True,
+        )
+    # After configuration is frozen, new files may be legitimate outputs.
+    assert (
+        await factory.resume(
+            request, "case_one", "control", 0, expected_manifest=replica.binding_manifest
+        )
+        == replica
+    )
+    assert (replica.root / "extra.txt").read_bytes() == b"unregistered input"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="real symlink creation needs Windows privileges")

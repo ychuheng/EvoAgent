@@ -193,6 +193,8 @@ class ConfiguredTaskHandler:
             if task is not None
             else None
         )
+        if validation_guard is not None:
+            project = await validation_guard.execution_project()
         provider = self._provider(lease.run_id)
 
         async def check():

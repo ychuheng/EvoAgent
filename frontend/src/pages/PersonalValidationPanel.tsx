@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
 import { chat, type TaskTrace } from "../api/chat";
-import { learning, learningError, type LearningRequest, type ValidationItem } from "../api/learning";
+import { learning, learningError, type LearningRequest, type ValidationItem, type ValidationFixture } from "../api/learning";
 
-type CaseForm = { goal: string; input: string; expected: string };
+type CaseForm = { goal: string; input: string; expected: string; fixtureId: string };
 type Verdict = "pass" | "fail" | "unknown";
 type Claim = { verdict: Verdict; notes: string };
-const blank = (): CaseForm => ({ goal: "", input: "", expected: "" });
+const blank = (): CaseForm => ({ goal: "", input: "", expected: "", fixtureId: "" });
 const keyOf = (item: ValidationItem) => `${item.evidence_refs.find(ref => ref.type === "eval_run")?.id}:${item.criterion_id}`;
 
 export function PersonalValidationPanel({ row, enabled, onChanged }: { row: LearningRequest; enabled: boolean; onChanged: () => Promise<void> }) {
@@ -13,6 +13,7 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
   const [positive, setPositive] = useState<CaseForm>(blank);
   const [negative, setNegative] = useState<CaseForm>(blank);
   const [family, setFamily] = useState("general");
+  const [fixtures, setFixtures] = useState<ValidationFixture[]>([]);
   const [review, setReview] = useState("");
   const [consent, setConsent] = useState(false);
   const [claims, setClaims] = useState<Record<string, Claim>>({});
@@ -42,6 +43,7 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
     return <fieldset disabled={!writable}><legend>{label}</legend>
       <label>验证任务<textarea aria-label={`${label}任务 ${row.id}`} value={value.goal} maxLength={8000} onChange={event => update({ ...value, goal: event.target.value })} /></label>
       <label>新输入<textarea aria-label={`${label}输入 ${row.id}`} value={value.input} maxLength={16000} onChange={event => update({ ...value, input: event.target.value })} /></label>
+      {fixtures.length > 0 && <><label>公共文件样例<select aria-label={`${label}文件样例 ${row.id}`} value={value.fixtureId} onChange={event => update({ ...value, fixtureId: event.target.value })}><option value="">使用文本输入</option>{fixtures.map(item => <option key={item.fixture_id} value={item.fixture_id}>{item.fixture_id}</option>)}</select></label>{fixtures.find(item => item.fixture_id === value.fixtureId)?.files.map(file => <div key={file.path}><p>{file.path}</p><pre>{file.content}</pre></div>)}</>}
       <label>由你核对的业务结果<textarea aria-label={`${label}结果 ${row.id}`} value={value.expected} maxLength={2000} onChange={event => update({ ...value, expected: event.target.value })} /></label>
     </fieldset>;
   }
@@ -49,7 +51,8 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
     if (!detail?.source?.content_hash || !consent || !review.trim()) return;
     const cases = [positive, negative].map((value, index) => ({
       case_key: index === 0 ? "positive_new" : "counter_new", case_kind: index === 0 ? "positive" : "counterexample",
-      task_family: family, public_input: { goal: value.goal, inputs: { text: value.input } },
+      task_family: family, public_input: { goal: value.goal, ...(value.input.trim() ? { inputs: { text: value.input } } : {}) },
+      ...(value.fixtureId ? { fixture_id: value.fixtureId } : {}),
       criteria: [{ criterion_id: "business_check", kind: "user", description: "按你提交的业务结果核对实际输出", expected: value.expected, business_criterion: true }],
     }));
     const body = { expected_parent_lock_version: detail.lock_version, reviewed_source_hash: detail.source.content_hash, independence_reason: review, repeats: 1, cases };
@@ -67,7 +70,7 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
     await learning.judgeValidation(row.id, { ...body, client_request_id: identity(body) });
     await onChanged(); setDetail(null); setClaims({});
   }
-  const filled = [positive, negative].every(value => value.goal.trim() && value.input.trim() && value.expected.trim());
+  const filled = [positive, negative].every(value => value.goal.trim() && (value.input.trim() || value.fixtureId) && value.expected.trim());
   return <section aria-label={`个人验证 ${row.id}`}>
     <p>当前仅提供离线 Mock 演练，不调用付费模型；人工判定也不会启用 Skill。真实试用尚未开放。</p>
     <button disabled={busy} type="button" onClick={() => void act(load)}>{row.request_kind === "validate" ? "查看验证与业务判定" : "准备新输入验证"}</button>
@@ -76,6 +79,8 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
       <button disabled={busy} type="button" onClick={() => void act(async () => { const trace = await chat.trace(row.origin_run_id); setTraces(values => ({ ...values, source: trace })); })}>查看来源运行</button>
       {traces.source && <pre>{JSON.stringify(traces.source, null, 2)}</pre>}
       <label>任务类型<select disabled={!writable} aria-label={`验证任务类型 ${row.id}`} value={family} onChange={event => setFamily(event.target.value)}>{["general", "coding", "research", "document", "data", "file_management"].map((value, index) => <option key={value} value={value}>{["通用", "编码", "研究", "文档", "数据", "文件管理"][index]}</option>)}</select></label>
+      <button type="button" disabled={!writable} onClick={() => void act(async () => { setFixtures(await learning.validationFixtures()); })}>加载公共文件样例</button>
+      <p>文件样例只在每臂独立副本中执行，不复制你的真实项目，也不允许提交宿主路径。请核对样例内容和业务判据。</p>
       {caseFields("正例", positive, setPositive)}{caseFields("反例", negative, setNegative)}
       <label>来源与新输入的审查依据<textarea aria-label={`输入审查依据 ${row.id}`} disabled={!writable} maxLength={2000} value={review} onChange={event => setReview(event.target.value)} /></label>
       <label><input type="checkbox" disabled={!writable} checked={consent} onChange={event => setConsent(event.target.checked)} />我已核对来源，这些输入没有用于提炼此方法</label>

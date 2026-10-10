@@ -45,6 +45,11 @@ class LocalArtifactStore:
         self._root = root.expanduser().resolve(strict=False)
         self._root.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def root(self) -> Path:
+        """Trusted host storage location; never resolve it from an artifact URI."""
+        return self._root
+
     async def write(self, run_id: UUID, name: str, content: bytes) -> StoredArtifact:
         return await asyncio.to_thread(self._write, run_id, name, content)
 

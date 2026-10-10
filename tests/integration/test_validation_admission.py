@@ -166,14 +166,14 @@ async def test_exact_known_input_hash_cannot_be_called_independent(trial_candida
 
 
 @pytest.mark.parametrize("unsupported", ["fixture", "validator"])
-async def test_unconnected_fixture_and_unknown_validator_leave_no_dataset(
+async def test_unregistered_fixture_and_unknown_validator_leave_no_dataset(
     trial_candidate, unsupported
 ):
     service, parent, payload, _ = await inputs(trial_candidate)
     body = payload.model_dump(mode="json")
     if unsupported == "fixture":
         body["cases"][0]["fixture_id"] = "registered_later"
-        code = "fixture_dispatch_not_connected"
+        code = "fixture_not_registered"
     else:
         body["cases"][0]["criteria"].append(
             {
@@ -201,3 +201,23 @@ async def test_current_off_policy_refuses_admission(trial_candidate):
         await session.commit()
     with pytest.raises(LearningError, match="learning_policy_off"):
         await service.prepare_cases(parent.id, payload)
+
+
+async def test_registered_fixture_aliases_cannot_claim_independent_inputs(trial_candidate):
+    from evoagent.learning.replicas import RegisteredFixture
+
+    service, parent, payload, _ = await inputs(trial_candidate)
+    service.fixtures = {
+        item.fixture_id: item
+        for item in (
+            RegisteredFixture("first_alias", (("first.txt", b"same data"),)),
+            RegisteredFixture("second_alias", (("second.txt", b"same data"),)),
+        )
+    }
+    body = payload.model_dump(mode="json")
+    for case, fixture_id in zip(body["cases"], service.fixtures, strict=True):
+        case["fixture_id"] = fixture_id
+    with pytest.raises(LearningError, match="fixture_inputs_not_distinct"):
+        await service.prepare_cases(parent.id, ValidationAdmission.model_validate(body))
+    async with trial_candidate[1].session_factory() as session:
+        assert await session.scalar(select(func.count()).select_from(EvalDatasetRecord)) == 0

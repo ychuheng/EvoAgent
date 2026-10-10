@@ -7,6 +7,39 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const parent: LearningRequest = { id: "parent", workspace_id: "workspace", origin_run_id: "source", status: "completed", stage: "reviewed", request_kind: "propose", lock_version: 3, candidate_version_id: "version", validation_report_hash: "hash", error_code: null, available_actions: ["prepare_validation"], source: { id: "source-id", status: "valid", revocation_epoch: 0, content_hash: "sha256:source-hash" } };
 
+test("只提交明确选择的公共文件样例，展示内容且不提交宿主路径", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("personal-validation-fixtures")) return json([
+      { fixture_id: "first_sample", files: [{ path: "rows.csv", content: "id,value\n001,2" }] },
+      { fixture_id: "second_sample", files: [{ path: "note.txt", content: "A public paragraph" }] },
+    ]);
+    if (!init?.method) return json(parent);
+    bodies.push(JSON.parse(String(init.body)));
+    return json({ ...parent, id: "child" }, 202);
+  }));
+  const changed = vi.fn(async () => {});
+  render(<PersonalValidationPanel row={parent} enabled onChanged={changed} />);
+  fireEvent.click(screen.getByRole("button", { name: "准备新输入验证" }));
+  fireEvent.click(await screen.findByRole("button", { name: "加载公共文件样例" }));
+  await screen.findByLabelText("正例文件样例 parent");
+  for (const [label, fixtureId] of [["正例", "first_sample"], ["反例", "second_sample"]]) {
+    fireEvent.change(screen.getByLabelText(`${label}任务 parent`), { target: { value: "核对输入" } });
+    fireEvent.change(screen.getByLabelText(`${label}结果 parent`), { target: { value: "文件内容保持完整" } });
+    fireEvent.change(screen.getByLabelText(`${label}文件样例 parent`), { target: { value: fixtureId } });
+  }
+  expect(screen.getByText("A public paragraph")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("输入审查依据 parent"), { target: { value: "已独立核对这些公开样例" } });
+  const freeze = screen.getByRole("button", { name: "冻结正反例（暂不执行）" });
+  expect(freeze).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(freeze);
+  await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+  expect((bodies[0].cases as { fixture_id: string }[]).map(item => item.fixture_id)).toEqual(["first_sample", "second_sample"]);
+  expect(JSON.stringify(bodies[0])).not.toContain("root");
+  expect(JSON.stringify(bodies[0])).not.toContain("rows.csv");
+});
+
 test("冻结新输入须有明确授权；网络重试保留提交身份且不启动验证", async () => {
   const submissions: Record<string, unknown>[] = [];
   const calls: string[] = [];

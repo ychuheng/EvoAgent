@@ -22,9 +22,11 @@ export type ValidationItem = {
   judge_origin: "machine" | "user"; evidence_refs: { type: string; id: string }[];
 };
 export type FeedbackResult = { id: string; revision: number; learning_revision: number; routing: string; learning_request_id: string | null };
+export type ValidationFixture = { fixture_id: string; files: { path: string; content: string }[] };
 
 const post = <T,>(path: string, body: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
 export const learning = {
+  validationFixtures: () => request<ValidationFixture[]>("/personal-validation-fixtures"),
   policy: (id: string) => request<LearningPolicy>(`/workspaces/${id}/learning-policy`),
   updatePolicy: (id: string, body: unknown) => request<LearningPolicy>(`/workspaces/${id}/learning-policy`, { method: "PUT", body: JSON.stringify(body) }),
   feedback: (runId: string, body: unknown) => post<FeedbackResult>(`/runs/${runId}/feedback`, body),
@@ -52,6 +54,9 @@ export function learningError(reason: unknown): string {
     validation_source_review_stale: "来源已变化，请刷新并重新审查。",
     validation_project_replica_required: "项目方法的受控验证副本尚未接通，暂时不能执行验证。",
     validation_fixture_dispatch_not_connected: "当前仅支持你显式提供的新输入，不读取项目目录。",
+    validation_fixture_not_registered: "该文件样例尚未登记，请从公共样例列表重新选择。",
+    validation_fixture_inputs_not_distinct: "两组文件数据相同，改名或复制不能作为不同验证输入。",
+    validation_fixture_registry_changed: "文件样例已更新，请重新冻结验证输入。",
     validation_judgment_report_conflict: "验证报告已有新判定，请刷新后重新核对。",
   };
   return reason instanceof ApiError ? labels[reason.code] ?? reason.message : String(reason);

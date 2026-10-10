@@ -1,8 +1,8 @@
 """Offline personal validation stages; no paid dispatch or trial activation.
 
 The maintenance handler must supply its fenced provenance check and atomic
-stage completion. The public API remains closed while judging and trial reuse
-are being connected; completed runtime checks cannot grant business success.
+stage completion. Trusted HTTP entry and human judging are available for Mock
+runs; completed runtime checks cannot grant business success or trial adoption.
 """
 
 import json
@@ -23,6 +23,8 @@ from evoagent.evals.coordinator import EvalCoordinator
 from evoagent.evals.lifecycle import EvalExperimentStatus
 from evoagent.evals.metrics import EvaluationReportService
 from evoagent.evals.validators.base import ValidationResult
+from evoagent.learning.replica_bindings import prepare_replicas, require_replica_binding
+from evoagent.learning.replicas import validation_input_fingerprint
 from evoagent.learning.repository import LearningRepository
 from evoagent.learning.schema import LearningError
 from evoagent.learning.sources import PersonalSourceService
@@ -127,6 +129,8 @@ class PersonalValidationExecution:
                 str(row.split) != "train"
                 or row.task_family != case.task_family
                 or row.public_input != case.public_input
+                or validation_input_fingerprint(case, frozen.get("fixture_manifests", {}))
+                != frozen.get("input_fingerprints", {}).get(case.case_key)
                 or row.private_validators
                 != (specs or [{"name": "run_completed", "version": "1", "parameters": {}}])
             ):
@@ -135,7 +139,7 @@ class PersonalValidationExecution:
 
     async def start(self, request_id, guard, complete_stage, *, code_version):
         async with self.factory() as session:
-            request, source, _, _ = await self._load(session, request_id, guard)
+            request, source, cases, _ = await self._load(session, request_id, guard)
             if request.stage != "task_validate":
                 raise LearningError("invalid_learning_stage")
             source_id, epoch = source.id, source.revocation_epoch
@@ -143,6 +147,7 @@ class PersonalValidationExecution:
         await PersonalSourceService(
             self.factory, artifact_store=self.store, max_source_risk=max_risk
         ).read_frozen(source_id, expected_revocation_epoch=epoch)
+        replicas = await prepare_replicas(self.store, request, cases)
 
         async def complete(session, request, experiment):
             await self._load(session, request.id, guard)
@@ -161,6 +166,7 @@ class PersonalValidationExecution:
             code_version=code_version,
             job_guard=guard,
             complete_stage=complete,
+            replicas=replicas,
         )
 
     async def collect(self, request_id, guard, complete_stage):
@@ -202,6 +208,7 @@ class PersonalValidationExecution:
                 task = await session.get(TaskRecord, row.task_id)
                 chat = await session.get(SessionRecord, task.session_id) if task else None
                 case = by_case[row.eval_case_id]
+                await require_replica_binding(session, request, row, case)
                 version_id = (
                     request.candidate_version_id
                     if row.arm == "treatment"

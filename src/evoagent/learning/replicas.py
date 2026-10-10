@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -19,6 +20,32 @@ _RESERVED = {"con", "prn", "aux", "nul"} | {
 }
 
 
+def fixture_input_fingerprint(manifest):
+    """Compare content conservatively, without trusting fixture names."""
+    return content_hash(
+        [
+            {"sha256": digest, "size_bytes": size}
+            for digest, size in sorted(
+                {(row["sha256"], row["size_bytes"]) for row in manifest["files"]}
+            )
+        ]
+    )
+
+
+def validation_input_fingerprint(case, manifests):
+    if case.fixture_id is None:
+        return content_hash(case.public_input["inputs"])
+    manifest = manifests.get(case.case_key)
+    if manifest is None or manifest.get("fixture_id") != case.fixture_id:
+        raise LearningError("validation_fixture_manifest_invalid")
+    return content_hash(
+        {
+            "inputs": case.public_input.get("inputs"),
+            "fixture_data": fixture_input_fingerprint(manifest),
+        }
+    )
+
+
 def _is_link(path):
     return path.is_symlink() or path.is_junction()
 
@@ -33,14 +60,7 @@ class RegisteredFixture:
     def input_fingerprint(self):
         """Conservative data identity: neither registry nor file renames add evidence."""
         manifest = self.manifest()
-        return content_hash(
-            [
-                {"sha256": digest, "size_bytes": size}
-                for digest, size in sorted(
-                    {(row["sha256"], row["size_bytes"]) for row in manifest["files"]}
-                )
-            ]
-        )
+        return fixture_input_fingerprint(manifest)
 
     def manifest(self):
         if type(self.files) is not tuple or any(
@@ -133,7 +153,14 @@ class ValidationReplicaFactory:
         return await asyncio.to_thread(self._create, request_id, case_key, arm, repeat, fixture)
 
     async def resume(
-        self, request_id: UUID, case_key: str, arm: str, repeat: int, *, expected_manifest: dict
+        self,
+        request_id: UUID,
+        case_key: str,
+        arm: str,
+        repeat: int,
+        *,
+        expected_manifest: dict,
+        verify_initial_inputs: bool = False,
     ):
         """Restore a durable host binding without resetting legitimately edited files.
 
@@ -151,10 +178,16 @@ class ValidationReplicaFactory:
         ):
             raise LearningError("validation_replica_identity_invalid")
         return await asyncio.to_thread(
-            self._resume, request_id, case_key, arm, repeat, expected_manifest
+            self._resume,
+            request_id,
+            case_key,
+            arm,
+            repeat,
+            expected_manifest,
+            verify_initial_inputs,
         )
 
-    def _resume(self, request_id, case_key, arm, repeat, expected_manifest):
+    def _resume(self, request_id, case_key, arm, repeat, expected_manifest, verify_initial_inputs):
         target = self.root / f"{request_id.hex}-{case_key}-{repeat}-{arm}"
         saved = target / ".validation-input-manifest.json"
         if (
@@ -184,12 +217,59 @@ class ValidationReplicaFactory:
                 raise LearningError("validation_replica_manifest_changed")
         except (OSError, ValueError, KeyError, TypeError):
             raise LearningError("validation_replica_manifest_changed") from None
+        if verify_initial_inputs:
+            self._verify_initial_files(target, manifest)
         return ValidationReplica(
             target,
             {"fixture_id": manifest["fixture_id"], "files": manifest["files"]},
             manifest["fixture_hash"],
             manifest,
         )
+
+    def _verify_initial_files(self, target, manifest):
+        expected_files = {row["path"] for row in manifest["files"]} | {
+            ".validation-input-manifest.json"
+        }
+        expected_dirs = {
+            parent.as_posix()
+            for row in manifest["files"]
+            for parent in PurePosixPath(row["path"]).parents
+            if parent.as_posix() != "."
+        }
+        pending, seen = [target], set()
+        try:
+            while pending:
+                with os.scandir(pending.pop()) as entries:
+                    for entry in entries:
+                        path = Path(entry.path)
+                        relative = path.relative_to(target).as_posix()
+                        if _is_link(path):
+                            raise LearningError("validation_replica_path_unsafe")
+                        if relative in expected_files and entry.is_file(follow_symlinks=False):
+                            seen.add(relative)
+                        elif relative in expected_dirs and entry.is_dir(follow_symlinks=False):
+                            pending.append(path)
+                        else:
+                            raise LearningError("validation_replica_input_changed")
+        except OSError:
+            raise LearningError("validation_replica_input_changed") from None
+        if seen != expected_files:
+            raise LearningError("validation_replica_input_changed")
+        for row in manifest["files"]:
+            path = target / row["path"]
+            if (
+                _is_link(path)
+                or any(_is_link(parent) for parent in path.parents if parent.is_relative_to(target))
+                or not path.resolve().is_relative_to(target)
+            ):
+                raise LearningError("validation_replica_path_unsafe")
+            try:
+                with path.open("rb") as handle:
+                    raw = handle.read(MAX_FIXTURE_BYTES + 1)
+            except OSError:
+                raise LearningError("validation_replica_input_changed") from None
+            if len(raw) != row["size_bytes"] or hashlib.sha256(raw).hexdigest() != row["sha256"]:
+                raise LearningError("validation_replica_input_changed")
 
     def _create(self, request_id, case_key, arm, repeat, fixture):
         manifest = fixture.manifest()
@@ -231,19 +311,28 @@ class ValidationReplicaFactory:
                     handle.write(data)
             with saved.open("xb") as handle:
                 handle.write(canonical_json(expected).encode("utf8"))
-        for row in manifest["files"]:
-            path = target / row["path"]
-            if (
-                _is_link(path)
-                or any(_is_link(parent) for parent in path.parents if parent.is_relative_to(target))
-                or not path.resolve().is_relative_to(target)
-            ):
-                raise LearningError("validation_replica_path_unsafe")
-            try:
-                with path.open("rb") as handle:
-                    raw = handle.read(MAX_FIXTURE_BYTES + 1)
-            except OSError as error:
-                raise LearningError("validation_replica_input_changed") from error
-            if len(raw) != row["size_bytes"] or hashlib.sha256(raw).hexdigest() != row["sha256"]:
-                raise LearningError("validation_replica_input_changed")
+        self._verify_initial_files(target, manifest)
         return ValidationReplica(target, manifest, digest, expected)
+
+
+def default_personal_fixtures():
+    """Small public examples registered by host code, not uploaded host paths."""
+    return (
+        RegisteredFixture("data_identifiers", (("inputs/rows.csv", b"id,value\n001,2\n002,4\n"),)),
+        RegisteredFixture(
+            "data_free_text", (("inputs/note.txt", b"No tabular identifiers here.\n"),)
+        ),
+        RegisteredFixture(
+            "document_notes", (("inputs/notes.md", b"# Notes\n- Deadline: Friday\n- Owner: Ada\n"),)
+        ),
+        RegisteredFixture(
+            "document_story",
+            (("inputs/story.md", b"# Story\nA fictional traveler rests near a river.\n"),),
+        ),
+        RegisteredFixture(
+            "coding_arithmetic", (("add.py", b"def add(a, b):\n    return a - b\n"),)
+        ),
+        RegisteredFixture(
+            "coding_correct", (("multiply.py", b"def multiply(a, b):\n    return a * b\n"),)
+        ),
+    )

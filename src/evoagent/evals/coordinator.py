@@ -167,6 +167,7 @@ class EvalCoordinator:
         code_version,
         job_guard,
         complete_stage=None,
+        replicas=None,
     ):
         # This coordinator is not a payment authorization boundary. Until the
         # task dispatch reservation adapter is wired, only offline runs enter.
@@ -248,7 +249,7 @@ class EvalCoordinator:
             )
             unit.evals.add_experiment(experiment)
             await unit.session.flush()
-            await self._ensure_pairs(unit, experiment, cases, config)
+            await self._ensure_pairs(unit, experiment, cases, config, replicas=replicas)
             request.validation_experiment_id = experiment.id
             # Formal lifecycle/gate hashes are deliberately untouched.
             await job_guard.check(unit.session)
@@ -403,13 +404,26 @@ class EvalCoordinator:
             await unit.commit()
             return experiment
 
-    async def _ensure_pairs(self, unit, experiment, cases, config) -> None:
+    async def _ensure_pairs(self, unit, experiment, cases, config, *, replicas=None) -> None:
         personal_workspace_id = None
         if experiment.purpose == "personal_validation":
             from evoagent.db.models import LearningRequestRecord
 
             request = await unit.session.get(LearningRequestRecord, experiment.learning_request_id)
             personal_workspace_id = request.workspace_id
+            fixture_cases = {
+                item["case_key"]
+                for item in request.frozen_inputs.get("validation_cases", [])
+                if item.get("fixture_id") is not None
+            }
+            expected_replicas = {
+                (case_key, arm, repeat)
+                for case_key in fixture_cases
+                for arm in ("control", "treatment")
+                for repeat in range(config.repeats)
+            }
+            if set(replicas or {}) != expected_replicas:
+                raise EvalCoordinatorError("personal_validation_replicas_incomplete")
         for case in cases:
             goal = (
                 json.dumps(case.public_input, ensure_ascii=False, sort_keys=True)
@@ -504,6 +518,27 @@ class EvalCoordinator:
                     unit.evals.add_run(eval_run)
                     await unit.session.flush()
                     records[arm] = eval_run
+                    if replicas and (case.case_key, arm, repeat_index) in replicas:
+                        from evoagent.db.models import ValidationReplicaBindingRecord
+
+                        replica = replicas[case.case_key, arm, repeat_index]
+                        unit.session.add(
+                            ValidationReplicaBindingRecord(
+                                workspace_id=personal_workspace_id,
+                                request_id=request.id,
+                                eval_run_id=eval_run.id,
+                                run_id=run.id,
+                                case_key=case.case_key,
+                                arm=arm,
+                                repeat_index=repeat_index,
+                                fixture_id=replica.input_manifest["fixture_id"],
+                                input_fingerprint=request.frozen_inputs["input_fingerprints"][
+                                    case.case_key
+                                ],
+                                manifest=replica.binding_manifest,
+                                manifest_hash=content_hash(replica.binding_manifest),
+                            )
+                        )
                 records["control"].paired_eval_run_id = records["treatment"].id
                 records["treatment"].paired_eval_run_id = records["control"].id
 

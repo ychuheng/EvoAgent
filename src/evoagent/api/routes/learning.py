@@ -171,12 +171,32 @@ async def review_candidate(
 
 
 def validation_service(database, settings):
+    from evoagent.learning.replicas import default_personal_fixtures
+
     return PersonalValidationService(
         database.session_factory,
         LocalArtifactStore(settings.artifact_root),
         default_validator_registry(),
         learning_enabled=settings.learning_enabled,
+        fixtures=default_personal_fixtures(),
     )
+
+
+@router.get("/personal-validation-fixtures")
+async def validation_fixture_catalog():
+    from evoagent.learning.replicas import default_personal_fixtures
+
+    return [
+        {
+            "fixture_id": fixture.fixture_id,
+            "manifest": fixture.manifest(),
+            "input_fingerprint": fixture.input_fingerprint(),
+            "files": [
+                {"path": path, "content": data.decode("utf8")} for path, data in fixture.files
+            ],
+        }
+        for fixture in default_personal_fixtures()
+    ]
 
 
 @router.post(

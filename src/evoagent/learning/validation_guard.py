@@ -16,6 +16,8 @@ from evoagent.db.models import (
     SessionRecord,
     TaskRecord,
 )
+from evoagent.learning.replica_bindings import replica_factory, require_replica_binding
+from evoagent.learning.replicas import validation_input_fingerprint
 from evoagent.learning.sources import PersonalSourceService
 from evoagent.learning.validation_schema import PersonalValidationCase
 from evoagent.memory.schema import MemoryError
@@ -111,13 +113,31 @@ class PersonalValidationRunGuard:
         except (KeyError, ValueError, TypeError, StopIteration):
             # Parser errors may retain the full legacy input in their context.
             raise MemoryError("personal_validation_frozen_input_invalid") from None
+        try:
+            fingerprint = validation_input_fingerprint(
+                frozen_case, request.frozen_inputs.get("fixture_manifests", {})
+            )
+        except ValueError:
+            raise MemoryError("personal_validation_frozen_input_invalid") from None
         if (
             frozen_case.public_input != case.public_input
             or frozen_case.task_family != case.task_family
-            or content_hash(case.public_input["inputs"])
-            != request.frozen_inputs.get("input_fingerprints", {}).get(case.case_key)
+            or fingerprint != request.frozen_inputs.get("input_fingerprints", {}).get(case.case_key)
         ):
             raise MemoryError("personal_validation_frozen_input_invalid")
+        try:
+            binding = await require_replica_binding(session, request, evaluation, frozen_case)
+            if binding is not None:
+                await replica_factory(self.store).resume(
+                    request.id,
+                    case.case_key,
+                    evaluation.arm,
+                    evaluation.repeat_index,
+                    expected_manifest=binding.manifest,
+                    verify_initial_inputs=run.config_snapshot is None,
+                )
+        except ValueError:
+            raise MemoryError("personal_validation_replica_unavailable") from None
         # The arm and the pinned body are server-created, not an API capability.
         version_id = (
             request.candidate_version_id
@@ -183,3 +203,33 @@ class PersonalValidationRunGuard:
         async with self.factory() as session:
             if await self._verify(session) != (source_id, epoch, max_risk):
                 raise MemoryError("personal_validation_authorization_revoked")
+
+    async def execution_project(self):
+        """An execution root grants no access to the source user's project."""
+        from evoagent.db.models import ValidationReplicaBindingRecord
+        from evoagent.projects.schema import ProjectAuthorization
+        from evoagent.projects.service import ActiveProject
+
+        await self.check()
+        async with self.factory() as session:
+            binding = await session.scalar(
+                select(ValidationReplicaBindingRecord).where(
+                    ValidationReplicaBindingRecord.run_id == self.run_id
+                )
+            )
+        if binding is None:
+            return None
+        replica = await replica_factory(self.store).resume(
+            binding.request_id,
+            binding.case_key,
+            binding.arm,
+            binding.repeat_index,
+            expected_manifest=binding.manifest,
+        )
+        return ActiveProject(
+            id=binding.id,
+            name="Private validation replica",
+            root=replica.root,
+            authorization=ProjectAuthorization.READ_WRITE,
+            authorization_version=1,
+        )

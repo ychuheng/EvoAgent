@@ -2,7 +2,7 @@
 
 This service is a trusted local control-plane entry, never a model tool.
 prepare_cases only freezes inputs; start explicitly enqueues offline execution.
-The public route and trial admission remain closed while adoption is connected.
+The trusted HTTP route exposes offline execution; trial adoption remains closed.
 """
 
 from uuid import UUID
@@ -21,6 +21,7 @@ from evoagent.db.repositories.events import RunEventRepository
 from evoagent.evals.datasets import EvalDatasetService
 from evoagent.evals.lifecycle import DatasetStatus
 from evoagent.evals.schema import EvalCaseDefinition, EvalDatasetDefinition, ValidatorSpec
+from evoagent.learning.replicas import fixture_input_fingerprint, validation_input_fingerprint
 from evoagent.learning.repository import LearningRepository
 from evoagent.learning.schema import LearningError
 from evoagent.learning.service import LearningService, request_view
@@ -47,9 +48,14 @@ class ValidationAdmission(ValidationSubmission):
 
 
 class PersonalValidationService:
-    def __init__(self, factory, store, validators, *, learning_enabled=False):
+    def __init__(self, factory, store, validators, *, learning_enabled=False, fixtures=()):
         self.factory, self.store, self.validators = factory, store, validators
         self.enabled = learning_enabled
+        self.fixtures = {item.fixture_id: item for item in fixtures}
+        if len(self.fixtures) != len(fixtures):
+            raise LearningError("validation_fixture_registry_duplicate")
+        for fixture in fixtures:
+            fixture.manifest()
 
     async def start(self, request_id, expected_lock_version):
         """Explicit, source-authorized offline dispatch with durable replay identity."""
@@ -248,8 +254,13 @@ class PersonalValidationService:
         evidence = await sources.read_frozen(source_id, expected_revocation_epoch=source_epoch)
         if payload.reviewed_source_hash != source_hash:
             raise LearningError("validation_source_review_stale")
-        if any(case.fixture_id is not None for case in payload.cases):
-            raise LearningError("validation_fixture_dispatch_not_connected")
+        fixture_manifests = {}
+        for case in payload.cases:
+            if case.fixture_id is not None:
+                fixture = self.fixtures.get(case.fixture_id)
+                if fixture is None:
+                    raise LearningError("validation_fixture_not_registered")
+                fixture_manifests[case.case_key] = fixture.manifest()
         for case in payload.cases:
             for item in case.criteria:
                 self._require_meaningful_spec(item)
@@ -263,9 +274,28 @@ class PersonalValidationService:
             raise LearningError("validation_report_item_bound")
         input_hashes = {item.get("hash") for item in evidence.input_refs}
         case_fingerprints = {
-            case.case_key: content_hash(case.public_input["inputs"]) for case in payload.cases
+            case.case_key: validation_input_fingerprint(case, fixture_manifests)
+            for case in payload.cases
         }
-        if any(value in input_hashes for value in case_fingerprints.values()):
+        fixture_fingerprints = [
+            fixture_input_fingerprint(item) for item in fixture_manifests.values()
+        ]
+        if len(set(fixture_fingerprints)) != len(fixture_fingerprints):
+            raise LearningError("validation_fixture_inputs_not_distinct")
+        compared_inputs = (
+            set(case_fingerprints.values())
+            | {
+                "sha256:" + row["sha256"]
+                for manifest in fixture_manifests.values()
+                for row in manifest["files"]
+            }
+            | {
+                content_hash(case.public_input["inputs"])
+                for case in payload.cases
+                if case.public_input.get("inputs")
+            }
+        )
+        if compared_inputs & input_hashes:
             raise LearningError("validation_input_reuses_source")
         body = payload.model_dump(mode="json", exclude={"client_request_id"})
         criteria = {
@@ -376,6 +406,12 @@ class PersonalValidationService:
                 "source_id": str(source_id),
                 "source_hash": source_hash,
             }
+            if fixture_manifests:
+                frozen["fixture_manifests"] = fixture_manifests
+                frozen["fixture_manifest_hash"] = content_hash(fixture_manifests)
+                # Fixture identity must participate in validate:v1 deduplication.
+                policy_snapshot["fixture_manifest_hash"] = frozen["fixture_manifest_hash"]
+                frozen["validation_policy_hash"] = content_hash(policy_snapshot)
             row = await LearningRepository(session).append_request(
                 workspace_id=parent.workspace_id,
                 origin_run_id=parent.origin_run_id,

@@ -533,6 +533,34 @@ class ValidationJudgmentRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class ValidationReplicaBindingRecord(Base):
+    """Immutable host-created initial input identity for one validation arm/run."""
+
+    __tablename__ = "validation_replica_bindings"
+    __table_args__ = (
+        UniqueConstraint("request_id", "case_key", "arm", "repeat_index"),
+        CheckConstraint("arm IN ('control','treatment')", name="replica_arm_valid"),
+        CheckConstraint("repeat_index >= 0 AND repeat_index < 3", name="replica_repeat_valid"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="RESTRICT"))
+    request_id: Mapped[UUID] = mapped_column(
+        ForeignKey("learning_requests.id", ondelete="RESTRICT")
+    )
+    eval_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("eval_runs.id", ondelete="RESTRICT"), unique=True
+    )
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), unique=True)
+    case_key: Mapped[str] = mapped_column(String(64))
+    arm: Mapped[str] = mapped_column(String(16))
+    repeat_index: Mapped[int] = mapped_column(Integer)
+    fixture_id: Mapped[str] = mapped_column(String(64))
+    input_fingerprint: Mapped[str] = mapped_column(String(71))
+    manifest: Mapped[dict[str, Any]] = mapped_column(JSON)
+    manifest_hash: Mapped[str] = mapped_column(String(71))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class LearningRequestAliasRecord(Base):
     """同一学习语义的多个客户端幂等键都必须保留，不能仅记住首个键。"""
 
@@ -1503,6 +1531,12 @@ def protect_learning_request_identity(_mapper, _connection, record):
 @event.listens_for(ValidationJudgmentRecord, "before_update")
 def protect_validation_judgment(_mapper, _connection, _record):
     raise ValueError("validation judgments are append-only")
+
+
+@event.listens_for(ValidationReplicaBindingRecord, "before_update")
+@event.listens_for(ValidationReplicaBindingRecord, "before_delete")
+def protect_validation_replica_binding(_mapper, _connection, _record):
+    raise ValueError("validation replica bindings are immutable")
 
 
 @event.listens_for(SkillTrialRecord, "before_update")
