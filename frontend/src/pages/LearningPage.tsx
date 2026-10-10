@@ -3,6 +3,7 @@ import { chat, type ChatWorkspace } from "../api/chat";
 import { api } from "../api/client";
 import { learning, learningError, type LearningPolicy, type LearningRequest } from "../api/learning";
 import { PersonalValidationPanel } from "./PersonalValidationPanel";
+import { SkillTrialPanel, TrialCandidatePanel } from "./SkillTrialPanel";
 
 const STAGE: Record<string, string> = { prepare: "整理经验", generate: "提炼方法", static_validate: "检查候选", review: "等待审查", reviewed: "已审查", duplicate: "发现重复" };
 
@@ -86,8 +87,10 @@ export function LearningPage() {
       {row.available_actions.includes("retry") && <button type="button" disabled={busy || !policy?.learning_enabled} onClick={() => void retry(row)}>重试学习请求</button>}
       {row.available_actions.includes("review") && <><label>候选审查依据<textarea aria-label={`审查依据 ${row.id}`} maxLength={2000} value={reasons[row.id] ?? ""} onChange={event => setReasons(values => ({ ...values, [row.id]: event.target.value }))} /></label><button type="button" disabled={busy || !reasons[row.id]?.trim()} onClick={() => void act(() => learning.review(row, "acknowledge", reasons[row.id]))}>确认候选（不启用）</button><button type="button" disabled={busy || !reasons[row.id]?.trim()} onClick={() => void act(() => learning.review(row, "reject", reasons[row.id]))}>拒绝候选</button></>}
       <PersonalValidationPanel row={row} enabled={policy?.personal_validation_available === true && policy.mode !== "off" && !busy} onChanged={refresh} />
+      <TrialCandidatePanel row={row} />
     </article>)}
     {cursor && <button type="button" disabled={busy} onClick={() => void act(async () => { const page = await learning.list(workspace, cursor); setRows(values => [...values, ...page.items]); setCursor(page.next_cursor); }, false)}>加载更多学习请求</button>}
+    <SkillTrialPanel key={workspace} workspaceId={workspace} />
     {error && <p className="error" role="alert">{error}</p>}
   </section>;
 }

@@ -278,6 +278,7 @@ class SkillTrialService:
                         "trial_id": str(trial.id),
                         "version_id": str(trial.version_id),
                         "reason": reason,
+                        "actor": "local-user",
                     },
                 )
             await session.commit()

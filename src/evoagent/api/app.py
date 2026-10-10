@@ -172,11 +172,12 @@ def create_app(
     app = FastAPI(title="EvoAgent API", version="0.4.0.dev0", lifespan=lifespan)
     app.include_router(memory.router, prefix="/api/v1")
     app.include_router(learning.router, prefix="/api/v1")
-    from evoagent.api.routes import mcp, retrieval, runtime_evals
+    from evoagent.api.routes import mcp, retrieval, runtime_evals, skill_trials
 
     app.include_router(mcp.router, prefix="/api/v1")
     app.include_router(runtime_evals.router, prefix="/api/v1")
     app.include_router(retrieval.router, prefix="/api/v1")
+    app.include_router(skill_trials.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(sessions.workspaces_router, prefix="/api/v1")
     app.include_router(projects.router, prefix="/api/v1")

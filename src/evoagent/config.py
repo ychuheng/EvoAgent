@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     runtime_heartbeat_status_merge_enabled: bool = False
     runtime_snapshot_deduplication_enabled: bool = False
     learning_enabled: bool = False
+    personal_trial_enabled: bool = False
     worker_runtime_experiment_id: UUID | None = None
     worker_runtime_arm: Literal["control", "treatment"] | None = None
     redis_url: SecretStr | None = None
