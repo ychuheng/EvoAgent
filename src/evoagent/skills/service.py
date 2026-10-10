@@ -160,6 +160,31 @@ class SkillService:
             )
             unit.skill_versions.add(version)
             await unit.session.flush()
+            if parent_version_id is not None:
+                links = list(
+                    await unit.session.scalars(
+                        select(SkillSourceRecord)
+                        .where(SkillSourceRecord.skill_version_id == parent_version_id)
+                        .limit(201)
+                    )
+                )
+                if len(links) > 200:
+                    raise SkillCompatibilityError("revision_source_link_budget_exceeded")
+                # Revisions preserve immutable source identities. The parent
+                # graph and current source checks still apply at adoption;
+                # copying links does not approve, activate or waive a gate.
+                for link in links:
+                    unit.session.add(
+                        SkillSourceRecord(
+                            skill_version_id=version.id,
+                            source_run_id=link.source_run_id,
+                            source_kind=link.source_kind,
+                            learning_source_id=link.learning_source_id,
+                            source_eval_run_id=link.source_eval_run_id,
+                            trace_artifact_id=link.trace_artifact_id,
+                            source_trace_hash=link.source_trace_hash,
+                        )
+                    )
             await self._event(
                 unit,
                 skill.id,
