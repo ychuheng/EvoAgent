@@ -1,0 +1,55 @@
+{
+  "1": {
+    "body": {
+      "provider": "mock",
+      "model": "mock-model",
+      "system_prompt_hash": "sha256:bbc5e661e106c6dcd8dc6dd186454c2fcba3c710fb4d8e71a60c93eaf077f073",
+      "tool_manifest_hash": "sha256:f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+      "policy_hash": "sha256:823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+      "max_iterations": 8,
+      "max_total_tokens": 1000,
+      "max_repeated_tool_calls": 3,
+      "max_tool_result_chars": 20000,
+      "temperature": null,
+      "max_output_tokens": null,
+      "model_timeout_seconds": 10.0,
+      "task_timeout_seconds": 20.0,
+      "tool_timeout_seconds": 5.0,
+      "code_version": "test-commit",
+      "skill_retrieval_top_k": 1,
+      "skill_retrieval_min_score": 0.1,
+      "run_mode": "baseline",
+      "skill_version_id": null,
+      "skill_content_hash": null,
+      "skill_context_hash": null
+    },
+    "hash": "sha256:8f36946657157bed44cc70687f0a2904749a5fa5cdc75b29b4f32a3c2c160fd0"
+  },
+  "2": {
+    "body": {
+      "schema_version": 2,
+      "provider": "mock",
+      "model": "mock-model",
+      "system_prompt_hash": "sha256:bbc5e661e106c6dcd8dc6dd186454c2fcba3c710fb4d8e71a60c93eaf077f073",
+      "tool_manifest_hash": "sha256:f9d35d43770d39092a663e665e82ae1d84a9e0da3d0d10c407acada6a40cd281",
+      "policy_hash": "sha256:823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+      "max_iterations": 8,
+      "max_total_tokens": 1000,
+      "max_repeated_tool_calls": 3,
+      "max_tool_result_chars": 20000,
+      "temperature": null,
+      "max_output_tokens": null,
+      "model_timeout_seconds": 10.0,
+      "task_timeout_seconds": 20.0,
+      "tool_timeout_seconds": 5.0,
+      "code_version": "test-commit",
+      "skill_retrieval_top_k": 1,
+      "skill_retrieval_min_score": 0.1,
+      "run_mode": "baseline",
+      "skill_version_id": null,
+      "skill_content_hash": null,
+      "skill_context_hash": null
+    },
+    "hash": "sha256:1e94eed314a8118731495546cd877a0e01b08e59c472794980a10d82e887b2b6"
+  }
+}
