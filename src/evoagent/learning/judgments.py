@@ -20,7 +20,7 @@ from evoagent.learning.repository import LearningRepository
 from evoagent.learning.schema import LearningError
 from evoagent.learning.service import LearningService
 from evoagent.learning.sources import PersonalSourceService
-from evoagent.privacy.redaction import detect_sensitive
+from evoagent.privacy.redaction import detect_sensitive, redact_value
 from evoagent.skills.access import SkillAccessPolicy
 from evoagent.skills.canonical import canonical_json, content_hash
 from evoagent.skills.lifecycle import SkillVersionStatus
@@ -42,6 +42,7 @@ class HumanCriterionJudgment(BaseModel):
             not self.reason.strip()
             or len(canonical_json(self.model_dump(mode="json")).encode()) > 8192
             or detect_sensitive(canonical_json(self.model_dump(mode="json")))
+            or redact_value(self.observed) != self.observed
         ):
             raise ValueError("human judgment requires bounded safe evidence")
         return self

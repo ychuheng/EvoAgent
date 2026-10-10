@@ -120,6 +120,7 @@ def test_goal_alone_and_sensitive_inputs_are_not_validation_material():
             public_input={"goal": "new title"},
             criteria=(criterion,),
         )
+
     with pytest.raises(ValidationError, match="safe bound"):
         PersonalValidationCase(
             case_key="secret_input",
@@ -131,3 +132,15 @@ def test_goal_alone_and_sensitive_inputs_are_not_validation_material():
             },
             criteria=(criterion,),
         )
+
+
+@pytest.mark.parametrize("field", ["public_input", "criterion_expected"])
+def test_nested_json_sensitive_keys_are_checked_before_serialization(field):
+    original = case("positive", "positive", ["001"]).model_dump(mode="json")
+    sensitive = {"rows": [{"API_KEY": "noncredential-test-marker"}]}
+    if field == "public_input":
+        original["public_input"]["inputs"] = sensitive
+    else:
+        original["criteria"][0]["expected"] = sensitive
+    with pytest.raises(ValidationError, match="safe bound"):
+        PersonalValidationCase.model_validate(original)

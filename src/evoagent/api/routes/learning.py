@@ -6,7 +6,9 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from evoagent.api.dependencies import DatabaseDependency, SettingsDependency
 from evoagent.db.repositories.base import ConcurrentUpdateError
+from evoagent.evals.validators import default_validator_registry
 from evoagent.learning.configuration import candidate_configuration
+from evoagent.learning.judgments import HumanJudgmentSubmission, ValidationJudgmentService
 from evoagent.learning.schema import (
     CandidateReview,
     FeedbackPayload,
@@ -22,6 +24,9 @@ from evoagent.learning.schema import (
 )
 from evoagent.learning.service import LearningService
 from evoagent.learning.sources import PersonalSourceService
+from evoagent.learning.validation import PersonalValidationService, ValidationAdmission
+from evoagent.learning.validation_schema import ValidationStart
+from evoagent.trace.artifacts import LocalArtifactStore
 
 router = APIRouter(tags=["learning"])
 
@@ -123,6 +128,9 @@ async def get_policy(
         **result,
         "learning_enabled": settings.learning_enabled,
         "automatic_discovery_available": False,
+        "personal_validation_available": settings.learning_enabled,
+        "personal_validation_provider": "mock",
+        "trial_adoption_available": False,
     }
 
 
@@ -159,6 +167,64 @@ async def review_candidate(
         service(database, settings).review_candidate(
             request_id, body.action, body.expected_lock_version, body.reason
         )
+    )
+
+
+def validation_service(database, settings):
+    return PersonalValidationService(
+        database.session_factory,
+        LocalArtifactStore(settings.artifact_root),
+        default_validator_registry(),
+        learning_enabled=settings.learning_enabled,
+    )
+
+
+@router.post(
+    "/learning-requests/{request_id}/validations",
+    status_code=202,
+    response_model=LearningRequestView,
+)
+async def prepare_validation(
+    request_id: UUID,
+    body: ValidationAdmission,
+    response: Response,
+    database: DatabaseDependency,
+    settings: SettingsDependency,
+):
+    result = await respond(validation_service(database, settings).prepare_cases(request_id, body))
+    response.headers["Location"] = f"/api/v1/learning-requests/{result.id}"
+    return result
+
+
+@router.post(
+    "/learning-requests/{request_id}/validation-start",
+    status_code=202,
+    response_model=LearningRequestView,
+)
+async def start_validation(
+    request_id: UUID,
+    body: ValidationStart,
+    database: DatabaseDependency,
+    settings: SettingsDependency,
+):
+    return await respond(
+        validation_service(database, settings).start(request_id, body.expected_lock_version)
+    )
+
+
+@router.post("/learning-requests/{request_id}/judgments", status_code=201)
+async def judge_validation(
+    request_id: UUID,
+    body: HumanJudgmentSubmission,
+    database: DatabaseDependency,
+    settings: SettingsDependency,
+):
+    return await respond(
+        ValidationJudgmentService(
+            database.session_factory,
+            LocalArtifactStore(settings.artifact_root),
+            learning_enabled=settings.learning_enabled,
+        ).submit(request_id, body)
     )
 
 

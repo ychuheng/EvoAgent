@@ -5,13 +5,21 @@ export type LearningPolicy = {
   daily_limit_micros: number | null; request_limit_micros: number | null;
   daily_candidate_limit: number; cooldown_seconds: number; max_source_risk: string;
   learning_enabled?: boolean;
+  personal_validation_available?: boolean; personal_validation_provider?: string;
+  trial_adoption_available?: boolean;
 };
 export type LearningRequest = {
   id: string; workspace_id: string; origin_run_id: string; status: string; stage: string;
   request_kind: string; lock_version: number; candidate_version_id: string | null;
   validation_report_hash: string | null; error_code: string | null; available_actions: string[];
-  source?: { id: string; status: string; revocation_epoch: number } | null;
+  source?: { id: string; status: string; revocation_epoch: number; content_hash?: string; artifact_id?: string } | null;
+  validation_report?: { items: ValidationItem[]; business_verification: string; trial_eligible: boolean; cost: { provider: string }; } | null;
   cost?: { known_spent_micros: number; outstanding_reserved_micros: number; unknown_usage_count: number } | null;
+};
+export type ValidationItem = {
+  case_key: string; case_kind: string; arm: string; repeat: number; criterion_id: string;
+  description?: string; expected: unknown; observed: unknown; verdict: string;
+  judge_origin: "machine" | "user"; evidence_refs: { type: string; id: string }[];
 };
 export type FeedbackResult = { id: string; revision: number; learning_revision: number; routing: string; learning_request_id: string | null };
 
@@ -26,6 +34,9 @@ export const learning = {
   review: (row: LearningRequest, action: "acknowledge" | "reject", reason: string) => post<LearningRequest>(`/learning-requests/${row.id}/review`, { action, reason, expected_lock_version: row.lock_version }),
   retry: (row: LearningRequest, clientRequestId: string) => post<LearningRequest>(`/learning-requests/${row.id}/retry`, { expected_lock_version: row.lock_version, client_request_id: clientRequestId }),
   revoke: (id: string, expectedStatus: string, reason: string) => post(`/learning-sources/${id}/revoke`, { expected_status: expectedStatus, reason }),
+  prepareValidation: (id: string, body: unknown) => post<LearningRequest>(`/learning-requests/${id}/validations`, body),
+  startValidation: (row: LearningRequest) => post<LearningRequest>(`/learning-requests/${row.id}/validation-start`, { expected_lock_version: row.lock_version }),
+  judgeValidation: (id: string, body: unknown) => post<{ report_hash: string; trial_eligible: boolean }>(`/learning-requests/${id}/judgments`, body),
 };
 
 export function learningError(reason: unknown): string {
@@ -38,6 +49,10 @@ export function learningError(reason: unknown): string {
     learning_request_version_conflict: "请求已变化，请刷新后重新核对。",
     learning_usage_unresolved: "上次调用费用尚未确认，暂时不能重试。",
     invalid_learning_payload: "反馈内容或引用不符合要求，可能包含敏感信息。请修改后再提交。",
+    validation_source_review_stale: "来源已变化，请刷新并重新审查。",
+    validation_project_replica_required: "项目方法的受控验证副本尚未接通，暂时不能执行验证。",
+    validation_fixture_dispatch_not_connected: "当前仅支持你显式提供的新输入，不读取项目目录。",
+    validation_judgment_report_conflict: "验证报告已有新判定，请刷新后重新核对。",
   };
   return reason instanceof ApiError ? labels[reason.code] ?? reason.message : String(reason);
 }

@@ -56,10 +56,18 @@ def request_view(row):
     actions = ()
     if row.status in {"queued", "running"}:
         actions = ("cancel",)
+        if (
+            row.request_kind == "validate"
+            and row.status == "queued"
+            and row.stage == "task_validate"
+        ):
+            actions = ("start_validation", "cancel")
     elif row.status == "ready_for_review":
-        actions = ("review", "reject")
+        actions = ("judge_validation",) if row.request_kind == "validate" else ("review", "reject")
     elif row.status in {"failed", "waiting_budget"}:
         actions = ("retry",)
+    elif row.request_kind == "propose" and row.status == "completed" and row.stage == "reviewed":
+        actions = ("prepare_validation",)
     return LearningRequestView(
         id=row.id,
         workspace_id=row.workspace_id,

@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from evoagent.evals.schema import ValidatorSpec
-from evoagent.privacy.redaction import detect_sensitive
+from evoagent.privacy.redaction import detect_sensitive, redact_value
 
 
 class ValidationCriterion(BaseModel):
@@ -37,10 +37,17 @@ class ValidationCriterion(BaseModel):
             }
         ):
             raise ValueError("runtime completion or safety alone is not business verification")
-        body = json.dumps(self.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
-        if len(body.encode()) > 8192 or detect_sensitive(body):
+        value = self.model_dump(mode="json")
+        body = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        if len(body.encode()) > 8192 or detect_sensitive(body) or redact_value(value) != value:
             raise ValueError("validation criterion exceeds the safe bound")
         return self
+
+
+class ValidationStart(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    expected_lock_version: int = Field(ge=0, strict=True)
 
 
 class PersonalValidationCase(BaseModel):
@@ -59,7 +66,11 @@ class PersonalValidationCase(BaseModel):
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("criterion ids must be unique within each case")
         body = json.dumps(self.public_input, ensure_ascii=False, sort_keys=True)
-        if len(body.encode()) > 32768 or detect_sensitive(body):
+        if (
+            len(body.encode()) > 32768
+            or detect_sensitive(body)
+            or redact_value(self.public_input) != self.public_input
+        ):
             raise ValueError("validation input exceeds the safe bound")
         goal = self.public_input.get("goal")
         if not isinstance(goal, str) or not 1 <= len(goal) <= 8000:

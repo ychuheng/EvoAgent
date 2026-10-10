@@ -35,3 +35,10 @@ def test_duplicate_run_criterion_and_forged_batch_actor_are_rejected():
     for extra in ({"judgments": [item, item]}, {"actor": "user"}):
         with pytest.raises(ValidationError):
             HumanJudgmentSubmission.model_validate({**payload, **extra})
+
+
+def test_nested_observation_credentials_are_rejected_as_structured_fields():
+    with pytest.raises(ValidationError, match="safe evidence"):
+        HumanCriterionJudgment.model_validate(
+            {**claim(), "observed": {"result": [{"password": "noncredential-test-marker"}]}}
+        )

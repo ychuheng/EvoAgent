@@ -258,6 +258,7 @@ class PersonalValidationExecution:
                             "arm": row.arm,
                             "repeat": row.repeat_index,
                             "criterion_id": criterion.criterion_id,
+                            "description": criterion.description,
                             "expected": criterion.expected,
                             "observed": result.evidence if result else None,
                             "verdict": ("pass" if result.passed else "fail")
