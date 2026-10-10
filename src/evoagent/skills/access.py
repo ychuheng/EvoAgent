@@ -1,5 +1,6 @@
 """Shared permission checks for immutable skill bodies and their source graph."""
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
@@ -30,8 +31,22 @@ class SkillAccessError(ValueError):
     """Stable error with no source body in its message."""
 
 
+@dataclass(frozen=True)
+class SkillSourceProof:
+    artifact_id: UUID
+    run_id: UUID
+    content_hash: str
+    uri: str
+    size_bytes: int
+    source_kind: str
+    learning_source_id: UUID | None
+    revocation_epoch: int | None
+
+
 class SkillAccessPolicy:
-    async def check(self, session, version_id, *, workspace_id, project_id=None):
+    async def check(
+        self, session, version_id, *, workspace_id, project_id=None, source_proofs=None
+    ):
         pending, seen = [(version_id, frozenset())], set()
         root = None
         while pending:
@@ -116,6 +131,7 @@ class SkillAccessPolicy:
                     await check_run_references(session, run.id)
                 except ValueError as error:
                     raise SkillAccessError("skill_source_reference_revoked") from error
+                source = None
                 if link.source_kind == "personal":
                     source = await session.get(LearningSourceRecord, link.learning_source_id)
                     if (
@@ -164,4 +180,15 @@ class SkillAccessPolicy:
                         raise SkillAccessError("skill_train_source_invalid")
                 else:
                     raise SkillAccessError("skill_source_kind_invalid")
+                if source_proofs is not None:
+                    source_proofs[artifact.id] = SkillSourceProof(
+                        artifact.id,
+                        run.id,
+                        artifact.content_hash,
+                        artifact.uri,
+                        artifact.size_bytes,
+                        link.source_kind,
+                        source.id if source else None,
+                        source.revocation_epoch if source else None,
+                    )
         return root
