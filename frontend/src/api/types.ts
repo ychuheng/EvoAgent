@@ -8,6 +8,9 @@ export type VersionStatus =
   | "rejected";
 
 export interface SkillSummary {
+  workspace_id?: string;
+  project_id?: string | null;
+  superseded_by_skill_id?: string | null;
   id: string;
   name: string;
   slug: string;
@@ -18,6 +21,7 @@ export interface SkillSummary {
 }
 
 export interface VersionSummary {
+  merge_candidate?: boolean;
   id: string;
   skill_id: string;
   parent_version_id: string | null;
@@ -82,4 +86,20 @@ export interface ReportEnvelope {
 export interface ApiErrorBody {
   error?: { code?: string; message?: string };
   detail?: string | { code?: string; message?: string };
+}
+
+
+export interface MergeProposalBody {
+  workspace_id: string;
+  project_id: string | null;
+  parents: Array<{ skill_id: string; version_id: string; content_hash: string; lock_version: number }>;
+  definition: Record<string, unknown>;
+  reason: string;
+  client_request_id: string;
+}
+
+export interface SupersessionBody {
+  replacement_id: string; replacement_version_id: string; replacement_trial_id: string;
+  expected_lock_version: number; expected_replacement_lock_version: number;
+  expected_trial_lock_version: number; reason: string;
 }

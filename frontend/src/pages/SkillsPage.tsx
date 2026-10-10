@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { SkillDetail, SkillSummary } from "../api/types";
 import { Badge, Empty, ErrorNotice, Loading } from "../components/State";
+import { SkillSupersessionPanel } from "./SkillSupersessionPanel";
+import { SkillMergePanel } from "./SkillMergePanel";
 
 export function SkillsPage() {
   const [skills, setSkills] = useState<SkillSummary[] | null>(null);
@@ -65,11 +67,13 @@ export function SkillsPage() {
               {selected.status === "disabled" && <button onClick={() => status("enable")}>重新启用</button>}
               {selected.status !== "deprecated" && <button className="danger" onClick={() => status("deprecate")}>弃用</button>}
             </div>
+            {selected.status === "enabled" && <SkillSupersessionPanel key={selected.id} skill={selected} onChanged={() => { void choose(selected.id); reload(); }} />}
             <table><thead><tr><th>版本</th><th>状态</th><th>哈希</th></tr></thead><tbody>
               {selected.versions.map((version) => <tr key={version.id}><td>v{version.version}</td><td><Badge value={version.lifecycle_status} /></td><td className="mono">{version.content_hash.slice(0, 18)}…</td></tr>)}
             </tbody></table>
           </>
         )}
+        {skills && <SkillMergePanel skills={skills} onCreated={reload} />}
       </article>
     </section>
   );

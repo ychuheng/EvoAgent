@@ -5,6 +5,7 @@ prepare_cases only freezes inputs; start explicitly enqueues execution.
 Real execution additionally requires a frozen host profile and numeric budgets.
 """
 
+import asyncio
 from typing import Literal
 from uuid import UUID
 
@@ -13,9 +14,12 @@ from sqlalchemy import select
 
 from evoagent.db.models import (
     ArtifactRecord,
+    EvalCaseRecord,
+    EvalRunRecord,
     LearningRequestRecord,
     LearningSourceRecord,
     MaintenanceJobRecord,
+    SkillSourceRecord,
 )
 from evoagent.db.repositories.base import ConcurrentUpdateError
 from evoagent.db.repositories.events import RunEventRepository
@@ -30,7 +34,7 @@ from evoagent.learning.sources import PersonalSourceService
 from evoagent.learning.validation_profiles import real_profile, require_frozen_profile
 from evoagent.learning.validation_schema import ValidationSubmission
 from evoagent.privacy.redaction import detect_sensitive
-from evoagent.skills.access import SkillAccessPolicy
+from evoagent.skills.access import SkillAccessPolicy, source_graph_identity
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.lifecycle import SkillVersionStatus
 from evoagent.skills.trials import TrialScope
@@ -116,12 +120,20 @@ class PersonalValidationService:
                 source.feedback_id,
                 "feedback" if source.feedback_id else "manual",
             )
+            current_proofs = {}
             candidate = await SkillAccessPolicy().check(
                 session,
                 request.candidate_version_id,
                 workspace_id=request.workspace_id,
                 project_id=request.project_id,
+                source_proofs=current_proofs,
             )
+            frozen_provenance = request.policy_snapshot.get("source_input_provenance")
+            if (
+                frozen_provenance is not None
+                and source_graph_identity(current_proofs) != frozen_provenance
+            ):
+                raise LearningError("validation_source_graph_changed")
             if (
                 candidate.lifecycle_status is not SkillVersionStatus.DRAFT
                 or candidate.content_hash != request.frozen_inputs["candidate_content_hash"]
@@ -294,12 +306,63 @@ class PersonalValidationService:
                 source.content_hash,
             )
             max_risk = initial.policy_snapshot["max_source_risk"]
+            lineage_proofs = {}
+            await SkillAccessPolicy().check(
+                session,
+                initial.candidate_version_id,
+                workspace_id=initial.workspace_id,
+                project_id=initial.project_id,
+                source_proofs=lineage_proofs,
+            )
+            if len(lineage_proofs) > 200:
+                raise LearningError("validation_source_graph_budget_exceeded")
+            formal_artifacts = [
+                p.artifact_id for p in lineage_proofs.values() if p.source_kind == "train_eval"
+            ]
+            known_formal_inputs = set()
+            if formal_artifacts:
+                public_inputs = list(
+                    await session.scalars(
+                        select(EvalCaseRecord.public_input)
+                        .join(EvalRunRecord, EvalRunRecord.eval_case_id == EvalCaseRecord.id)
+                        .where(
+                            EvalRunRecord.id.in_(
+                                select(SkillSourceRecord.source_eval_run_id).where(
+                                    SkillSourceRecord.trace_artifact_id.in_(formal_artifacts)
+                                )
+                            )
+                        )
+                        .limit(201)
+                    )
+                )
+                if len(public_inputs) > 200:
+                    raise LearningError("validation_source_graph_budget_exceeded")
+                known_formal_inputs = {
+                    content_hash(item["inputs"]) for item in public_inputs if item.get("inputs")
+                }
         # Whole-source current-policy review happens outside a database lock;
         # admission rechecks the source identity and authorization below.
         sources = PersonalSourceService(
             self.factory, artifact_store=self.store, max_source_risk=max_risk
         )
-        evidence = await sources.read_frozen(source_id, expected_revocation_epoch=source_epoch)
+        try:
+            async with asyncio.timeout(10):
+                evidence = await sources.read_frozen(
+                    source_id, expected_revocation_epoch=source_epoch
+                )
+                lineage_input_hashes = {item.get("hash") for item in evidence.input_refs}
+                for proof in lineage_proofs.values():
+                    if proof.source_kind != "personal" or proof.learning_source_id == source_id:
+                        continue
+                    ancestor_evidence = await sources.read_frozen(
+                        proof.learning_source_id,
+                        expected_revocation_epoch=proof.revocation_epoch,
+                    )
+                    lineage_input_hashes.update(
+                        item.get("hash") for item in ancestor_evidence.input_refs
+                    )
+        except TimeoutError as error:
+            raise LearningError("validation_source_scan_budget_exceeded") from error
         if payload.reviewed_source_hash != source_hash:
             raise LearningError("validation_source_review_stale")
         fixture_manifests = {}
@@ -320,7 +383,7 @@ class PersonalValidationService:
                 raise LearningError("validation_business_judge_required")
         if sum(len(case.criteria) for case in payload.cases) * payload.repeats * 2 > 100:
             raise LearningError("validation_report_item_bound")
-        input_hashes = {item.get("hash") for item in evidence.input_refs}
+        input_hashes = lineage_input_hashes | known_formal_inputs
         case_fingerprints = {
             case.case_key: validation_input_fingerprint(case, fixture_manifests)
             for case in payload.cases
@@ -394,12 +457,16 @@ class PersonalValidationService:
                 source.feedback_id,
                 "feedback" if source.feedback_id else "manual",
             )
+            current_proofs = {}
             candidate = await SkillAccessPolicy().check(
                 session,
                 parent.candidate_version_id,
                 workspace_id=parent.workspace_id,
                 project_id=parent.project_id,
+                source_proofs=current_proofs,
             )
+            if current_proofs != lineage_proofs:
+                raise LearningError("validation_source_graph_changed")
             if candidate.lifecycle_status is not SkillVersionStatus.DRAFT:
                 raise LearningError("validation_candidate_not_draft")
             if (
@@ -423,6 +490,7 @@ class PersonalValidationService:
                     "reason": payload.independence_reason,
                 },
                 "independence_scope": "user_review_plus_exact_known_input_hashes",
+                "source_input_provenance": source_graph_identity(lineage_proofs),
             }
             if parent.project_id is not None:
                 policy_snapshot.update(

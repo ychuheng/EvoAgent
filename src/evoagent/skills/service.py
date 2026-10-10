@@ -68,6 +68,18 @@ class SkillService:
         self._session_factory = session_factory
         self._validator = validator
 
+    async def merge(self, payload, *, settings):
+        from evoagent.skills.merging import SkillMergeService
+
+        return await SkillMergeService(self._session_factory, self._validator, settings).propose(
+            payload
+        )
+
+    async def deprecate_superseded(self, skill_id, payload):
+        from evoagent.skills.supersession import SkillSupersessionService
+
+        return await SkillSupersessionService(self._session_factory).deprecate(skill_id, payload)
+
     async def list_skills(self) -> tuple[dict[str, Any], ...]:
         async with self._session_factory() as session:
             skills = tuple(await session.scalars(select(SkillRecord).order_by(SkillRecord.slug)))
@@ -479,6 +491,11 @@ class SkillService:
             "id": str(skill.id),
             "name": skill.name,
             "slug": skill.slug,
+            "workspace_id": str(skill.workspace_id),
+            "project_id": str(skill.project_id) if skill.project_id else None,
+            "superseded_by_skill_id": str(skill.superseded_by_skill_id)
+            if skill.superseded_by_skill_id
+            else None,
             "description": skill.description,
             "status": skill.status.value,
             "active_version_id": (
@@ -499,6 +516,7 @@ class SkillService:
             ),
             "version": version.version,
             "schema_version": version.schema_version,
+            "merge_candidate": version.extraction_key.startswith("merge:"),
             "content_hash": version.content_hash,
             "lifecycle_status": version.lifecycle_status.value,
             "evaluation_report_hash": version.evaluation_report_hash,

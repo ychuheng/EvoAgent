@@ -520,12 +520,14 @@ class LearningService:
                 ):
                     raise LearningError("candidate_identity_invalid")
                 SkillDefinition.model_validate(candidate.definition)
+                source_proofs = {}
                 try:
                     await SkillAccessPolicy().check(
                         session,
                         candidate.id,
                         workspace_id=row.workspace_id,
                         project_id=row.project_id,
+                        source_proofs=source_proofs,
                     )
                 except SkillAccessError as error:
                     raise LearningError("candidate_source_graph_invalid") from error
@@ -559,6 +561,23 @@ class LearningService:
                     source.feedback_id,
                     "feedback" if source.feedback_id else "manual",
                 )
+                # Merge/revision ancestors can have additional personal origins.
+                # Acknowledgment checks their consent under the same workspace
+                # lock, without reading storage or starting model calls.
+                checked = {source.id}
+                for proof in source_proofs.values():
+                    if proof.source_kind != "personal" or proof.learning_source_id in checked:
+                        continue
+                    dependency = await session.get(LearningSourceRecord, proof.learning_source_id)
+                    await PersonalSourceService(
+                        self.factory, max_source_risk=row.policy_snapshot["max_source_risk"]
+                    ).check_in_session(
+                        session,
+                        dependency.run_id,
+                        dependency.feedback_id,
+                        "feedback" if dependency.feedback_id else "manual",
+                    )
+                    checked.add(dependency.id)
             row.status = "completed" if action == "acknowledge" else "rejected"
             row.stage = "reviewed"
             row.lock_version += 1

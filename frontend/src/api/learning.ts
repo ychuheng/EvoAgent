@@ -106,6 +106,22 @@ export const learning = {
 
 export function learningError(reason: unknown): string {
   const labels: Record<string, string> = {
+    merge_parent_version_conflict: "来源方法版本已变化，请重新读取并核对。",
+    merge_scope_mismatch: "只能合并同一工作区、相同作用范围的方法。",
+    merge_parent_source_invalid: "某条来源方法已不可用，请先核对来源或授权。",
+    merge_source_verification_failed: "来源未通过当前安全复查，本次未创建合并候选。",
+    merge_new_slug_required: "合并方法名称已存在，请使用新的名称。",
+    candidate_source_graph_invalid: "候选的来源或父方法已失效，暂不能确认。",
+    validation_input_reuses_source: "验证输入曾用于学习，请选择其他独立输入。",
+    validation_source_graph_changed: "验证依赖的来源已变化，请重新冻结输入。",
+    supersession_version_conflict: "方法版本已变化，请重新检查替换条件。",
+    supersession_trial_version_conflict: "试用状态已变化，请刷新后重新检查。",
+    supersession_healthy_replacement_required: "替换方法的健康状态尚未核实或已触发挂起，请先核对使用证据。",
+    supersession_verified_validation_required: "替换方法尚未通过独立验证，本次保留旧方法。",
+    supersession_parent_not_in_merge: "当前方法不是该合并候选的来源，不能用它替换。",
+    supersession_active_same_scope_trial_required: "需要当前同范围的有效替换试用。",
+    supersession_source_invalid: "替换方法的来源已失效，本次保留旧方法。",
+    supersession_would_revoke_replacement: "弃用会影响替换方法的历史引用，本次操作已撤回。",
     observation_evidence_check_denied: "产物未通过当前安全检查，不能用于 Skill 判定。请核对产物或使用其他证据。",
     learning_disabled: "方法学习已关闭，本次没有保存学习请求。可取消勾选后提交普通反馈。",
     learning_policy_off: "当前工作区未开启方法学习。请先在个人学习页设置策略。",

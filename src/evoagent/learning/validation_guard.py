@@ -23,7 +23,7 @@ from evoagent.learning.sources import PersonalSourceService
 from evoagent.learning.validation_profiles import require_frozen_profile
 from evoagent.learning.validation_schema import PersonalValidationCase
 from evoagent.memory.schema import MemoryError
-from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
+from evoagent.skills.access import SkillAccessError, SkillAccessPolicy, source_graph_identity
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.lifecycle import SkillVersionStatus
 
@@ -177,12 +177,17 @@ class PersonalValidationRunGuard:
         ):
             raise MemoryError("personal_validation_identity_invalid")
         try:
+            lineage_proofs = {}
             candidate = await SkillAccessPolicy().check(
                 session,
                 request.candidate_version_id,
                 workspace_id=request.workspace_id,
                 project_id=request.project_id,
+                source_proofs=lineage_proofs,
             )
+            expected = request.policy_snapshot.get("source_input_provenance")
+            if expected is not None and source_graph_identity(lineage_proofs) != expected:
+                raise SkillAccessError("validation_source_graph_changed")
             if version_id is not None and version_id != request.candidate_version_id:
                 comparison = await SkillAccessPolicy().check(
                     session,

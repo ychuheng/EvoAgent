@@ -10,9 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from evoagent.providers.base import ProviderError
 from evoagent.skills.extraction import CandidateGenerator, SkillExtractionService
 from evoagent.skills.lifecycle import SkillStatus
+from evoagent.skills.merging import MergeProposal
 from evoagent.skills.provenance import ProvenanceService
 from evoagent.skills.schema import SkillDefinition
 from evoagent.skills.service import PromotionResult, SkillService
+from evoagent.skills.supersession import SupersessionSubmission
 from evoagent.skills.validation import SkillDefinitionValidator
 from evoagent.tools.registry import ToolRegistry
 from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
@@ -76,14 +78,14 @@ def _registry(request: Request) -> ToolRegistry:
     return request.app.state.skill_tool_registry or ToolRegistry()
 
 
-def _validator(request: Request) -> SkillDefinitionValidator:
+def _validator(request: Request, *, personal: bool = False) -> SkillDefinitionValidator:
     settings = request.app.state.settings
     return SkillDefinitionValidator(
         _registry(request),
         allowed_tools=frozenset(settings.skill_allowed_tools),
         max_steps=settings.skill_max_steps,
         max_risk=settings.skill_max_effective_risk,
-        supported_schema_version=settings.skill_schema_version,
+        supported_schema_version=2 if personal else settings.skill_schema_version,
     )
 
 
@@ -179,9 +181,26 @@ async def list_skills(request: Request) -> tuple[dict[str, Any], ...]:
     return await _service(request).list_skills()
 
 
+@router.post("/merge-proposals", status_code=status.HTTP_202_ACCEPTED)
+async def propose_merge(payload: MergeProposal, request: Request):
+    from evoagent.api.routes.learning import respond
+
+    service = SkillService(
+        request.app.state.database.session_factory, _validator(request, personal=True)
+    )
+    return await respond(service.merge(payload, settings=request.app.state.settings))
+
+
 @router.get("/{skill_id}")
 async def get_skill(skill_id: UUID, request: Request) -> dict[str, Any]:
     return await _service(request).get_skill(skill_id)
+
+
+@router.post("/{skill_id}/supersede")
+async def supersede_skill(skill_id: UUID, payload: SupersessionSubmission, request: Request):
+    from evoagent.api.routes.learning import respond
+
+    return await respond(_service(request).deprecate_superseded(skill_id, payload))
 
 
 @router.post("/{skill_id}/versions", status_code=status.HTTP_201_CREATED)

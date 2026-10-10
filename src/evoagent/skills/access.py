@@ -11,6 +11,7 @@ from evoagent.db.models import (
     EvalDatasetRecord,
     EvalExperimentRecord,
     EvalRunRecord,
+    LearningRequestRecord,
     LearningSourceRecord,
     ProjectRecord,
     RunRecord,
@@ -43,14 +44,32 @@ class SkillSourceProof:
     revocation_epoch: int | None
 
 
+def source_graph_identity(proofs):
+    """Safe immutable evidence metadata; never source bodies or storage URIs."""
+    return [
+        {
+            "artifact_id": str(proof.artifact_id),
+            "run_id": str(proof.run_id),
+            "content_hash": proof.content_hash,
+            "size_bytes": proof.size_bytes,
+            "source_kind": proof.source_kind,
+            "learning_source_id": str(proof.learning_source_id)
+            if proof.learning_source_id
+            else None,
+            "revocation_epoch": proof.revocation_epoch,
+        }
+        for proof in sorted(proofs.values(), key=lambda item: str(item.artifact_id))
+    ]
+
+
 class SkillAccessPolicy:
     async def check(
         self, session, version_id, *, workspace_id, project_id=None, source_proofs=None
     ):
-        pending, seen = [(version_id, frozenset())], set()
+        pending, seen = [(version_id, frozenset(), frozenset())], set()
         root = None
         while pending:
-            current, ancestors = pending.pop()
+            current, ancestors, supersession_path = pending.pop()
             if current in ancestors:
                 raise SkillAccessError("skill_source_graph_cycle")
             if current in seen:
@@ -69,7 +88,12 @@ class SkillAccessPolicy:
                 raise SkillAccessError("skill_scope_or_hash_invalid")
             # A retired pointer is compatible with a frozen lineage; explicit
             # disabling/rejection is revocation and applies to every ancestor.
-            if skill.status is not SkillStatus.ENABLED or (
+            superseded_ancestor = (
+                bool(ancestors)
+                and skill.status is SkillStatus.DEPRECATED
+                and skill.superseded_by_skill_id in supersession_path
+            )
+            if (skill.status is not SkillStatus.ENABLED and not superseded_ancestor) or (
                 version.lifecycle_status is SkillVersionStatus.REJECTED
             ):
                 raise SkillAccessError("skill_source_version_revoked")
@@ -86,11 +110,68 @@ class SkillAccessPolicy:
                 raise SkillAccessError("skill_sensitive_content")
             if root is None:
                 root = version
+            if version.extraction_key.startswith("merge:"):
+                # Only host-created merge roots use this namespace; ordinary
+                # versions incur no additional request lookup.
+                from evoagent.learning.repository import LearningRepository
+                from evoagent.skills.merging import MergeParent, merge_extraction_key
+
+                requests = list(
+                    await session.scalars(
+                        select(LearningRequestRecord)
+                        .where(
+                            LearningRequestRecord.candidate_version_id == version.id,
+                            LearningRequestRecord.request_kind == "propose",
+                            LearningRequestRecord.trigger == "merge",
+                        )
+                        .limit(2)
+                    )
+                )
+                if len(requests) != 1:
+                    raise SkillAccessError("skill_merge_lineage_missing")
+                request = requests[0]
+                if (
+                    request.status not in {"ready_for_review", "completed"}
+                    or request.workspace_id != skill.workspace_id
+                    or request.project_id != skill.project_id
+                    or request.policy_snapshot.get("merge_contract") != "merge:v1"
+                    or content_hash(request.policy_snapshot) != request.policy_hash
+                    or request.frozen_inputs.get("policy_hash") != request.policy_hash
+                    or request.source_key
+                    != LearningRepository.build_source_key("propose", request.frozen_inputs)
+                    or request.policy_snapshot.get("definition_hash") != version.content_hash
+                    or version.extraction_key
+                    != merge_extraction_key(request.source_key, version.content_hash)
+                ):
+                    raise SkillAccessError("skill_merge_lineage_invalid")
+                try:
+                    parents = [
+                        MergeParent.model_validate(item)
+                        for item in request.policy_snapshot["lineage"]
+                    ]
+                    if not 2 <= len(parents) <= 4 or len({p.skill_id for p in parents}) != len(
+                        parents
+                    ):
+                        raise ValueError("invalid lineage cardinality")
+                    for parent_ref in parents:
+                        parent = await session.get(SkillVersionRecord, parent_ref.version_id)
+                        if (
+                            parent is None
+                            or parent.skill_id != parent_ref.skill_id
+                            or parent.content_hash != parent_ref.content_hash
+                        ):
+                            raise ValueError("invalid lineage identity")
+                        pending.append(
+                            (parent.id, ancestors | {current}, supersession_path | {skill.id})
+                        )
+                except (ValueError, TypeError, KeyError) as error:
+                    raise SkillAccessError("skill_merge_lineage_invalid") from error
+                supersession_path = supersession_path | {skill.id}
             if version.parent_version_id is not None:
                 parent = await session.get(SkillVersionRecord, version.parent_version_id)
                 if parent is None or parent.skill_id != version.skill_id:
                     raise SkillAccessError("skill_revision_parent_invalid")
-                pending.append((parent.id, ancestors | {current}))
+                pending.append((parent.id, ancestors | {current}, supersession_path))
             links = list(
                 await session.scalars(
                     select(SkillSourceRecord)
@@ -146,7 +227,7 @@ class SkillAccessPolicy:
                         raise SkillAccessError("skill_personal_source_revoked")
                     try:
                         pending.extend(
-                            (UUID(value), ancestors | {current})
+                            (UUID(value), ancestors | {current}, supersession_path)
                             for value in source.parent_skill_versions
                         )
                     except (ValueError, TypeError) as error:
