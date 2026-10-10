@@ -317,7 +317,11 @@ async def test_selection_evidence_migration_keeps_legacy_and_refuses_loss(tmp_pa
         skill = SkillRecord(slug="legacy", name="legacy", description="fixture")
         session.add_all([chat, skill])
         await session.flush()
-        task = TaskRecord(session_id=chat.id, goal="legacy")
+        task_id = await session.scalar(
+            TaskRecord.__table__.insert()
+            .values(session_id=chat.id, goal="legacy")
+            .returning(TaskRecord.id)
+        )
         version = SkillVersionRecord(
             skill_id=skill.id,
             version=1,
@@ -326,9 +330,9 @@ async def test_selection_evidence_migration_keeps_legacy_and_refuses_loss(tmp_pa
             content_hash=digest,
             extraction_key=digest,
         )
-        session.add_all([task, version])
+        session.add(version)
         await session.flush()
-        run = RunRecord(task_id=task.id, provider="mock", model="mock")
+        run = RunRecord(task_id=task_id, provider="mock", model="mock")
         session.add(run)
         await session.flush()
         for rank in [1, 2]:
@@ -380,6 +384,49 @@ async def test_selection_evidence_migration_keeps_legacy_and_refuses_loss(tmp_pa
             )
         )
     await asyncio.to_thread(command.downgrade, config, "20261010_0031")
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.check, config)
+    await db.dispose()
+
+
+async def test_task_selection_contract_migration_preserves_queued_history(tmp_path):
+    from evoagent.db.models import SessionRecord, TaskRecord
+    from evoagent.db.session import Database
+
+    url = f"sqlite+aiosqlite:///{tmp_path / 'selection-routing.db'}"
+    config = alembic_config(url)
+    await asyncio.to_thread(command.upgrade, config, "20261010_0032")
+    db = Database(url)
+    async with db.session_factory() as session:
+        chat = SessionRecord(title="old queued")
+        session.add(chat)
+        await session.flush()
+        task_id = await session.scalar(
+            TaskRecord.__table__.insert()
+            .values(session_id=chat.id, goal="old queued", status="queued")
+            .returning(TaskRecord.id)
+        )
+        await session.commit()
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with db.session_factory() as session:
+        task = await session.get(TaskRecord, task_id)
+        assert task.selection_contract_version is None and str(task.status) == "queued"
+        task.selection_contract_version = 3
+        with pytest.raises(ValueError, match="immutable"):
+            await session.commit()
+        await session.rollback()
+        # Synthetic routing fixture only, no production task is retrofitted.
+        await session.execute(
+            TaskRecord.__table__.update()
+            .where(TaskRecord.id == task_id)
+            .values(selection_contract_version=3)
+        )
+        await session.commit()
+    with pytest.raises(RuntimeError, match="tasks require v3 selection routing"):
+        await asyncio.to_thread(command.downgrade, config, "20261010_0032")
+    async with db.engine.begin() as connection:
+        await connection.execute(text("UPDATE tasks SET selection_contract_version=NULL"))
+    await asyncio.to_thread(command.downgrade, config, "20261010_0032")
     await asyncio.to_thread(command.upgrade, config, "head")
     await asyncio.to_thread(command.check, config)
     await db.dispose()
