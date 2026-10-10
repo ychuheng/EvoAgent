@@ -376,3 +376,56 @@ async def test_formal_binding_checks_are_per_request_not_per_stream_delta(fencin
         assert checks == [(lease.task_id, lease.run_id)]
     finally:
         await sink.aclose()
+
+
+async def test_runner_uses_frozen_rendered_text_without_invoking_renderer(
+    fencing_db, tmp_path, monkeypatch
+):
+    from evoagent.core.models import FinishReason, Message, MessageRole, ModelResponse
+    from evoagent.providers.mock import MockProvider
+    from evoagent.runtime.persistent_runner import PersistentAgentRunner
+    from evoagent.skills.rendering import SkillContextRenderer
+    from evoagent.tasks.state_machine import PersistentRunStatus
+
+    aggregate, _ = await setup(fencing_db, "data")
+    registry = ToolRegistry([CalculatorTool()])
+    settings = Settings(
+        workspace=tmp_path,
+        retrieval_backend="lexical",
+        memory_retrieval_enabled=True,
+        retrieval_min_lexical_score=0.001,
+    )
+    manager = JobLeaseManager(fencing_db.session_factory, lease_seconds=60)
+    lease = await manager.claim_next("frozen-text")
+    resolver = ContextResolver(
+        fencing_db.session_factory, settings, registry, LeaseGuard(lease), ContextBuilder()
+    )
+    frozen = await resolver.resolve(aggregate.task, aggregate.run)
+    assert frozen.skill_text and frozen.skills
+
+    def unavailable(*_args, **_kwargs):
+        raise AssertionError("frozen context must not invoke the renderer")
+
+    monkeypatch.setattr(SkillContextRenderer, "render", unavailable)
+    provider = MockProvider(
+        [
+            ModelResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="finished"),
+                finish_reason=FinishReason.STOP,
+            )
+        ]
+    )
+    runner = PersistentAgentRunner(
+        settings=settings,
+        session_factory=fencing_db.session_factory,
+        context_builder=ContextBuilder(),
+        provider=provider,
+        registry=registry,
+    )
+    result = await runner.handle(lease)
+    assert result.status == PersistentRunStatus.COMPLETED, result.error_code
+    assert len(provider.requests) == 1
+    assert any(
+        frozen.skill_text in (message.content or "") for message in provider.requests[0].messages
+    )
+    await manager.finalize(lease, result)

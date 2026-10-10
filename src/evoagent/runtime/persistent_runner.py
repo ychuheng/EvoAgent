@@ -144,11 +144,15 @@ class PersistentAgentRunner:
             ).select(run.id, task.goal)
         )
         skill_context = (
-            "\n\n".join(
-                SkillContextRenderer(renderer_version).render(item.document.definition)
-                for item in matches
+            resolved.skill_text
+            if resolved
+            else (
+                "\n\n".join(
+                    SkillContextRenderer(renderer_version).render(item.document.definition)
+                    for item in matches
+                )
+                or None
             )
-            or None
         )
         selected = matches[0].document if matches else None
         skill_context_hash = (
