@@ -17,7 +17,7 @@ export function LearningPage() {
   const [policy, setPolicy] = useState<LearningPolicy | null>(null);
   const [rows, setRows] = useState<LearningRequest[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [mode, setMode] = useState<"off" | "manual">("off");
+  const [mode, setMode] = useState<"off" | "manual" | "suggest">("off");
   const [daily, setDaily] = useState("");
   const [perRequest, setPerRequest] = useState("");
   const [reasons, setReasons] = useState<Record<string, string>>({});
@@ -32,7 +32,7 @@ export function LearningPage() {
     setRows([]); setPolicy(null); setError(""); setReasons({}); setRetryKeys({}); setCursor(null); setDetails({}); setCandidateViews({});
     void Promise.all([learning.policy(workspace), learning.list(workspace)]).then(([nextPolicy, page]) => {
       if (!active) return;
-      setPolicy(nextPolicy); setMode(nextPolicy.mode === "off" ? "off" : "manual");
+      setPolicy(nextPolicy); setMode(nextPolicy.mode);
       setDaily(nextPolicy.daily_limit_micros === null ? "" : String(nextPolicy.daily_limit_micros / 1_000_000));
       setPerRequest(nextPolicy.request_limit_micros === null ? "" : String(nextPolicy.request_limit_micros / 1_000_000));
       setRows(page.items); setCursor(page.next_cursor);
@@ -67,12 +67,12 @@ export function LearningPage() {
     <p>任务结束后提交反馈或记成方法，生成候选供审查。确认候选不会直接启用 Skill；验证和试用需要各自的证据与操作。</p>
     <label>学习 Workspace<select aria-label="学习 Workspace" value={workspace} disabled={busy} onChange={event => setWorkspace(event.target.value)}>{workspaces.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
     {policy && <section className="chat-evidence" aria-label="学习策略"><h3>工作区学习策略</h3>
-      <p>服务学习开关：{policy.learning_enabled ? "已开启" : "已关闭"}。自动发现候选尚未开放。</p>
-      <label>学习模式<select aria-label="学习模式" value={mode} onChange={event => setMode(event.target.value as "off" | "manual")}><option value="off">关闭</option><option value="manual">仅显式申请</option></select></label>
+      <p>服务学习开关：{policy.learning_enabled ? "已开启" : "已关闭"}。后台建议需要选择对应模式并具备验收证据。</p>
+      <label>学习模式<select aria-label="学习模式" value={mode} onChange={event => setMode(event.target.value as "off" | "manual" | "suggest")}><option value="off">关闭</option><option value="manual">仅显式申请</option><option value="suggest">后台建议（需要明确验收证据）</option></select></label>
       <label>每日学习预算（元）<input aria-label="每日学习预算" type="number" min="0" step="0.000001" value={daily} onChange={event => setDaily(event.target.value)} /></label>
       <label>每次申请预算（元）<input aria-label="每次学习预算" type="number" min="0" step="0.000001" value={perRequest} onChange={event => setPerRequest(event.target.value)} /></label>
       <p>留空不授权付费学习；学习额度也受总预算限制。</p>
-      <button type="button" disabled={busy} onClick={() => void savePolicy()}>保存学习策略</button>
+      <p>后台建议仅扫描终结的个人任务，遵守每日候选数量、冷却期和费用额度；只生成待审方法，不会自动启用。</p><button type="button" disabled={busy} onClick={() => void savePolicy()}>保存学习策略</button>
     </section>}
     <button type="button" disabled={busy} onClick={() => void act(refresh, false)}>刷新学习请求</button>
     {!rows.length && <p>当前没有学习请求。</p>}

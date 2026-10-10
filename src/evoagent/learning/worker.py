@@ -148,6 +148,8 @@ class LearningJobHandler:
         policy = await session.get(LearningPolicyRecord, request.workspace_id)
         if not self.enabled or policy is None or policy.mode == "off":
             raise LearningError("learning_policy_off")
+        if request.trigger == "discover" and policy.mode != "suggest":
+            raise LearningError("learning_discovery_not_authorized")
         sources.max_source_risk = min(sources.max_source_risk, policy.max_source_risk)
         await sources.check_in_session(
             session,
@@ -560,7 +562,9 @@ class LearningJobHandler:
                 await session.commit()
                 return  # an expired owner cannot change either request or job
             request.status = (
-                "waiting_budget"
+                "waiting_disabled"
+                if code == "learning_discovery_not_authorized"
+                else "waiting_budget"
                 if code
                 in {
                     "learning_waiting_budget",

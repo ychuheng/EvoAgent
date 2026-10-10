@@ -603,6 +603,18 @@ async def run_maintenance_worker():
                     ),
                 ]
                 if settings.learning_enabled:
+                    from evoagent.learning.configuration import candidate_configuration
+                    from evoagent.learning.discovery import CandidateDiscoveryService
+                    from evoagent.learning.service import LearningService
+
+                    discovery = CandidateDiscoveryService(
+                        LearningService(
+                            database.session_factory,
+                            learning_enabled=True,
+                            generator_configuration=candidate_configuration(settings),
+                        )
+                    )
+                    lanes.append(asyncio.create_task(discovery.periodic_discovery()))
                     lanes.append(asyncio.create_task(learning_handler.periodic_reconciliation()))
                     learning = MaintenanceWorker(
                         database.session_factory,

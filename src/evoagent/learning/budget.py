@@ -228,6 +228,8 @@ class LearningBudgetService:
             policy = await session.get(LearningPolicyRecord, request.workspace_id)
             if policy is None or policy.mode == "off" or not self.settings.learning_enabled:
                 raise LearningError("learning_policy_off")
+            if request.trigger == "discover" and policy.mode != "suggest":
+                raise LearningError("learning_discovery_not_authorized")
             from evoagent.db.models import ArtifactRecord, LearningSourceRecord
 
             source = await session.scalar(

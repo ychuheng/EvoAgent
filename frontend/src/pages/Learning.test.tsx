@@ -73,3 +73,27 @@ test("候选确认调用学习审查，不调用版本启用；分页保留既�
   await waitFor(() => expect(calls.some(url => url.endsWith("/learning-requests/request-1/review"))).toBe(true));
   expect(calls.some(url => url.includes("/approve") || url.includes("/trials"))).toBe(false);
 });
+
+
+test("后台建议模式须用户保存策略，不自动启用或执行验证", async () => {
+  const updates: Record<string, unknown>[] = [];
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push(url);
+    if (url.endsWith("/workspaces")) return json([{ id: "workspace", name: "test" }]);
+    if (url.includes("learning-policy")) {
+      if (init?.method === "PUT") updates.push(JSON.parse(String(init.body)));
+      return json(updates.length ? { ...policy, mode: "suggest", lock_version: 2 } : policy);
+    }
+    return json({ items: [], next_cursor: null });
+  }));
+  render(<LearningPage />);
+  const mode = await screen.findByLabelText("学习模式");
+  expect(mode).toHaveValue("manual");
+  fireEvent.change(mode, { target: { value: "suggest" } });
+  expect(updates).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "保存学习策略" }));
+  await waitFor(() => expect(updates).toHaveLength(1));
+  expect(updates[0].mode).toBe("suggest");
+  expect(calls.some(url => url.includes("/trial") || url.includes("validation-start"))).toBe(false);
+});

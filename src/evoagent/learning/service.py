@@ -64,7 +64,7 @@ def request_view(row):
             actions = ("start_validation", "cancel")
     elif row.status == "ready_for_review":
         actions = ("judge_validation",) if row.request_kind == "validate" else ("review", "reject")
-    elif row.status in {"failed", "waiting_budget"}:
+    elif row.status in {"failed", "waiting_budget", "waiting_disabled"}:
         actions = ("retry",)
     elif row.request_kind == "propose" and row.status == "completed" and row.stage == "reviewed":
         actions = ("prepare_validation",)
@@ -196,7 +196,9 @@ class LearningService:
             await session.commit()
             return result
 
-    async def _append_proposal(self, session, run_id, payload, *, trigger="manual"):
+    async def _append_proposal(
+        self, session, run_id, payload, *, trigger="manual", discovery_fingerprint=None
+    ):
         run, task, chat = await self._scope(session, run_id)
         body = {
             "run_id": str(run_id),
@@ -222,6 +224,12 @@ class LearningService:
         policy = await self._policy(session, chat.workspace_id)
         if policy["mode"] == "off":
             raise LearningError("learning_policy_off")
+        if trigger == "discover":
+            from evoagent.learning.discovery import check_discovery_limits
+
+            await check_discovery_limits(
+                session, chat.workspace_id, task, policy, discovery_fingerprint
+            )
         source_service = PersonalSourceService(
             self.factory, max_source_risk=policy["max_source_risk"]
         )
@@ -270,6 +278,8 @@ class LearningService:
                 else {}
             ),
         }
+        if trigger == "discover":
+            snapshot["discovery_fingerprint"] = discovery_fingerprint
         source_revision = content_hash(
             {
                 "run_id": str(run_id),
@@ -550,7 +560,7 @@ class LearningService:
                 return request_view(row)
             if row.lock_version != expected_lock_version:
                 raise ConcurrentUpdateError("learning_request_version_conflict")
-            if row.status not in {"failed", "waiting_budget"}:
+            if row.status not in {"failed", "waiting_budget", "waiting_disabled"}:
                 raise LearningError("learning_request_not_retryable")
             if await session.scalar(
                 select(LearningSpendReservationRecord.id)
@@ -564,6 +574,8 @@ class LearningService:
             policy = await self._policy(session, row.workspace_id)
             if policy["mode"] == "off":
                 raise LearningError("learning_policy_off")
+            if row.trigger == "discover" and policy["mode"] != "suggest":
+                raise LearningError("learning_discovery_not_authorized")
             source_service = PersonalSourceService(
                 self.factory,
                 max_source_risk=min(

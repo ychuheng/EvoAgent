@@ -148,7 +148,7 @@ async def get_policy(
     return {
         **result,
         "learning_enabled": settings.learning_enabled,
-        "automatic_discovery_available": False,
+        "automatic_discovery_available": settings.learning_enabled,
         "personal_validation_available": settings.learning_enabled,
         "personal_validation_provider": "mock",
         "personal_real_validation_available": real_available,
