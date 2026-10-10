@@ -36,7 +36,7 @@ class SkillUsageReports:
 
     @staticmethod
     def _selected(skill_id, scope, since):
-        return (
+        query = (
             select(RunSkillSelectionRecord.run_id)
             .join(
                 SkillVersionRecord,
@@ -48,12 +48,17 @@ class SkillUsageReports:
             .where(
                 SkillVersionRecord.skill_id == skill_id,
                 SessionRecord.workspace_id == scope.workspace_id,
-                TaskRecord.project_id == scope.project_id,
                 RunRecord.data_role == "personal",
                 RunRecord.created_at >= since,
                 RunSkillSelectionRecord.selection_policy_version == "skill-selector-v1",
             )
         )
+
+        # Workspace-wide methods are selected in project tasks too. A supplied
+        # project narrows statistics; None denotes the whole workspace here.
+        if scope.project_id is not None:
+            query = query.where(TaskRecord.project_id == scope.project_id)
+        return query
 
     async def summarize(self, skill_id, scope, since=None):
         if since is not None and (since.tzinfo is None or since.utcoffset() is None):
@@ -164,10 +169,11 @@ class SkillUsageReports:
                 .where(
                     SkillObservationRecord.version_id == version_id,
                     SessionRecord.workspace_id == scope.workspace_id,
-                    TaskRecord.project_id == scope.project_id,
                     RunRecord.data_role == "personal",
                 )
             )
+            if scope.project_id is not None:
+                query = query.where(TaskRecord.project_id == scope.project_id)
             if cursor is not None:
                 query = query.where(SkillObservationRecord.id > cursor)
             rows = list(

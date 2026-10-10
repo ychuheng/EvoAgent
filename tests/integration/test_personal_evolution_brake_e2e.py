@@ -191,6 +191,30 @@ async def test_actual_personal_use_feedback_and_three_failures_stop_next_adoptio
         ).definition == original_definition
     assert len(model_requests) == 4 and all(len(item.requests) == 2 for item in model_requests)
 
+    # A workspace method is used in multiple projects. Workspace reports must
+    # include those uses; an explicit project remains a narrower query.
+    from evoagent.skills.trials import TrialScope
+
+    usage = SkillUsageService(db.session_factory)
+    workspace_scope = TrialScope(trial.workspace_id)
+    workspace_report = await usage.summarize(trial.skill_id, workspace_scope)
+    project_report = await usage.summarize(
+        trial.skill_id, TrialScope(trial.workspace_id, project.id)
+    )
+    assert workspace_report["selected_count"] == 4
+    assert workspace_report["projected_count"] == 4
+    assert project_report["selected_count"] == 3
+    assert project_report["skill_related_failures"] == 3
+    workspace_evidence = await usage.list_evidence(trial.version_id, workspace_scope)
+    project_evidence = await usage.list_evidence(
+        trial.version_id, TrialScope(trial.workspace_id, project.id)
+    )
+    assert set(runs) <= {item["run_id"] for item in workspace_evidence["items"]}
+    assert {item["run_id"] for item in project_evidence["items"]} == set(runs)
+    signal = await usage.suggest_revision(trial.version_id, workspace_scope)
+    assert signal is not None and signal["independent_input_count"] == 3
+    assert signal["requires_explicit_submission"] and not signal["automatically_queued"]
+
     # A safety suspension must not remove the ability to request a traceable
     # correction; explicit learning consent creates a new immutable revision.
     from uuid import UUID
