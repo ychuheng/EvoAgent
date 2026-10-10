@@ -214,11 +214,15 @@ async def test_feedback_consent_migration_keeps_history_unconsented(tmp_path):
         chat = SessionRecord(title="old")
         session.add(chat)
         await session.flush()
-        task = TaskRecord(session_id=chat.id, goal="old")
-        session.add(task)
-        await session.flush()
+        # Core INSERT omits later nullable columns (e.g. family) when seeding
+        # a genuinely old schema; the current ORM would explicitly send NULL.
+        task_id = await session.scalar(
+            TaskRecord.__table__.insert()
+            .values(session_id=chat.id, goal="old")
+            .returning(TaskRecord.id)
+        )
         run = RunRecord(
-            task_id=task.id,
+            task_id=task_id,
             provider="mock",
             model="mock",
             data_role="personal",
@@ -259,4 +263,34 @@ async def test_feedback_consent_migration_keeps_history_unconsented(tmp_path):
         columns = await connection.run_sync(lambda conn: inspect(conn).get_columns("run_feedback"))
         assert "learn_from_feedback" not in {column["name"] for column in columns}
         assert await connection.scalar(text("SELECT count(*) FROM run_feedback")) == 1
+    await db.dispose()
+
+
+async def test_task_family_upgrade_preserves_unknown_history_and_blocks_loss(tmp_path):
+    from evoagent.db.models import SessionRecord, TaskRecord
+    from evoagent.db.session import Database
+
+    url = f"sqlite+aiosqlite:///{tmp_path / 'family-legacy.db'}"
+    config = alembic_config(url)
+    await asyncio.to_thread(command.upgrade, config, "20261010_0030")
+    db = Database(url)
+    async with db.session_factory() as session:
+        chat = SessionRecord(title="old data task")
+        session.add(chat)
+        await session.flush()
+        await session.execute(TaskRecord.__table__.insert().values(session_id=chat.id, goal="data"))
+        await session.commit()
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with db.engine.begin() as connection:
+        assert await connection.scalar(text("SELECT family FROM tasks")) is None
+        await connection.execute(text("UPDATE tasks SET family='data'"))
+    with pytest.raises(RuntimeError, match="frozen task family evidence"):
+        await asyncio.to_thread(command.downgrade, config, "20261010_0030")
+    async with db.engine.begin() as connection:
+        assert await connection.scalar(text("SELECT family FROM tasks")) == "data"
+        # Isolated migration fixture only: remove this evidence to test rollback.
+        await connection.execute(text("UPDATE tasks SET family=NULL"))
+    await asyncio.to_thread(command.downgrade, config, "20261010_0030")
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.check, config)
     await db.dispose()

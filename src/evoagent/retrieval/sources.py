@@ -22,6 +22,7 @@ from evoagent.memory.repository import verify_version
 from evoagent.memory.schema import MemoryError
 from evoagent.privacy.redaction import redact_value
 from evoagent.sessions.service import text_hash
+from evoagent.skills.applicability import SkillApplicabilityEvaluator
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.rendering import SkillContextRenderer
 from evoagent.skills.schema import SkillDefinition
@@ -54,6 +55,7 @@ async def load_source(
     verify=None,
     run_id=None,
     renderer_version=2,
+    applicability_facts=None,
 ):
     kind, raw_id = key.split(":", 1)
     identity = UUID(raw_id)
@@ -79,6 +81,12 @@ async def load_source(
         if content_hash(version.definition) != version.content_hash:
             raise MemoryError("retrieval_source_hash_mismatch")
         definition = SkillDefinition.model_validate(version.definition)
+        if (
+            applicability_facts is not None
+            and SkillApplicabilityEvaluator().assess(definition, applicability_facts).status
+            != "applicable"
+        ):
+            return None
         if redact_value(version.definition) != version.definition:
             return None
         allowed = set(definition.preconditions.allowed_tools)

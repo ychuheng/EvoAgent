@@ -74,6 +74,7 @@ test("前一任务运行时可以提交下一任务并显示持久队列", async
     kind: "goal", role: "user", content: "先处理 A", created_at: new Date().toISOString(),
   }];
   const submitted: string[] = [];
+  const categories: Array<string | undefined> = [];
   vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string, options?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
     let payload: unknown = {};
@@ -84,8 +85,9 @@ test("前一任务运行时可以提交下一任务并显示持久队列", async
     else if (path.endsWith("/sessions/session-1/messages")) payload = messages;
     else if (path.endsWith("/tasks/task-1")) payload = { id: "task-1", status: "running", created_at: new Date().toISOString() };
     else if (path.endsWith("/tasks") && options?.method === "POST") {
-      const body = JSON.parse(String(options.body)) as { goal: string };
+      const body = JSON.parse(String(options.body)) as { goal: string; family?: string };
       submitted.push(body.goal);
+      categories.push(body.family);
       messages.push({ id: "message-2", task_id: "task-2", run_id: "run-2", sequence: 2, kind: "goal", role: "user", content: body.goal, created_at: new Date().toISOString() });
       payload = { id: "task-2", status: "queued", created_at: new Date().toISOString(), latest_run: { id: "run-2", provider: "mock", model: "mock" } };
     }
@@ -94,9 +96,12 @@ test("前一任务运行时可以提交下一任务并显示持久队列", async
   render(<App />);
   const queueButton = await screen.findByRole("button", { name: "排队下一任务" });
   fireEvent.change(screen.getByLabelText("发送消息"), { target: { value: "接着处理 B" } });
+  fireEvent.change(screen.getByLabelText("本次任务类型"), { target: { value: "data" } });
   fireEvent.click(queueButton);
   await waitFor(() => expect(submitted).toEqual(["接着处理 B"]));
   expect(await screen.findByText(/后续排队 1 项/)).toBeInTheDocument();
+  expect(categories).toEqual(["data"]);
+  await waitFor(() => expect(screen.getByLabelText("本次任务类型")).toHaveValue(""));
 });
 
 test("执行详情区分已读正文、搜索摘要和未观察到的答复链接", async () => {

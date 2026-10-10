@@ -1,8 +1,12 @@
 """Finite, side-effect-free applicability checks over frozen host facts."""
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
+from evoagent.memory.schema import MemoryError
+from evoagent.projects.inputs import InputSet
 from evoagent.skills.schema import SkillApplicability, SkillFactCondition
+from evoagent.tools.builtin.project_file_read import ProjectFileReadTool
 
 
 @dataclass(frozen=True)
@@ -65,3 +69,49 @@ def assess(applicability: SkillApplicability, facts) -> ApplicabilityDecision:
     if missing:
         return ApplicabilityDecision("unknown", (), tuple(sorted(missing)))
     return ApplicabilityDecision("applicable")
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedSkillFacts:
+    tools: tuple[str, ...]
+    project_available: bool | None = None
+    input_exists: bool | None = None
+    input_file_type: str | None = None
+    task_family: str | None = None
+
+    @classmethod
+    def from_runtime(cls, registry, frozen_inputs=None, *, task_family=None):
+        # Actual host tool implementation, not a model-provided tool name or
+        # a free-text statement that a project exists.
+        project = "file_read" in registry.names and isinstance(
+            registry.get("file_read"), ProjectFileReadTool
+        )
+        exists, file_type = None, None
+        if frozen_inputs is not None:
+            try:
+                manifest = InputSet.model_validate(frozen_inputs)
+            except ValueError:
+                raise MemoryError("skill_facts_unavailable") from None
+            exists = bool(manifest.files)
+            extensions = {
+                PurePosixPath(item.path).suffix.lower().lstrip(".") for item in manifest.files
+            }
+            if len(extensions) == 1:
+                file_type = next(iter(extensions)) or None
+        return cls(tuple(sorted(registry.names)), project, exists, file_type, task_family)
+
+    def as_mapping(self):
+        return {
+            "tool.available": self.tools,
+            "project.available": self.project_available,
+            "input.exists": self.input_exists,
+            "input.file_type": self.input_file_type,
+            "task.family": self.task_family,
+        }
+
+
+class SkillApplicabilityEvaluator:
+    def assess(self, definition, facts):
+        if definition.applicability is None:
+            return ApplicabilityDecision("applicable")
+        return assess(definition.applicability, facts.as_mapping())

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 
-import { chat, type ChatMessage, type ChatSession, type ChatWorkspace, type Project, type RuntimeInfo } from "../api/chat";
+import { chat, type ChatMessage, type ChatSession, type ChatWorkspace, type Project, type RuntimeInfo, type TaskFamily } from "../api/chat";
 import { useTaskEventStream } from "../api/taskEvents";
 import { failure } from "../components/Evidence";
 import { TaskInspector } from "./TaskInspector";
@@ -86,6 +86,7 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
   const [projectPath, setProjectPath] = useState("");
   const [projectName, setProjectName] = useState("");
   const [projectWritable, setProjectWritable] = useState(false);
+  const [taskFamily, setTaskFamily] = useState<TaskFamily | "">("");
   const [instruction, setInstruction] = useState("");
   const [instructionNotice, setInstructionNotice] = useState("");
 
@@ -298,12 +299,13 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
         required_tools: requiredTool.trim() ? [requiredTool.trim()] : [],
         required_files: requiredFile.trim() ? [{ path: requiredFile.trim() }] : [],
       } : null;
-      const task = await chat.createTask(id, goal, acceptance, projectScope === "task" ? projectId : undefined);
+      const task = await chat.createTask(id, goal, acceptance, projectScope === "task" ? projectId : undefined, taskFamily || undefined);
       if (projectScope === "task") {
         setProjectId(sessions.find((item) => item.id === id)?.project_id ?? null);
         setProjectScope("session");
       }
       setDraft("");
+      setTaskFamily("");
       setRequiredText("");
       setRequiredTool("");
       setRequiredFile("");
@@ -399,6 +401,11 @@ export function ChatPage({ onOpenVersion, onOpenContext, onOpenMemory }: { onOpe
       <form onSubmit={(event) => { void send(event); }} className="chat-compose">
         <label htmlFor="chat-input">发送消息</label>
         <textarea id="chat-input" rows={3} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onKeyDown} placeholder="向 Agent 提问，或让它使用工具完成任务" />
+        <label>本次任务类型（可选）<select aria-label="本次任务类型" value={taskFamily} onChange={event => setTaskFamily(event.target.value as TaskFamily | "")}>
+          <option value="">不指定</option><option value="general">通用</option><option value="coding">编程</option>
+          <option value="research">调研</option><option value="document">文档</option><option value="data">数据处理</option>
+          <option value="file_management">文件管理</option>
+        </select></label>
         <details className="chat-acceptance"><summary>设置可核对的验收条件（可选）</summary>
           <p className="chat-meta">请在任务文字中说明要求；这里的条件只用于结果核对，不会代替任务指令。未填写时回答不会被独立判定为正确。</p>
           <label>回答必须包含<input value={requiredText} maxLength={200} onChange={(event) => setRequiredText(event.target.value)} placeholder="例如：391" /></label>

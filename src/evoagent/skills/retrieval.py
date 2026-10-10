@@ -14,6 +14,7 @@ from evoagent.memory.schema import MemoryError
 from evoagent.privacy.redaction import redact_value
 from evoagent.retrieval.lexical import bm25, tokenize  # noqa: F401
 from evoagent.runtime.run_config import RunMode
+from evoagent.skills.applicability import SkillApplicabilityEvaluator, VerifiedSkillFacts
 from evoagent.skills.schema import SkillDefinition
 from evoagent.tasks.lease_guard import LeaseGuard
 from evoagent.tools.registry import ToolRegistry
@@ -117,12 +118,21 @@ class SkillRetrievalService:
                 documents = (self._document(version),)
                 candidates = (RetrievalMatch(documents[0], 1.0, ("pinned",)),)
             else:
-                rows = await unit.skills.active_versions()
-                documents = tuple(
-                    self._document(version)
-                    for _, version in rows
-                    if self._compatible(SkillDefinition.model_validate(version.definition))
+                task = await unit.tasks.get(run.task_id)
+                facts = VerifiedSkillFacts.from_runtime(
+                    self._registry, task.frozen_inputs, task_family=task.family
                 )
+                rows = await unit.skills.active_versions()
+                documents = []
+                evaluator = SkillApplicabilityEvaluator()
+                for _, version in rows:
+                    document = self._document(version)
+                    if (
+                        self._compatible(document.definition)
+                        and evaluator.assess(document.definition, facts).status == "applicable"
+                    ):
+                        documents.append(document)
+                documents = tuple(documents)
                 candidates = tuple(
                     item
                     for item in self._retriever.search(goal, documents)

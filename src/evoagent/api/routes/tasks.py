@@ -32,6 +32,7 @@ def _response(aggregate: TaskAggregate) -> TaskResponse:
         session_id=task.session_id,
         project_id=task.project_id,
         goal=task.goal,
+        family=task.family,
         acceptance=task.acceptance,
         frozen_inputs=task.frozen_inputs,
         status=task.status,
@@ -59,6 +60,7 @@ async def create_task(
         project_id=request.project_id,
         project_override="project_id" in request.model_fields_set,
         input_paths=request.input_paths,
+        family=request.family,
     )
     return _response(aggregate)
 

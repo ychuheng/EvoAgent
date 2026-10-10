@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from evoagent.db.models import ApprovalStatus
 from evoagent.projects.schema import ProjectAuthorization, ProjectStatus
 from evoagent.runtime.run_config import RunMode
+from evoagent.skills.schema import TaskFamily
 from evoagent.tasks.acceptance import AcceptanceSpec
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
@@ -126,6 +127,7 @@ class WorkspaceResponse(ApiModel):
 
 
 class TaskCreateRequest(ApiModel):
+    family: TaskFamily | None = None
     session_id: UUID
     goal: str = Field(min_length=1, max_length=100_000)
     acceptance: AcceptanceSpec | None = None
@@ -173,6 +175,7 @@ class RunResponse(ApiModel):
 
 
 class TaskResponse(ApiModel):
+    family: TaskFamily | None = None
     id: UUID
     session_id: UUID
     project_id: UUID | None = None

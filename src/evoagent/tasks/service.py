@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -29,6 +30,7 @@ from evoagent.projects.schema import (
 from evoagent.projects.service import root_status
 from evoagent.runtime.run_config import RunMode
 from evoagent.sessions.service import append_message, project_terminal
+from evoagent.skills.schema import TaskFamily
 from evoagent.tasks.acceptance import AcceptanceSpec
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 
@@ -120,6 +122,7 @@ class TaskService:
         project_id: UUID | None = None,
         project_override: bool = False,
         input_paths: list[str] | None = None,
+        family: str | None = None,
     ) -> TaskAggregate:
         """在同一事务中创建 Task、首个 Run 和初始事件。
 
@@ -133,6 +136,7 @@ class TaskService:
         运行中文件被替换会以 `input_changed` 终止，而不是悄悄换掉输入。
         """
 
+        family = TypeAdapter(TaskFamily | None).validate_python(family)
         normalized_goal = goal.strip()
         normalized_provider = provider.strip()
         normalized_model = model.strip()
@@ -184,6 +188,7 @@ class TaskService:
                 project_id=bound_project_id,
                 project_authorization_version=authorization_version,
                 goal=normalized_goal,
+                family=family,
                 acceptance=acceptance.model_dump(mode="json") if acceptance else None,
                 frozen_inputs=frozen_inputs,
                 status=TaskStatus.QUEUED,

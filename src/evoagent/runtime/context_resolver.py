@@ -38,6 +38,7 @@ from evoagent.retrieval.sources import load_source, source_keys
 from evoagent.retrieval.vector import exact_distances
 from evoagent.runtime.checkpoints import SnapshotCompatibilityError
 from evoagent.sessions.service import text_hash
+from evoagent.skills.applicability import VerifiedSkillFacts
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.retrieval import RetrievalMatch, SkillRetrievalService
 from evoagent.tools.base import ToolError
@@ -100,6 +101,9 @@ class ContextResolver:
                 else 2
             )
             scope = await session.get(SessionRecord, task.session_id)
+            applicability_facts = VerifiedSkillFacts.from_runtime(
+                self.registry, task.frozen_inputs, task_family=task.family
+            )
             candidates = {}
             for key in await source_keys(session):
                 kind = key.split(":")[0]
@@ -120,6 +124,7 @@ class ContextResolver:
                     verify=self.injection,
                     run_id=run.id,
                     renderer_version=config["skill_renderer_version"],
+                    applicability_facts=applicability_facts,
                 )
                 if source:
                     candidates[key] = source
@@ -243,6 +248,7 @@ class ContextResolver:
                     max_risk=self.settings.skill_max_effective_risk.value,
                     lock=True,
                     renderer_version=config["skill_renderer_version"],
+                    applicability_facts=applicability_facts,
                 )
                 if current is None or current.source_hash != source.source_hash:
                     continue

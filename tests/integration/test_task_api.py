@@ -265,3 +265,20 @@ async def test_running_task_cancellation_is_observed_by_lease_owner(tmp_path: Pa
         assert response.json()["status"] == "running"
         assert response.json()["cancel_requested"] is True
         assert await manager.cancellation_requested(lease) is True
+
+
+async def test_explicit_task_family_is_returned_and_invalid_category_rejected(tmp_path):
+    async with api_client(tmp_path) as (client, _):
+        scope = (await client.post("/api/v1/sessions", json={"title": "category"})).json()
+        payload = {"session_id": scope["id"], "goal": "calculate report", "family": "data"}
+        response = await client.post("/api/v1/tasks", json=payload)
+        assert response.status_code == 202 and response.json()["family"] == "data"
+        restored = await client.get("/api/v1/tasks/" + response.json()["id"])
+        assert restored.json()["family"] == "data"
+        assert (
+            await client.post("/api/v1/tasks", json={**payload, "family": "guessed"})
+        ).status_code == 422
+        legacy = await client.post(
+            "/api/v1/tasks", json={"session_id": scope["id"], "goal": "data"}
+        )
+        assert legacy.status_code == 202 and legacy.json()["family"] is None

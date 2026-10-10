@@ -87,10 +87,11 @@ class SkillFactCondition(ContractModel):
         return self
 
 
+TaskFamily = Literal["general", "coding", "research", "document", "data", "file_management"]
+
+
 class SkillApplicability(ContractModel):
-    task_families: tuple[
-        Literal["general", "coding", "research", "document", "data", "file_management"], ...
-    ] = Field(min_length=1, max_length=6)
+    task_families: tuple[TaskFamily, ...] = Field(min_length=1, max_length=6)
     file_types: tuple[str, ...] = Field(default=(), max_length=32)
     required_facts: tuple[SkillFactCondition, ...] = Field(default=(), max_length=32)
     excluded_conditions: tuple[SkillFactCondition, ...] = Field(default=(), max_length=32)

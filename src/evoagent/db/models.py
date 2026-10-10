@@ -218,6 +218,11 @@ class MessageRecord(Base):
 class TaskRecord(Base):
     __tablename__ = "tasks"
     __table_args__ = (
+        CheckConstraint(
+            "family IS NULL OR family IN "
+            "('general','coding','research','document','data','file_management')",
+            name="family_valid",
+        ),
         CheckConstraint("attempt_count >= 0", name="attempt_count_non_negative"),
         CheckConstraint("lock_version >= 0", name="lock_version_non_negative"),
         Index("ix_tasks_claim", "status", "next_attempt_at", "lease_expires_at"),
@@ -232,6 +237,7 @@ class TaskRecord(Base):
         ForeignKey("projects.id", ondelete="RESTRICT"), index=True
     )
     project_authorization_version: Mapped[int | None] = mapped_column(Integer)
+    family: Mapped[str | None] = mapped_column(String(32))
     goal: Mapped[str] = mapped_column(Text)
     acceptance: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     # F-02：创建时冻结的输入集（路径 + 内容哈希 + 类型）；运行中变化即按输入变化终止。
@@ -1645,3 +1651,8 @@ event.listen(
     "after_drop",
     DDL("DROP FUNCTION IF EXISTS evoagent_notify_task_cancel()").execute_if(dialect="postgresql"),
 )
+
+
+@event.listens_for(TaskRecord, "before_update")
+def protect_task_family(_mapper, _connection, record):
+    _reject_changed_fields(record, ("family",))

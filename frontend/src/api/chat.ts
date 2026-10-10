@@ -30,7 +30,9 @@ export type ChatMessage = {
   injected_at: string | null;
   created_at: string;
 };
+export type TaskFamily = "general" | "coding" | "research" | "document" | "data" | "file_management";
 export type ChatTask = {
+  family?: TaskFamily | null;
   id: string;
   status: string;
   created_at: string;
@@ -152,8 +154,8 @@ export const chat = {
     }),
   messages: (sessionId: string) =>
     request<ChatMessage[]>(`/sessions/${encodeURIComponent(sessionId)}/messages`),
-  createTask: (sessionId: string, goal: string, acceptance?: ChatTask["acceptance"], projectId?: string | null) => request<ChatTask>("/tasks", {
-    method: "POST", body: JSON.stringify({ session_id: sessionId, goal, acceptance: acceptance ?? null, ...(projectId !== undefined ? { project_id: projectId } : {}) }),
+  createTask: (sessionId: string, goal: string, acceptance?: ChatTask["acceptance"], projectId?: string | null, family?: TaskFamily) => request<ChatTask>("/tasks", {
+    method: "POST", body: JSON.stringify({ session_id: sessionId, goal, ...(family ? { family } : {}), acceptance: acceptance ?? null, ...(projectId !== undefined ? { project_id: projectId } : {}) }),
   }),
   task: (taskId: string) => request<ChatTask>(`/tasks/${encodeURIComponent(taskId)}`),
   addInstruction: (taskId: string, content: string) =>
