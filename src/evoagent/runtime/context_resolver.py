@@ -92,7 +92,10 @@ class ContextResolver:
         config["history_before_sequence"] = task.history_before_sequence
         async with self.factory() as session:
             saved = await session.scalar(
-                select(RetrievalBatchRecord).where(RetrievalBatchRecord.run_id == run.id)
+                select(RetrievalBatchRecord).where(
+                    RetrievalBatchRecord.run_id == run.id,
+                    RetrievalBatchRecord.purpose == "context",
+                )
             )
             if saved:
                 if "skill_renderer_version" in saved.config:
@@ -220,7 +223,10 @@ class ContextResolver:
         async with UnitOfWork(self.factory) as unit:
             await self.guard.check(unit.session)
             saved = await unit.session.scalar(
-                select(RetrievalBatchRecord).where(RetrievalBatchRecord.run_id == run.id)
+                select(RetrievalBatchRecord).where(
+                    RetrievalBatchRecord.run_id == run.id,
+                    RetrievalBatchRecord.purpose == "context",
+                )
             )
             if saved:
                 return await self._restore(unit.session, saved, config)

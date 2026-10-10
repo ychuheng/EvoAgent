@@ -13,6 +13,7 @@ from evoagent.db.models import (
     MaintenanceJobRecord,
     RetrievalBatchRecord,
     RetrievalSelectionRecord,
+    SessionRecord,
 )
 from evoagent.memory.maintenance import MaintenanceWorker
 from evoagent.memory.schema import MemoryDecision, MemoryError
@@ -82,6 +83,36 @@ async def test_index_job_and_frozen_context_restore_without_provider(env, tmp_pa
     assert await resolve.resolve(task.task, task.run) == first
     async with db.session_factory() as session:
         assert len(tuple(await session.scalars(select(RetrievalBatchRecord)))) == 1
+
+
+async def test_context_and_skill_selector_batches_do_not_alias(env, tmp_path):
+    from evoagent.sessions.service import text_hash
+
+    db, _, _, _ = env
+    await indexed(env)
+    task, resolve = await resolver(env, tmp_path)
+    async with db.session_factory() as session:
+        chat = await session.get(SessionRecord, task.task.session_id)
+        session.add(
+            RetrievalBatchRecord(
+                run_id=task.run.id,
+                purpose="skill_selector",
+                query_hash=text_hash(task.task.goal),
+                workspace_id=chat.workspace_id,
+                session_id=chat.id,
+                config={"selector_sentinel": True},
+                selected_count=0,
+            )
+        )
+        await session.commit()
+    first = await resolve.resolve(task.task, task.run)
+    assert len(first.memory_texts) == 1
+    assert await resolve.resolve(task.task, task.run) == first
+    async with db.session_factory() as session:
+        batches = list(await session.scalars(select(RetrievalBatchRecord)))
+        assert {row.purpose for row in batches} == {"context", "skill_selector"}
+        selector = next(row for row in batches if row.purpose == "skill_selector")
+        assert selector.config == {"selector_sentinel": True}
 
 
 async def test_native_dimension_profile_is_indexed_without_padding(env, tmp_path):
