@@ -6,7 +6,7 @@
 2. 单进程内存上限生效（超过上限的分配必须失败，而不是把 Worker 拖死）；
 3. 墙钟/CPU 上限生效（忙循环必须被终止，而不是永远跑下去）；
 4. 进程树配额生效：失控的 fork 循环**不能**跑完，且不能留下活着的子进程；
-5. 配额不是"无上限"：子进程读到的 `RLIMIT_NPROC` 必须等于配置值。
+5. 配额内的普通子进程仍可运行；这是会话轮询软限制，不是 RLIMIT_NPROC/cgroup 硬上限。
 
 用法（在应用镜像里）：
 
@@ -147,11 +147,13 @@ async def main() -> None:
                     python,
                     "-c",
                     "import os, time\n"
-                    "pids = [os.fork() for _ in range(4)]\n"
-                    "for pid in pids:\n"
+                    "pids = []\n"
+                    "for _ in range(4):\n"
+                    "    pid = os.fork()\n"
                     "    if pid == 0:\n"
                     "        time.sleep(0.2)\n"
                     "        os._exit(0)\n"
+                    "    pids.append(pid)\n"
                     "for pid in pids:\n"
                     "    os.waitpid(pid, 0)\n"
                     "print('children:4')\n",

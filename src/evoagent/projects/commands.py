@@ -532,7 +532,8 @@ async def _watch_process_tree(
     既做不了per-command配额，还会让命令连自己的沙箱初始化（`ldconfig`）都跑不起来。
 
     因此配额完全由父进程按**会话**计数实施：命令子进程是 `setsid` 后的会话首进程，
-    未被显式 `setsid` 的后代都留在同一会话里，double-fork 也甩不掉统计。代价是**有界
+    执行 argv 前的 seccomp 阻止后代 `setsid`/`setpgid`，double-fork 仍在同组。
+    这不替代内核 pids 硬配额。代价是**有界
     超杀**：最多多跑一个轮询间隔的进程，随后整组被 SIGKILL。轮询间隔取 0.05 秒，
     命令是低频操作，这个开销可以忽略。
     """

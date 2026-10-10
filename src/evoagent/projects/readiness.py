@@ -9,8 +9,9 @@
 宿主上跑一次通过，不代表容器里能观测。所以它同时被 Worker 装配、`personal_preflight`
 与命令执行前的运行时复查使用；`run_command()` 不信任预检结果，每次发起前自己再查一遍。
 
-本模块**不**声称补齐内核 pids/cgroup 硬配额，也不声称验证了后代会话逃逸
-（`setsid` 后的后代可以脱离统计）——那是 K2 的后续专项。
+本模块不提供内核 pids/cgroup 硬配额。命令 child 在执行 argv 前加载 seccomp，
+阻止后代 setsid/setpgid/unshare/setns；此预检只验证 /proc 可观测性，不能替代真实
+命令路径的 seccomp 测试。进程数仍为 50ms 轮询的软限制，不能称为硬上限。
 """
 
 from __future__ import annotations

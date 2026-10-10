@@ -128,11 +128,11 @@ def _load_seccomp() -> ctypes.CDLL:
             continue
     library = ctypes.util.find_library("seccomp")
     if not library:
-        raise RuntimeError("libseccomp is required for offline commands")
+        raise RuntimeError("libseccomp is required for project commands")
     return ctypes.CDLL(library, use_errno=True)
 
 
-def _block_network() -> None:
+def _block_network(*, offline: bool = True) -> None:
     seccomp = _load_seccomp()
     seccomp.seccomp_init.argtypes = [ctypes.c_uint32]
     seccomp.seccomp_init.restype = ctypes.c_void_p
@@ -153,23 +153,36 @@ def _block_network() -> None:
     if not context:
         raise RuntimeError("seccomp initialization failed")
     try:
-        socket_call = seccomp.seccomp_syscall_resolve_name(b"socket")
-        if socket_call < 0:
-            raise RuntimeError("socket syscall unavailable")
-        # Socket pairs remain usable for local test fixtures. Creating sockets
-        # in all other families fails, and connect() is denied even for AF_UNIX.
-        not_unix = _SeccompArgCmp(0, 1, 1, 0)  # SCMP_CMP_NE, AF_UNIX=1
-        result = seccomp.seccomp_rule_add_array(
-            context, 0x00050000 | errno.EPERM, socket_call, 1, ctypes.byref(not_unix)
-        )
-        connect_call = seccomp.seccomp_syscall_resolve_name(b"connect")
-        if connect_call < 0:
-            raise RuntimeError("connect syscall unavailable")
-        connect_result = seccomp.seccomp_rule_add_array(
-            context, 0x00050000 | errno.EPERM, connect_call, 0, None
-        )
-        if result != 0 or connect_result != 0 or seccomp.seccomp_load(context) != 0:
-            raise RuntimeError("seccomp network filter installation failed")
+        # The parent creates the command's session before this process starts.
+        # Descendants must remain in its process group so killpg and /proc
+        # observation still cover double-forked children, even with networking.
+        for name in (b"setsid", b"setpgid", b"unshare", b"setns"):
+            call = seccomp.seccomp_syscall_resolve_name(name)
+            if (
+                call < 0
+                or seccomp.seccomp_rule_add_array(context, 0x00050000 | errno.EPERM, call, 0, None)
+                != 0
+            ):
+                raise RuntimeError("seccomp process containment installation failed")
+        if offline:
+            socket_call = seccomp.seccomp_syscall_resolve_name(b"socket")
+            if socket_call < 0:
+                raise RuntimeError("socket syscall unavailable")
+            # AF_UNIX socketpair remains usable; connect is denied.
+            not_unix = _SeccompArgCmp(0, 1, 1, 0)
+            result = seccomp.seccomp_rule_add_array(
+                context, 0x00050000 | errno.EPERM, socket_call, 1, ctypes.byref(not_unix)
+            )
+            connect_call = seccomp.seccomp_syscall_resolve_name(b"connect")
+            if connect_call < 0:
+                raise RuntimeError("connect syscall unavailable")
+            connect_result = seccomp.seccomp_rule_add_array(
+                context, 0x00050000 | errno.EPERM, connect_call, 0, None
+            )
+            if result != 0 or connect_result != 0:
+                raise RuntimeError("seccomp network filter installation failed")
+        if seccomp.seccomp_load(context) != 0:
+            raise RuntimeError("seccomp filter installation failed")
     finally:
         seccomp.seccomp_release(context)
 
@@ -188,8 +201,7 @@ def main() -> int:
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
         resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
         _landlock(project, scratch)
-        if offline:
-            _block_network()
+        _block_network(offline=offline)
         os.execvpe(command[0], command, os.environ)
     except Exception as error:
         print(f"EVOAGENT_COMMAND_SETUP_FAILED: {error}", file=sys.stderr)
