@@ -15,6 +15,7 @@ from evoagent.db.models import (
     RunRecord,
     SkillSourceRecord,
     SkillVersionRecord,
+    TaskRecord,
 )
 from evoagent.evals.coordinator import EvalCoordinator, EvalCoordinatorError
 from evoagent.evals.datasets import EvalDatasetService
@@ -32,7 +33,7 @@ from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
 pytest_plugins = ("tests.integration.test_personal_trials",)
 
 
-async def prepare(context, *, comparison=False, split="train"):
+async def prepare(context, *, comparison=False, split="train", task_family="data"):
     _, db, run_id, state, candidate, skill = context
     service = EvalDatasetService(db.session_factory)
     dataset = await service.import_definition(
@@ -43,7 +44,7 @@ async def prepare(context, *, comparison=False, split="train"):
             cases=tuple(
                 EvalCaseDefinition(
                     case_key="case_" + str(index),
-                    task_family="data",
+                    task_family=task_family,
                     split=split,
                     public_input={
                         "goal": "Preserve identifiers",
@@ -157,6 +158,7 @@ async def test_personal_pairs_have_explicit_arms_actual_modes_and_dev_roles(
         for row in rows:
             run = await session.get(RunRecord, row.run_id)
             assert run.data_role == "dev"
+            assert (await session.get(TaskRecord, run.task_id)).family == "data"
             if row.arm == "control":
                 assert row.mode.value == ("pinned_skill" if comparison else "baseline")
                 assert row.skill_version_id == control_id
@@ -261,3 +263,22 @@ async def test_purpose_cannot_be_changed_to_launder_personal_validation(trial_ca
         with pytest.raises(ValueError, match="immutable"):
             await session.flush()
         await session.rollback()
+
+
+async def test_invalid_personal_case_family_cannot_create_tasks(trial_candidate):
+    _, db, _, _, candidate, _ = trial_candidate
+    dataset, request, _, guard = await prepare(trial_candidate, task_family="guessed-from-goal")
+    coordinator = EvalCoordinator(db.session_factory, default_validator_registry())
+    with pytest.raises(EvalCoordinatorError, match="personal_validation_task_family_invalid"):
+        await coordinator.create_personal_validation(
+            learning_request_id=request.id,
+            dataset_id=dataset.id,
+            candidate_version_id=candidate.id,
+            provider="mock",
+            model="mock",
+            repeats=1,
+            code_version="test",
+            job_guard=guard,
+        )
+    async with db.session_factory() as session:
+        assert not list(await session.scalars(select(EvalRunRecord)))

@@ -13,6 +13,7 @@ from evoagent.db.models import (
     LearningSourceRecord,
     RunRecord,
     SkillVersionRecord,
+    TaskRecord,
 )
 from evoagent.evals.coordinator import EvalCoordinator
 from evoagent.evals.validators import default_validator_registry
@@ -97,6 +98,7 @@ async def test_actual_task_to_completed_experiment_to_pending_user_report(trial_
         assert len(runs) == 4
         for evaluation in runs:
             run = await session.get(RunRecord, evaluation.run_id)
+            assert (await session.get(TaskRecord, run.task_id)).family == "data"
             assert (
                 run.status.value == "completed"
                 and run.config_hash

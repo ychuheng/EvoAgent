@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -31,6 +31,7 @@ from evoagent.evals.validators.base import ValidatorRegistry
 from evoagent.runtime.run_config import RunConfigSnapshot, RunMode
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.lifecycle import SkillVersionStatus
+from evoagent.skills.schema import TaskFamily
 from evoagent.tasks.lease_guard import database_now
 from evoagent.tasks.state_machine import PersistentRunStatus, TaskStatus
 from evoagent.trace.bundle import TraceBundleService
@@ -425,6 +426,12 @@ class EvalCoordinator:
             if set(replicas or {}) != expected_replicas:
                 raise EvalCoordinatorError("personal_validation_replicas_incomplete")
         for case in cases:
+            family = None
+            if experiment.purpose == "personal_validation":
+                try:
+                    family = TypeAdapter(TaskFamily).validate_python(case.task_family)
+                except ValueError:
+                    raise EvalCoordinatorError("personal_validation_task_family_invalid") from None
             goal = (
                 json.dumps(case.public_input, ensure_ascii=False, sort_keys=True)
                 if experiment.purpose == "personal_validation"
@@ -460,6 +467,7 @@ class EvalCoordinator:
                     task = TaskRecord(
                         session_id=session.id,
                         goal=goal,
+                        family=family,
                         status=TaskStatus.QUEUED if queued else TaskStatus.PAUSED,
                     )
                     unit.tasks.add(task)

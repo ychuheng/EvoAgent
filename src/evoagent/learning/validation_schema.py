@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from evoagent.evals.schema import ValidatorSpec
 from evoagent.privacy.redaction import detect_sensitive, redact_value
+from evoagent.skills.schema import TaskFamily
 
 
 class ValidationCriterion(BaseModel):
@@ -55,7 +56,7 @@ class PersonalValidationCase(BaseModel):
 
     case_key: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,63}$")
     case_kind: Literal["positive", "counterexample"]
-    task_family: Literal["general", "coding", "research", "document", "data", "file_management"]
+    task_family: TaskFamily
     public_input: dict[str, JsonValue]
     fixture_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{1,63}$")
     criteria: tuple[ValidationCriterion, ...] = Field(min_length=1, max_length=20)

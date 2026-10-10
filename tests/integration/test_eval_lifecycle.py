@@ -138,6 +138,7 @@ async def complete_position(
             run = await session.get(RunRecord, item.run_id)
             task = await session.get(TaskRecord, item.task_id)
             assert run is not None and task is not None
+            assert task.family is None  # Formal case taxonomy is not an explicit personal category.
             snapshot = run_snapshot(item.mode, version)
             run.status = PersistentRunStatus.COMPLETED
             run.final_answer = "# 总结\n结果为 2。"
