@@ -3,6 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Response
+from pydantic import BaseModel, ConfigDict, Field
 
 from evoagent.api.dependencies import DatabaseDependency, SettingsDependency
 from evoagent.db.repositories.base import ConcurrentUpdateError
@@ -26,6 +27,7 @@ from evoagent.learning.service import LearningService
 from evoagent.learning.sources import PersonalSourceService
 from evoagent.learning.validation import PersonalValidationService, ValidationAdmission
 from evoagent.learning.validation_schema import ValidationStart
+from evoagent.skills.observation_evidence import ObservationArtifact
 from evoagent.trace.artifacts import LocalArtifactStore
 
 router = APIRouter(tags=["learning"])
@@ -366,3 +368,28 @@ async def revoke_source(source_id: UUID, body: SourceRevocation, database: Datab
         "affected_version_ids": versions[:100],
         "impact_truncated": len(requests) > 100 or len(versions) > 100,
     }
+
+
+class ObservationEvidenceCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    artifacts: tuple[ObservationArtifact, ...] = Field(min_length=1, max_length=10)
+
+
+@router.post("/runs/{run_id}/skill-observation-evidence/verify")
+async def check_observation_evidence(
+    run_id: UUID,
+    body: ObservationEvidenceCheck,
+    database: DatabaseDependency,
+    settings: SettingsDependency,
+):
+    from evoagent.skills.observation_catalog import verify_observation_evidence
+
+    return await respond(
+        verify_observation_evidence(
+            database.session_factory,
+            LocalArtifactStore(settings.artifact_root),
+            settings,
+            run_id,
+            body.artifacts,
+        )
+    )

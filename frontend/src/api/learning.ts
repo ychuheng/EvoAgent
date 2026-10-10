@@ -34,6 +34,8 @@ export type ObservationCatalog = {
   versions: { version_id: string; origin: string; steps: string[] }[];
   artifacts: { artifact_id: string; content_hash: string; type: string }[];
   artifacts_truncated: boolean;
+  pending_artifacts?: { artifact_id: string; content_hash: string; type: string }[];
+  pending_artifacts_truncated?: boolean;
 };
 export type HumanSkillObservation = {
   type: "skill_observation"; schema_version: 1; version_id: string;
@@ -85,6 +87,7 @@ export const learning = {
   trials: (workspace: string, project: string | null = null) => request<{ items: SkillTrial[] }>(`/skill-trials?workspace_id=${encodeURIComponent(workspace)}${project ? `&project_id=${encodeURIComponent(project)}` : ""}&limit=100`),
   suspendTrial: (trial: SkillTrial, reason: string) => post<SkillTrial>(`/skill-trials/${trial.id}/suspend`, { expected_lock_version: trial.lock_version, reason }),
   rollbackTrial: (trial: SkillTrial, target: string, reason: string) => post<SkillTrial>(`/skill-trials/${trial.id}/rollback`, { expected_lock_version: trial.lock_version, target_trial_id: target, reason }),
+  checkObservationEvidence: (runId: string, artifacts: { artifact_id: string; content_hash: string }[]) => post<ObservationCatalog>(`/runs/${runId}/skill-observation-evidence/verify`, { artifacts }),
   observationEvidence: (runId: string) => request<ObservationCatalog>(`/runs/${runId}/skill-observation-evidence`),
   validationFixtures: () => request<ValidationFixture[]>("/personal-validation-fixtures"),
   policy: (id: string) => request<LearningPolicy>(`/workspaces/${id}/learning-policy`),
@@ -103,6 +106,7 @@ export const learning = {
 
 export function learningError(reason: unknown): string {
   const labels: Record<string, string> = {
+    observation_evidence_check_denied: "产物未通过当前安全检查，不能用于 Skill 判定。请核对产物或使用其他证据。",
     learning_disabled: "方法学习已关闭，本次没有保存学习请求。可取消勾选后提交普通反馈。",
     learning_policy_off: "当前工作区未开启方法学习。请先在个人学习页设置策略。",
     source_method_consent_required: "需要明确选择方法，并允许用于改进方法。",

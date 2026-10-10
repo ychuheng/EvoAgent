@@ -39,6 +39,19 @@ from evoagent.tools.base import ToolExecutionError, ToolPermissionError
 #: 允许注入模型的 artifact 类型白名单。其余类型（评测报告、skill 来源、下载产物等）
 #: 没有"重新注入模型"的用途，一律不因门禁通过而获得注入权限。
 INJECTABLE_ARTIFACT_TYPES = frozenset({"tool_output", "context_source"})
+# Checking feedback evidence does not grant these downloads model injection.
+EVIDENCE_TEXT_ARTIFACT_TYPES = INJECTABLE_ARTIFACT_TYPES | frozenset(
+    {
+        "text/plain",
+        "text/markdown",
+        "text/csv",
+        "application/json",
+        "text/x-python",
+        "application/yaml",
+        "text/html",
+        "application/xml",
+    }
+)
 
 #: 全量扫描采用有界读取、CPU/墙钟截止时间及可终止子进程。
 SCAN_BUDGET_MS = 1000
@@ -178,18 +191,31 @@ class ArtifactInjectionGuard:
                 "artifact bounded read limit or deadline exceeded"
             ) from error
 
-    async def read_verified_text(
-        self,
-        *,
-        artifact_id: UUID,
-        run_id: UUID,
-        purpose: str,
+    async def read_verified_text(self, *, artifact_id: UUID, run_id: UUID, purpose: str) -> str:
+        """Only injection-whitelisted artifacts may return text to a model reader."""
+        return await self._check_text_artifact(
+            artifact_id=artifact_id,
+            run_id=run_id,
+            purpose=purpose,
+            allowed_types=INJECTABLE_ARTIFACT_TYPES,
+        )
+
+    async def verify_feedback_evidence(
+        self, *, artifact_id: UUID, run_id: UUID, expected_hash: str
+    ) -> None:
+        """Check selected text evidence without returning any body or widening injection."""
+        await self._check_text_artifact(
+            artifact_id=artifact_id,
+            run_id=run_id,
+            purpose="human_feedback_evidence",
+            allowed_types=EVIDENCE_TEXT_ARTIFACT_TYPES,
+            requested_hash=expected_hash,
+        )
+
+    async def _check_text_artifact(
+        self, *, artifact_id: UUID, run_id: UUID, purpose: str, allowed_types, requested_hash=None
     ) -> str:
-        """读取整份正文，确认它通过当前策略后才允许调用方分页。
-
-        先复查**整份**正文再分页，是为了防止调用方用 offset/limit 把秘密切碎绕过检测。
-        """
-
+        """Shared bounded whole-text check; permissions remain caller-specific."""
         if self._store is None:
             raise RuntimeError("artifact store is required for read_verified_text")
         started = monotonic()
@@ -213,7 +239,9 @@ class ArtifactInjectionGuard:
                 state.reusable and record.attributes.get("redaction_scan_mode") == "offline"
             )
 
-        if artifact_type not in INJECTABLE_ARTIFACT_TYPES:
+        if requested_hash is not None and expected_hash != requested_hash:
+            raise ToolExecutionError("artifact evidence hash changed")
+        if artifact_type not in allowed_types:
             raise ArtifactNotInjectable(f"artifact type is not injectable: {artifact_type}")
         if state.policy_version is not None and state.policy_version > POLICY_VERSION:
             raise ArtifactCheckUnavailable("runtime sensitive policy is older than artifact policy")
@@ -265,6 +293,7 @@ class ArtifactInjectionGuard:
                 run_id=run_id,
                 expected_hash=actual_hash,
                 purpose=purpose,
+                allowed_types=allowed_types,
             )
             return text
 
@@ -292,12 +321,16 @@ class ArtifactInjectionGuard:
         # 返回前再复验一次：扫描期间可能发生了擦除/撤销/隔离（F2）。这是 §2.1 第 8 条
         # 要求的"提交和返回前复验授权及 content_hash"。
         await self._reverify(
-            artifact_id=artifact_id, run_id=run_id, expected_hash=actual_hash, purpose=purpose
+            artifact_id=artifact_id,
+            run_id=run_id,
+            expected_hash=actual_hash,
+            purpose=purpose,
+            allowed_types=allowed_types,
         )
         return text
 
     async def _reverify(
-        self, *, artifact_id: UUID, run_id: UUID, expected_hash: str, purpose: str
+        self, *, artifact_id: UUID, run_id: UUID, expected_hash: str, purpose: str, allowed_types
     ) -> None:
         """返回注入内容之前的最后一道复验。
 
@@ -315,6 +348,11 @@ class ArtifactInjectionGuard:
             record = await session.get(ArtifactRecord, artifact_id)
             if record is None or record.run_id != run_id or record.attributes.get("erased"):
                 raise ToolPermissionError("artifact is outside current run or erased")
+            if (
+                record.type not in allowed_types
+                or _check_state(record).status == STATUS_NOT_APPLICABLE
+            ):
+                raise ArtifactNotInjectable("artifact permissions changed during read")
             if record.content_hash != expected_hash:
                 raise ToolExecutionError("artifact hash mismatch")
             if _check_state(record).status == STATUS_QUARANTINED:

@@ -157,10 +157,10 @@ class SkillUsageService:
                 or selected.scope.workspace_id != chat.workspace_id
                 or selected.scope.project_id != task.project_id
                 or trial.workspace_id != chat.workspace_id
-                or trial.project_id != task.project_id
+                or trial.project_id not in (None, task.project_id)
                 or trial.version_id != version.id
                 or trial.skill_id != version.skill_id
-                or trial.scope_key != TrialScope(chat.workspace_id, task.project_id).key
+                or trial.scope_key != TrialScope(chat.workspace_id, trial.project_id).key
                 or content_hash(version.definition) != selected.content_hash
             ):
                 raise LearningError("observation_selection_invalid")

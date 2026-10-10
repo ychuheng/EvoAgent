@@ -224,6 +224,7 @@ async def test_real_validation_uses_task_bound_learning_ledger_without_double_ch
     assert lease.run_id == aggregate.run.id
     result = await ConfiguredTaskHandler(settings, db).handle(lease)
     assert str(result.status) == "completed", result.error_code
+    await JobLeaseManager(db.session_factory, lease_seconds=120).finalize(lease, result)
     async with db.session_factory() as session:
         ordinary = await session.get(RunRecord, lease.run_id)
         selection = ordinary.config_snapshot["selected_skills"][0]

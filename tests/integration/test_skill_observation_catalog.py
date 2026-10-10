@@ -73,3 +73,64 @@ async def test_catalog_refuses_missing_running_and_nonpersonal_runs(learning_api
         response = await client.get(f"/api/v1/runs/{run.id}/skill-observation-evidence")
         assert response.status_code == 422
         assert response.json()["detail"]["code"] == "observation_terminal_personal_run_required"
+
+
+async def test_explicit_evidence_check_safe_download_not_model_injectable_and_secret_denied(
+    trial_candidate, learning_api
+):
+    import pytest
+
+    from evoagent.privacy.artifact_access import ArtifactInjectionGuard, ArtifactNotInjectable
+    from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
+
+    await formal_fixture(trial_candidate)
+    client, db, _, settings = learning_api
+    selector, task, run = await setup_run(trial_candidate, settings)
+    await resolve_ordinary(selector, task, run)
+    async with db.session_factory() as session:
+        (await session.get(RunRecord, run.id)).status = "completed"
+        await session.commit()
+    store = LocalArtifactStore(settings.artifact_root)
+    service = ArtifactService(store, db.session_factory)
+    safe = await service.create_unique(
+        run_id=run.id, name="safe.csv", content=b"identifier\n0050\n", artifact_type="text/csv"
+    )
+    secret = await service.create_unique(
+        run_id=run.id,
+        name="unsafe.txt",
+        content=b"password: fake-secret-value\n",
+        artifact_type="text/plain",
+    )
+    endpoint = f"/api/v1/runs/{run.id}/skill-observation-evidence/verify"
+
+    def reference(record, digest=None):
+        return {"artifact_id": str(record.id), "content_hash": digest or record.content_hash}
+
+    mismatch = await client.post(
+        endpoint, json={"artifacts": [reference(safe, "sha256:" + "0" * 64)]}
+    )
+    assert mismatch.status_code == 422
+    assert mismatch.json()["detail"]["code"] == "observation_evidence_check_denied"
+    response = await client.post(endpoint, json={"artifacts": [reference(safe)]})
+    assert response.status_code == 200, response.text
+    assert response.json()["artifacts"] == [{**reference(safe), "type": "text/csv"}]
+    assert "0050" not in response.text and safe.uri not in response.text
+    guard = ArtifactInjectionGuard(
+        session_factory=db.session_factory, artifact_store=store, settings=settings
+    )
+    with pytest.raises(ArtifactNotInjectable):
+        await guard.read_verified_text(artifact_id=safe.id, run_id=run.id, purpose="artifact_read")
+    denied = await client.post(endpoint, json={"artifacts": [reference(secret)]})
+    assert denied.status_code == 422, denied.text
+    assert "fake-secret-value" not in denied.text
+    async with db.session_factory() as session:
+        assert (await session.get(ArtifactRecord, secret.id)).redaction_status == "quarantined"
+    assert (
+        await client.post(endpoint, json={"artifacts": [reference(safe)] * 11})
+    ).status_code == 422
+    foreign = await service.create_unique(
+        run_id=learning_api[2], name="foreign.csv", content=b"safe\n", artifact_type="text/csv"
+    )
+    assert (
+        await client.post(endpoint, json={"artifacts": [reference(foreign)]})
+    ).status_code == 422

@@ -44,3 +44,45 @@ test("没有实际采用的 Skill 或证据时不能提交人工技能判定", a
   await screen.findByText("本次没有可判定的实际 Skill 采用记录。");
   expect(screen.getByRole("button", { name: "提交任务反馈" })).toBeDisabled();
 });
+
+
+test("显式检查绑定产物哈希，通过后才可选为证据，检查不提交任务反馈", async () => {
+  const checks: unknown[] = [];
+  const base = { run_id: "run", versions: [{ version_id: "version-actual", origin: "trial", steps: ["read"] }], artifacts: [], artifacts_truncated: false, pending_artifacts: [artifact] };
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("learning-policy")) return new Response(JSON.stringify({ mode: "off" }));
+    if (url.endsWith("/verify")) {
+      checks.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ ...base, artifacts: [artifact], pending_artifacts: [] }));
+    }
+    return new Response(JSON.stringify(base));
+  }));
+  render(<FeedbackPanel runId="run" workspaceId="workspace" />);
+  fireEvent.click(screen.getByRole("button", { name: "反馈与记成方法" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "记录已核对的 Skill 使用结果" }));
+  await screen.findByLabelText("待检查产物 artifact-actual");
+  expect(checks).toHaveLength(0);
+  expect(screen.queryByLabelText("产物证据 artifact-actual")).toBeNull();
+  fireEvent.click(screen.getByLabelText("待检查产物 artifact-actual"));
+  fireEvent.click(screen.getByRole("button", { name: "检查所选产物证据" }));
+  await screen.findByLabelText("产物证据 artifact-actual");
+  expect(checks).toEqual([{ artifacts: [{ artifact_id: artifact.artifact_id, content_hash: artifact.content_hash }] }]);
+  expect(screen.getByRole("button", { name: "提交任务反馈" })).toBeDisabled();
+});
+
+test("证据检查被拒绝不会生成可引用证据", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.includes("learning-policy")) return new Response(JSON.stringify({ mode: "off" }));
+    if (url.endsWith("/verify")) return new Response(JSON.stringify({ detail: { code: "observation_evidence_check_denied", message: "denied" } }), { status: 422 });
+    return new Response(JSON.stringify({ run_id: "run", versions: [{ version_id: "version-actual", origin: "trial", steps: ["read"] }], artifacts: [], artifacts_truncated: false, pending_artifacts: [artifact] }));
+  }));
+  render(<FeedbackPanel runId="run" workspaceId="workspace" />);
+  fireEvent.click(screen.getByRole("button", { name: "反馈与记成方法" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "记录已核对的 Skill 使用结果" }));
+  await screen.findByLabelText("待检查产物 artifact-actual");
+  fireEvent.click(screen.getByLabelText("待检查产物 artifact-actual"));
+  fireEvent.click(screen.getByRole("button", { name: "检查所选产物证据" }));
+  await screen.findByRole("alert");
+  expect(screen.queryByLabelText("产物证据 artifact-actual")).toBeNull();
+  expect(screen.getByRole("button", { name: "提交任务反馈" })).toBeDisabled();
+});
