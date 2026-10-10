@@ -1057,3 +1057,45 @@ async def test_v2_verified_json_secret_is_quarantined_under_v3(tmp_path: Path) -
         assert (store._root / record.uri).read_text(encoding="utf8") == raw
     finally:
         await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_download_evidence_quarantine_review_does_not_grant_model_injection(tmp_path):
+    database, aggregate, artifacts, _store, guard = await _environment(tmp_path)
+    try:
+        record = await _add_artifact(artifacts, aggregate, CLEAN_TEXT, artifact_type="text/csv")
+        async with database.session_factory() as session:
+            current = await session.get(ArtifactRecord, record.id)
+            current.redaction_status = "quarantined"
+            current.redaction_policy_version = POLICY_VERSION - 1
+            await session.commit()
+        result = await guard.clear_quarantine(
+            artifact_id=record.id,
+            actor="local-user",
+            reason="old false-positive policy corrected",
+            expected_policy_version=POLICY_VERSION - 1,
+            expected_content_hash=record.content_hash,
+            client_request_id="download-review-one",
+        )
+        assert result.outcome == OUTCOME_CLEARED
+        assert result.checked_hash == record.content_hash
+        with pytest.raises(ArtifactNotInjectable):
+            await guard.read_verified_text(
+                artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+            )
+        async with database.session_factory() as session:
+            events = list(
+                await session.scalars(
+                    select(RunEventRecord).where(
+                        RunEventRecord.run_id == aggregate.run.id,
+                        RunEventRecord.event_type.in_(REVIEW_EVENT_TYPES),
+                    )
+                )
+            )
+            assert len(events) == 2
+            assert {event.event_type for event in events} == {
+                REVIEW_REQUESTED_EVENT,
+                REVIEW_CLEARED_EVENT,
+            }
+    finally:
+        await database.dispose()

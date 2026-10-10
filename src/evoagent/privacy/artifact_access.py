@@ -680,8 +680,8 @@ class ArtifactInjectionGuard:
     async def _require_access(self, session, record):
         if record is None or record.attributes.get("erased"):
             raise ToolPermissionError("artifact is unknown or erased")
-        if record.type not in INJECTABLE_ARTIFACT_TYPES:
-            raise ArtifactNotInjectable("artifact type is not injectable")
+        if record.type not in EVIDENCE_TEXT_ARTIFACT_TYPES:
+            raise ArtifactNotInjectable("artifact type has no supported text review")
         try:
             await check_run_references(session, record.run_id)
         except MemoryError as error:
