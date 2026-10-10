@@ -245,6 +245,48 @@ class SkillUsageService:
             },
         )
 
+    async def health_snapshot(self, session, trial):
+        """Compute in caller transaction without another connection or side effects."""
+        if trial.status != "active":
+            return TrialHealth(trial.status)
+        if content_hash(trial.health_policy_snapshot) != trial.health_policy_hash:
+            return TrialHealth("health_pending")
+        pending = await session.scalar(
+            self.pending_projection_query()
+            .where(
+                RunSkillSelectionRecord.trial_id == trial.id,
+                RunSkillSelectionRecord.skill_version_id == trial.version_id,
+            )
+            .limit(1)
+        )
+        if pending is not None:
+            return TrialHealth("health_pending")
+        now = await database_now(session)
+        records = list(
+            await session.scalars(
+                select(SkillObservationRecord)
+                .where(
+                    SkillObservationRecord.trial_id == trial.id,
+                    SkillObservationRecord.version_id == trial.version_id,
+                    SkillObservationRecord.first_finished_at >= now - timedelta(hours=24),
+                )
+                .order_by(
+                    SkillObservationRecord.first_finished_at.desc(),
+                    SkillObservationRecord.id.desc(),
+                )
+                .limit(201)
+            )
+        )
+        version = await session.get(SkillVersionRecord, trial.version_id)
+        known_steps = {item["id"] for item in version.definition.get("steps", ())}
+        return evaluate_health(
+            persisted_health_observations(records, trial=trial, known_steps=known_steps),
+            trial_id=trial.id,
+            version_id=trial.version_id,
+            now=now,
+            policy=trial.health_policy_snapshot,
+        )
+
     async def evaluate_trial_health(self, trial_id):
         trials = SkillTrialService(self.factory)
         if await trials.suspend_unavailable(trial_id):
@@ -253,43 +295,7 @@ class SkillUsageService:
             trial = await session.get(SkillTrialRecord, trial_id)
             if trial.status != "active":
                 return TrialHealth(trial.status)
-            if content_hash(trial.health_policy_snapshot) != trial.health_policy_hash:
-                return TrialHealth("health_pending")
-            pending = await session.scalar(
-                self.pending_projection_query()
-                .where(
-                    RunSkillSelectionRecord.trial_id == trial.id,
-                    RunSkillSelectionRecord.skill_version_id == trial.version_id,
-                )
-                .limit(1)
-            )
-            if pending is not None:
-                return TrialHealth("health_pending")
-            now = await database_now(session)
-            records = list(
-                await session.scalars(
-                    select(SkillObservationRecord)
-                    .where(
-                        SkillObservationRecord.trial_id == trial.id,
-                        SkillObservationRecord.version_id == trial.version_id,
-                        SkillObservationRecord.first_finished_at >= now - timedelta(hours=24),
-                    )
-                    .order_by(
-                        SkillObservationRecord.first_finished_at.desc(),
-                        SkillObservationRecord.id.desc(),
-                    )
-                    .limit(201)
-                )
-            )
-            version = await session.get(SkillVersionRecord, trial.version_id)
-            known_steps = {item["id"] for item in version.definition.get("steps", ())}
-            decision = evaluate_health(
-                persisted_health_observations(records, trial=trial, known_steps=known_steps),
-                trial_id=trial.id,
-                version_id=trial.version_id,
-                now=now,
-                policy=trial.health_policy_snapshot,
-            )
+            decision = await self.health_snapshot(session, trial)
             policy_hash = trial.health_policy_hash
         if decision.status == "suspend":
             try:

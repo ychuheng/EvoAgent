@@ -1,6 +1,8 @@
 """Common formal eligibility reader; trial selection remains closed."""
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
+from uuid import UUID
 
 from sqlalchemy import select
 
@@ -12,9 +14,47 @@ from evoagent.db.models import (
 )
 from evoagent.memory.schema import MemoryError
 from evoagent.privacy.redaction import redact_value
-from evoagent.skills.applicability import SkillApplicabilityEvaluator
+from evoagent.skills.applicability import ApplicabilityDecision, SkillApplicabilityEvaluator
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.schema import SkillDefinition
+from evoagent.skills.selection_snapshot import SkillSelectionScope
+
+if TYPE_CHECKING:
+    from evoagent.skills.retrieval import SkillDocument
+
+
+@dataclass(frozen=True)
+class SkillCandidate:
+    document: "SkillDocument"
+    scope: SkillSelectionScope
+    origin: Literal["formal", "trial", "pinned"]
+    trial_id: UUID | None = None
+
+    def __post_init__(self):
+        if self.origin not in {"formal", "trial", "pinned"} or (
+            (self.origin == "trial") != (self.trial_id is not None)
+        ):
+            raise ValueError("candidate trial identity invalid")
+        if (
+            content_hash(self.document.definition.model_dump(mode="json"))
+            != self.document.content_hash
+        ):
+            raise ValueError("candidate content hash invalid")
+
+
+@dataclass(frozen=True)
+class RankedSkill:
+    candidate: SkillCandidate
+    score: float
+    matched_terms: tuple[str, ...]
+    applicability: ApplicabilityDecision
+
+
+@dataclass(frozen=True)
+class SkillSelectionPlan:
+    selected: RankedSkill | None
+    text: str | None
+    omissions: tuple[tuple[UUID, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -159,6 +199,285 @@ class SkillSelector:
         self.factory, self.settings, self.registry = factory, settings, registry
         self.guard, self.scope, self.inputs = guard, scope, frozen_inputs
 
+    def assess(self, definition, facts):
+        allowed = set(definition.preconditions.allowed_tools)
+        if (
+            "shell" in allowed
+            or not allowed <= set(self.registry.names)
+            or definition.preconditions.max_effective_risk.value
+            > self.settings.skill_max_effective_risk.value
+            or any(
+                self.registry.get(name).risk.value
+                > definition.preconditions.max_effective_risk.value
+                for name in allowed
+                if name in self.registry.names
+            )
+        ):
+            return ApplicabilityDecision("inapplicable", ("tool_or_risk_unavailable",))
+        return SkillApplicabilityEvaluator().assess(definition, facts)
+
+    async def candidates(self, *, scope=None, run_mode="retrieval", pinned_version_id=None):
+        from sqlalchemy import or_
+
+        from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
+        from evoagent.skills.retrieval import SkillDocument
+        from evoagent.skills.service import GateNotPassedError, SkillService
+        from evoagent.skills.trials import SkillTrialService
+        from evoagent.skills.usage import SkillUsageService
+
+        if scope is not None and scope != self.scope:
+            raise MemoryError("skill_selection_scope_invalid")
+        if run_mode == "baseline":
+            return ()
+        if run_mode != "retrieval" or pinned_version_id is not None:
+            # DRAFT pins require the existing fenced internal experiment path.
+            raise MemoryError("skill_selection_internal_pin_required")
+        async with self.factory() as session:
+            skills = tuple(
+                await session.scalars(
+                    select(SkillRecord)
+                    .where(
+                        SkillRecord.workspace_id == self.scope.workspace_id,
+                        SkillRecord.status == "enabled",
+                        or_(
+                            SkillRecord.project_id.is_(None),
+                            SkillRecord.project_id == self.scope.project_id,
+                        ),
+                    )
+                    .order_by(SkillRecord.id)
+                    .limit(201)
+                )
+            )
+        if len(skills) > 200:
+            raise MemoryError("skill_catalogue_budget_exceeded")
+        candidates = []
+        for skill in skills:
+            async with self.factory() as session:
+                try:
+                    trial = await self._trial_intent(session, skill.id)
+                except MemoryError:
+                    continue  # incomplete history cannot grant selection authority
+                target = trial.version_id if trial else skill.active_version_id
+                if target is None or trial is not None and trial.status != "active":
+                    continue  # suspension does not silently restore the formal version
+                if trial is not None:
+                    ready = await SkillTrialService(self.factory)._assess(
+                        session, trial.version_id, trial.validation_request_id
+                    )
+                    if not ready.ready or ready.report_hash != trial.report_hash:
+                        continue
+                try:
+                    version = await SkillAccessPolicy().check(
+                        session,
+                        target,
+                        workspace_id=self.scope.workspace_id,
+                        project_id=self.scope.project_id,
+                    )
+                except SkillAccessError:
+                    continue
+                if trial is None:
+                    if str(version.lifecycle_status) != "active":
+                        continue
+                    try:
+                        await SkillService.check_formal_gate(session, version)
+                    except GateNotPassedError:
+                        continue
+                candidate = SkillCandidate(
+                    SkillDocument(
+                        skill.id,
+                        version.id,
+                        SkillDefinition.model_validate(version.definition),
+                        version.content_hash,
+                    ),
+                    self.scope,
+                    "trial" if trial else "formal",
+                    trial.id if trial else None,
+                )
+            if trial is not None:
+                health = await SkillUsageService(self.factory).evaluate_trial_health(trial.id)
+                if health.status != "healthy":
+                    continue
+            candidates.append(candidate)
+        return tuple(candidates)
+
+    async def _trial_intent(self, session, skill_id):
+        from sqlalchemy import or_
+
+        from evoagent.db.models import SkillTrialRecord
+
+        trials = tuple(
+            await session.scalars(
+                select(SkillTrialRecord)
+                .where(
+                    SkillTrialRecord.skill_id == skill_id,
+                    SkillTrialRecord.workspace_id == self.scope.workspace_id,
+                    or_(
+                        SkillTrialRecord.project_id.is_(None),
+                        SkillTrialRecord.project_id == self.scope.project_id,
+                    ),
+                )
+                .order_by(SkillTrialRecord.created_at.desc(), SkillTrialRecord.id.desc())
+                .limit(201)
+                .execution_options(populate_existing=True)
+            )
+        )
+        if len(trials) > 200:
+            raise MemoryError("skill_trial_history_budget_exceeded")
+        return next(
+            (item for item in trials if item.project_id == self.scope.project_id),
+            trials[0] if trials else None,
+        )
+
+    async def revalidate(self, session, plan, *, scope=None):
+        from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
+        from evoagent.skills.service import GateNotPassedError, SkillService
+        from evoagent.skills.trials import SkillTrialService, TrialScope
+        from evoagent.skills.usage import SkillUsageService
+
+        if scope is not None and scope != self.scope:
+            raise MemoryError("skill_selection_scope_invalid")
+        if plan.selected is None:
+            return
+        candidate = plan.selected.candidate
+        if candidate.scope != self.scope:
+            raise MemoryError("skill_selection_scope_invalid")
+        version = await session.get(SkillVersionRecord, candidate.document.version_id)
+        if version is None:
+            raise MemoryError("skill_source_revoked")
+        skill = await session.scalar(
+            select(SkillRecord)
+            .where(SkillRecord.id == version.skill_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if skill is None:
+            raise MemoryError("skill_source_revoked")
+        await session.refresh(version)
+        try:
+            version = await SkillAccessPolicy().check(
+                session,
+                candidate.document.version_id,
+                workspace_id=self.scope.workspace_id,
+                project_id=self.scope.project_id,
+            )
+        except SkillAccessError:
+            raise MemoryError("skill_source_revoked") from None
+        intent = await self._trial_intent(session, skill.id)
+        if version.content_hash != candidate.document.content_hash:
+            raise MemoryError("skill_selection_changed")
+        if candidate.origin == "formal":
+            if (
+                intent is not None
+                or skill.active_version_id != version.id
+                or str(version.lifecycle_status) != "active"
+            ):
+                raise MemoryError("skill_selection_changed")
+            try:
+                await SkillService.check_formal_gate(session, version)
+            except GateNotPassedError:
+                raise MemoryError("skill_formal_gate_unavailable") from None
+        elif candidate.origin == "trial":
+            trial = intent
+            if (
+                trial is None
+                or trial.id != candidate.trial_id
+                or trial.status != "active"
+                or trial.version_id != version.id
+                or trial.workspace_id != self.scope.workspace_id
+                or trial.project_id not in (None, self.scope.project_id)
+                or trial.scope_key != TrialScope(trial.workspace_id, trial.project_id).key
+            ):
+                raise MemoryError("skill_selection_changed")
+            ready = await SkillTrialService(self.factory)._assess(
+                session, trial.version_id, trial.validation_request_id
+            )
+            if not ready.ready or ready.report_hash != trial.report_hash:
+                raise MemoryError("skill_trial_validation_revoked")
+            health = await SkillUsageService(self.factory).health_snapshot(session, trial)
+            if health.status != "healthy":
+                raise MemoryError("skill_trial_health_unavailable")
+        else:
+            raise MemoryError("skill_selection_internal_pin_required")
+
+    async def rank(self, goal, candidates, *, facts, backend="bm25", distances=None):
+        from evoagent.retrieval.hybrid import rank
+        from evoagent.skills.retrieval import BM25Retriever
+
+        if backend not in {"bm25", "hybrid"}:
+            raise ValueError("selector backend invalid")
+        eligible = {}
+        for candidate in candidates:
+            if candidate.scope != self.scope:
+                continue
+            decision = self.assess(candidate.document.definition, facts)
+            if decision.status == "applicable":
+                if candidate.document.version_id in eligible:
+                    raise ValueError("duplicate selection candidate")
+                eligible[candidate.document.version_id] = candidate, decision
+        if backend == "bm25":
+            matches = BM25Retriever().search(
+                goal, tuple(item[0].document for item in eligible.values())
+            )
+            return tuple(
+                RankedSkill(
+                    eligible[match.document.version_id][0],
+                    match.score,
+                    match.matched_terms,
+                    eligible[match.document.version_id][1],
+                )
+                for match in matches
+                if match.score >= self.settings.skill_retrieval_min_score
+            )
+        rows = rank(
+            goal,
+            {key: value[0].document.text for key, value in eligible.items()},
+            distances or {},
+            minimum_score=self.settings.skill_retrieval_min_score,
+            maximum_distance=self.settings.retrieval_max_vector_distance,
+            rrf_k=self.settings.retrieval_rrf_k,
+        )
+        return tuple(
+            RankedSkill(
+                eligible[key][0],
+                evidence["rrf"],
+                tuple(evidence.get("terms", ())),
+                eligible[key][1],
+            )
+            for key, evidence in rows
+        )
+
+    def choose(self, ranked, *, token_budget, max_skills=1):
+        from evoagent.core.context_budget import ConservativeTokenCounter
+        from evoagent.core.models import Message, MessageRole, ModelRequest
+        from evoagent.skills.rendering import SkillContextRenderer
+
+        if (
+            type(token_budget) is not int
+            or token_budget < 0
+            or type(max_skills) is not int
+            or max_skills not in {0, 1}
+        ):
+            raise ValueError("selector choice budget invalid")
+        if max_skills == 0:
+            return SkillSelectionPlan(None, None)
+        omissions = []
+        for item in ranked:
+            text = SkillContextRenderer(2).render(item.candidate.document.definition)
+            count = (
+                ConservativeTokenCounter()
+                .count_request(
+                    ModelRequest(
+                        model="selection-budget",
+                        messages=(Message(role=MessageRole.USER, content=text),),
+                    )
+                )
+                .count
+            )
+            if count <= token_budget:
+                return SkillSelectionPlan(item, text, tuple(omissions))
+            omissions.append((item.candidate.document.version_id, "partition_budget"))
+        return SkillSelectionPlan(None, None, tuple(omissions))
+
     async def _target(self, unit, task, run):
         from evoagent.runtime.run_config import RunMode
         from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
@@ -243,29 +562,12 @@ class SkillSelector:
             return choice
         text, evidence, reason = None, None, None
         if definition is not None:
-            decision = SkillApplicabilityEvaluator().assess(definition, facts)
+            decision = self.assess(definition, facts)
             evidence = {
                 "status": decision.status,
                 "reasons": list(decision.reasons),
                 "missing_facts": list(decision.missing_facts),
             }
-            allowed = set(definition.preconditions.allowed_tools)
-            if (
-                "shell" in allowed
-                or not allowed <= set(self.registry.names)
-                or definition.preconditions.max_effective_risk.value > config["max_risk"]
-                or any(
-                    self.registry.get(name).risk.value
-                    > definition.preconditions.max_effective_risk.value
-                    for name in allowed
-                    if name in self.registry.names
-                )
-            ):
-                evidence = {
-                    "status": "inapplicable",
-                    "reasons": ["tool_or_risk_unavailable"],
-                    "missing_facts": [],
-                }
             reason = None if evidence["status"] == "applicable" else evidence["status"]
             if config["top_k"] == 0:
                 reason = "top_k"
