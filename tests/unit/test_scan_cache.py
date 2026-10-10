@@ -19,7 +19,10 @@ async def test_actual_safe_scan_reuses_one_child_and_never_keeps_plaintext(monke
         return original(limits)
 
     monkeypatch.setattr(scanner, "command", count)
-    limits = ScanLimits()
+    # This contract measures reuse/key isolation, not a production latency SLA.
+    # Leave room for real child startup on shared CI CPUs; dedicated scanner
+    # tests still exercise hard wall/CPU limits and fail-closed cleanup.
+    limits = ScanLimits(wall_ms=5000)
     one = await scanner.scan_identical("public fixture body", limits)
     two = await scanner.scan_identical("public fixture body", limits)
     assert one == two and len(commands) == 1
