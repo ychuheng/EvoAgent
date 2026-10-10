@@ -1,13 +1,15 @@
 """Real file tools operate on distinct replicas; Mock is never adoption proof."""
 
 import hashlib
+import io
 import json
+import zipfile
 
 import pytest
 from sqlalchemy import select
 
 from evoagent.core.models import FinishReason, Message, MessageRole, ModelResponse, ToolCall
-from evoagent.db.models import LearningRequestRecord, ValidationReplicaBindingRecord
+from evoagent.db.models import ArtifactRecord, LearningRequestRecord, ValidationReplicaBindingRecord
 from evoagent.evals.coordinator import EvalCoordinator
 from evoagent.evals.validators import default_validator_registry
 from evoagent.learning.replica_bindings import replica_factory
@@ -17,7 +19,7 @@ from evoagent.memory.maintenance import MaintenanceWorker
 from evoagent.memory.schema import MemoryError
 from evoagent.providers.mock import MockProvider
 from evoagent.tasks.lease import JobLeaseManager
-from evoagent.trace.artifacts import LocalArtifactStore
+from evoagent.trace.artifacts import ArtifactService, LocalArtifactStore
 from evoagent.workers.bootstrap import ConfiguredTaskHandler
 from evoagent.workers.main import JobWorker
 from tests.integration.test_learning_worker import worker
@@ -168,6 +170,29 @@ async def test_actual_file_tools_and_bound_resume_preserve_separate_arms(
         assert hashlib.sha256(original).hexdigest() in observed
         assert all(line in observed for line in original.decode().splitlines())
         assert registry[binding.fixture_id].files[0][1] == original
+        async with db.session_factory() as session:
+            output = await session.scalar(
+                select(ArtifactRecord).where(
+                    ArtifactRecord.run_id == binding.run_id,
+                    ArtifactRecord.type == "validation_output",
+                )
+            )
+        assert output is not None
+        downloaded = await trial_candidate[0].get(f"/api/v1/artifacts/{output.id}/download")
+        assert downloaded.status_code == 200
+        assert downloaded.content == await store.read(output.uri)
+        with zipfile.ZipFile(io.BytesIO(downloaded.content)) as archive:
+            assert (
+                archive.read(f"files/{path}") == original + f"Verified by {binding.arm}.\n".encode()
+            )
+            manifest = json.loads(archive.read("manifest.json"))
+            assert manifest["run_id"] == str(binding.run_id)
+            assert manifest["input_manifest_hash"] == binding.manifest_hash
+            assert str(roots[binding.run_id]) not in archive.read("manifest.json").decode()
+        # Download is an immutable byte snapshot, not a pointer to editable files.
+        (roots[binding.run_id] / path).write_bytes(b"later local edit")
+        repeated = await trial_candidate[0].get(f"/api/v1/artifacts/{output.id}/download")
+        assert repeated.content == downloaded.content
     async with db.session_factory() as session:
         updated = await session.get(LearningRequestRecord, request.id)
         assert updated.stage == "validation_review", updated.error_code
@@ -259,3 +284,49 @@ async def test_initial_replica_input_change_is_refused_before_run_configuration(
     with pytest.raises(MemoryError, match="replica_unavailable"):
         await guard.check()
     assert path.read_bytes() == b"changed before execution"
+
+
+async def test_output_archive_retry_is_idempotent_and_cancel_stops_new_snapshot(trial_candidate):
+    from evoagent.learning.replica_outputs import archive_outputs
+    from evoagent.learning.service import LearningService
+    from evoagent.privacy.artifact_access import ArtifactInjectionGuard, ArtifactNotInjectable
+    from evoagent.tasks.lease_guard import LeaseGuard, LeaseLostError
+
+    db, settings, request, _ = await prepare(trial_candidate)
+    lease = await JobLeaseManager(db.session_factory, lease_seconds=60).claim_next("archive-retry")
+    assert lease is not None
+    store = LocalArtifactStore(settings.artifact_root)
+    guard = await PersonalValidationRunGuard.for_run(
+        db.session_factory, store, lease.run_id, learning_enabled=True
+    )
+    service = ArtifactService(store, db.session_factory, lease_guard=LeaseGuard(lease))
+    first = await archive_outputs(guard, service)
+    second = await archive_outputs(guard, service)
+    assert first.id == second.id and first.content_hash == second.content_hash
+    async with db.session_factory() as session:
+        outputs = list(
+            await session.scalars(
+                select(ArtifactRecord).where(
+                    ArtifactRecord.run_id == lease.run_id,
+                    ArtifactRecord.type == "validation_output",
+                )
+            )
+        )
+    assert len(outputs) == 1
+    injection = ArtifactInjectionGuard(session_factory=db.session_factory, artifact_store=store)
+    with pytest.raises(ArtifactNotInjectable):
+        await injection.read_verified_text(
+            artifact_id=second.id, run_id=lease.run_id, purpose="artifact_read"
+        )
+    from evoagent.db.models import TaskRecord
+
+    async with db.session_factory() as session:
+        task = await session.get(TaskRecord, lease.task_id)
+        task.lease_epoch += 1
+        await session.commit()
+    with pytest.raises(LeaseLostError):
+        await archive_outputs(guard, service)
+    await LearningService(db.session_factory).cancel_request(request.id, request.lock_version)
+    with pytest.raises(MemoryError, match="authorization_revoked"):
+        await archive_outputs(guard, service)
+    assert await store.read(second.uri)

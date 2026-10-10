@@ -20,6 +20,7 @@ from evoagent.core.models import (
 from evoagent.db.models import RunRecord, TaskRecord
 from evoagent.db.session import Database
 from evoagent.memory.maintenance import MaintenanceWorker
+from evoagent.memory.schema import MemoryError as ContextAuthorizationError
 from evoagent.projects.inputs import InputChangedError
 from evoagent.projects.readiness import REASON_UNOBSERVABLE, ProjectCommandReadinessProbe
 from evoagent.projects.schema import ProjectAuthorizationRevoked
@@ -145,7 +146,6 @@ class ConfiguredTaskHandler:
         validation_guard = None
         if run is not None and run.data_role == "dev":
             from evoagent.learning.validation_guard import PersonalValidationRunGuard
-            from evoagent.memory.schema import MemoryError as ContextAuthorizationError
 
             try:
                 validation_guard = await PersonalValidationRunGuard.for_run(
@@ -275,7 +275,18 @@ class ConfiguredTaskHandler:
             authorization_check=authorize if validation_guard is not None else project_check,
         )
         try:
-            return await runner.handle(lease)
+            result = await runner.handle(lease)
+            if validation_guard is not None and result.status is PersistentRunStatus.COMPLETED:
+                from evoagent.learning.replica_outputs import archive_outputs
+
+                await archive_outputs(validation_guard, artifact_service)
+            return result
+        except ContextAuthorizationError as error:
+            return TaskExecutionResult(
+                status=PersistentRunStatus.FAILED,
+                error_code=error.code,
+                error_message="personal validation output or authorization is unavailable",
+            )
         except ProjectAuthorizationRevoked as error:
             return TaskExecutionResult(
                 status=PersistentRunStatus.AUTHORIZATION_REVOKED,
