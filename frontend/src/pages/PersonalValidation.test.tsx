@@ -110,3 +110,21 @@ test("关闭学习后仍可查看验证证据，不能提交判定", async () =>
   expect(screen.getByRole("button", { name: "查看实际输出 positive treatment" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "保存填写的业务判定" })).toBeDisabled();
 });
+
+test("区分实际采用、不采用和历史未知，不让业务通过覆盖采用失败", async () => {
+  const detail: LearningRequest = { ...validation, validation_report: {
+    ...validation.validation_report!, business_verification: "passed", adoption_verification: "failed",
+    items: validation.validation_report!.items.map((item, index) => ({ ...item,
+      actual_selection: { verified: true, applied: index === 0, selection: index === 0 ? {
+        version_id: "candidate-v3", content_hash: "hash", rendered_hash: "render", origin: "pinned",
+      } : null },
+    })),
+  } };
+  vi.stubGlobal("fetch", vi.fn(async () => json(detail)));
+  render(<PersonalValidationPanel row={detail} enabled onChanged={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "查看验证与业务判定" }));
+  expect(await screen.findByText(/未通过，不能据此试用/)).toBeInTheDocument();
+  expect(screen.getByText(/已进入上下文（版本 candidate-v3）/)).toBeInTheDocument();
+  expect(screen.getByText("实际方法：未采用")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /启用|试用/ })).not.toBeInTheDocument();
+});

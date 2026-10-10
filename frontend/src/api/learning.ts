@@ -13,13 +13,18 @@ export type LearningRequest = {
   request_kind: string; lock_version: number; candidate_version_id: string | null;
   validation_report_hash: string | null; error_code: string | null; available_actions: string[];
   source?: { id: string; status: string; revocation_epoch: number; content_hash?: string; artifact_id?: string } | null;
-  validation_report?: { items: ValidationItem[]; business_verification: string; trial_eligible: boolean; cost: { provider: string }; } | null;
+  validation_report?: { items: ValidationItem[]; business_verification: string; adoption_verification?: "passed" | "failed"; trial_eligible: boolean; cost: { provider: string }; } | null;
   cost?: { known_spent_micros: number; outstanding_reserved_micros: number; unknown_usage_count: number } | null;
 };
 export type ValidationItem = {
   case_key: string; case_kind: string; arm: string; repeat: number; criterion_id: string;
   description?: string; expected: unknown; observed: unknown; verdict: string;
   judge_origin: "machine" | "user"; evidence_refs: { type: string; id: string }[];
+  actual_selection?: {
+    verified: boolean; applied: boolean | null;
+    selection?: { version_id: string; content_hash: string; rendered_hash: string; origin: string } | null;
+    selection_hash?: string; selector_version?: string;
+  };
 };
 export type FeedbackResult = { id: string; revision: number; learning_revision: number; routing: string; learning_request_id: string | null };
 export type ValidationFixture = { fixture_id: string; files: { path: string; content: string }[] };

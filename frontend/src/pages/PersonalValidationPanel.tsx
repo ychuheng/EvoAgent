@@ -89,9 +89,11 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
     {detail?.available_actions.includes("start_validation") && <button type="button" disabled={!writable} onClick={() => void act(async () => { await learning.startValidation(detail); await onChanged(); setDetail(null); })}>执行离线验证</button>}
     {detail && report && <>
       <p>业务判定：{report.business_verification === "passed" ? "已确认" : report.business_verification === "failed" ? "有失败项" : "待核对"}。本轮模型：{report.cost.provider}；不具备试用资格。</p>
+      <p>方法采用检查：{report.adoption_verification === "passed" ? "正例采用、反例未采用" : report.adoption_verification === "failed" ? "未通过，不能据此试用" : "历史报告缺少实际采用证据"}。进入上下文不代表已经遵循方法或业务正确。</p>
       {report.items.map(item => { const key = keyOf(item), runId = item.evidence_refs.find(ref => ref.type === "run")?.id, claim = claims[key] ?? { verdict: "unknown" as Verdict, notes: "" }; return <fieldset key={key} disabled={busy}>
         <legend>{item.case_key} · {item.arm === "treatment" ? "候选方法" : "对照"} · 第 {item.repeat + 1} 次</legend>
         <p>{item.description ?? item.criterion_id} · 当前结果：{item.verdict}</p><pre>{JSON.stringify({ expected: item.expected, observed: item.observed }, null, 2)}</pre>
+        <p>实际方法：{item.actual_selection?.verified ? item.actual_selection.applied ? `已进入上下文（版本 ${item.actual_selection.selection?.version_id ?? "未知"}）` : "未采用" : "缺少可信采用证据"}</p>
         {runId && <><button type="button" onClick={() => void act(async () => { const trace = await chat.trace(runId); setTraces(values => ({ ...values, [runId]: trace })); })}>查看实际输出 {item.case_key} {item.arm}</button>{traces[runId] && <><pre>{JSON.stringify(traces[runId], null, 2)}</pre>{traces[runId].artifacts?.map(artifact => <a key={artifact.id} href={`/api/v1/artifacts/${artifact.id}/download`} download>下载验证产物</a>)}</>}</>}
         {item.judge_origin === "user" && detail.available_actions.includes("judge_validation") && <>
           <label>你的判定<select disabled={!enabled} aria-label={`判定 ${key}`} value={claim.verdict} onChange={event => setClaims(values => ({ ...values, [key]: { ...claim, verdict: event.target.value as Verdict } }))}><option value="unknown">尚不能确定</option><option value="pass">符合业务结果</option><option value="fail">不符合业务结果</option></select></label>
