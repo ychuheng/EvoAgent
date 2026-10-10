@@ -17,10 +17,12 @@ from evoagent.db.models import (
     RetrievalBatchRecord,
     RetrievalDocumentRecord,
     RetrievalSelectionRecord,
+    RunRecord,
     RunSkillSelectionRecord,
     SessionRecord,
     SkillRecord,
     SkillVersionRecord,
+    TaskRecord,
     utc_now,
 )
 from evoagent.db.unit_of_work import UnitOfWork
@@ -41,6 +43,7 @@ from evoagent.sessions.service import text_hash
 from evoagent.skills.applicability import VerifiedSkillFacts
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.retrieval import RetrievalMatch, SkillRetrievalService
+from evoagent.skills.selection import FormalSkillReader
 from evoagent.tools.base import ToolError
 from evoagent.workers.rate_limit import RateLimited
 
@@ -125,6 +128,7 @@ class ContextResolver:
                     run_id=run.id,
                     renderer_version=config["skill_renderer_version"],
                     applicability_facts=applicability_facts,
+                    project_id=task.project_id,
                 )
                 if source:
                     candidates[key] = source
@@ -249,6 +253,7 @@ class ContextResolver:
                     lock=True,
                     renderer_version=config["skill_renderer_version"],
                     applicability_facts=applicability_facts,
+                    project_id=task.project_id,
                 )
                 if current is None or current.source_hash != source.source_hash:
                     continue
@@ -335,6 +340,9 @@ class ContextResolver:
             return await self._restore(unit.session, batch, config)
 
     async def _restore(self, session, batch, config):
+        run = await session.get(RunRecord, batch.run_id)
+        task = await session.get(TaskRecord, run.task_id)
+        scope = await session.get(SessionRecord, task.session_id)
         if batch.config != config:
             raise SnapshotCompatibilityError("retrieval configuration changed")
         await check_run_references(session, batch.run_id)
@@ -373,6 +381,9 @@ class ContextResolver:
                     or content_hash(version.definition) != row.source_hash
                 ):
                     raise MemoryError("context_source_revoked")
+                FormalSkillReader.check_frozen_scope(
+                    skill, workspace_id=scope.workspace_id, project_id=task.project_id
+                )
                 matches.append(
                     RetrievalMatch(
                         SkillRetrievalService._document(version),

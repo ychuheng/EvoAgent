@@ -14,18 +14,14 @@ from evoagent.db.models import (
     RuntimeEvalRunRecord,
     SessionArchiveRecord,
     SessionRecord,
-    SkillRecord,
     SkillVersionRecord,
 )
 from evoagent.memory.archival import archive_input
 from evoagent.memory.repository import verify_version
 from evoagent.memory.schema import MemoryError
-from evoagent.privacy.redaction import redact_value
 from evoagent.sessions.service import text_hash
-from evoagent.skills.applicability import SkillApplicabilityEvaluator
-from evoagent.skills.canonical import content_hash
 from evoagent.skills.rendering import SkillContextRenderer
-from evoagent.skills.schema import SkillDefinition
+from evoagent.skills.selection import FormalSkillReader
 from evoagent.tools.base import ToolError
 
 
@@ -56,44 +52,27 @@ async def load_source(
     run_id=None,
     renderer_version=2,
     applicability_facts=None,
+    project_id=None,
 ):
     kind, raw_id = key.split(":", 1)
     identity = UUID(raw_id)
     if kind == "skill":
-        version = await session.get(SkillVersionRecord, identity)
-        if version is None:
+        scope = await session.get(SessionRecord, scope_id) if scope_id is not None else None
+        if scope_id is not None and scope is None:
             return None
-        skill = await session.get(SkillRecord, version.skill_id)
-        if lock:
-            skill = await session.scalar(
-                select(SkillRecord)
-                .where(SkillRecord.id == skill.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            await session.refresh(version)
-        if (
-            skill.status.value != "enabled"
-            or skill.active_version_id != identity
-            or version.lifecycle_status.value != "active"
-        ):
+        eligible = await FormalSkillReader().read(
+            session,
+            identity,
+            workspace_id=scope.workspace_id if scope else None,
+            project_id=project_id,
+            registry=registry,
+            max_risk=max_risk,
+            facts=applicability_facts,
+            lock=lock,
+        )
+        if eligible is None:
             return None
-        if content_hash(version.definition) != version.content_hash:
-            raise MemoryError("retrieval_source_hash_mismatch")
-        definition = SkillDefinition.model_validate(version.definition)
-        if (
-            applicability_facts is not None
-            and SkillApplicabilityEvaluator().assess(definition, applicability_facts).status
-            != "applicable"
-        ):
-            return None
-        if redact_value(version.definition) != version.definition:
-            return None
-        allowed = set(definition.preconditions.allowed_tools)
-        if "shell" in allowed or definition.preconditions.max_effective_risk.value > max_risk:
-            return None
-        if registry is not None and not allowed <= set(registry.names):
-            return None
+        version, definition = eligible.version, eligible.definition
         text = " ".join((definition.name, definition.description, *definition.triggers))
         return Source(
             key,

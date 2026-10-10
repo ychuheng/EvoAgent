@@ -153,3 +153,119 @@ async def test_family_is_frozen_and_rejects_unrecognized_labels(fencing_db):
             model="mock",
             family="guessed-from-model",
         )
+
+
+@pytest.mark.parametrize("route", ["bm25", "resolver"])
+async def test_foreign_workspace_cannot_select_default_workspace_skill(fencing_db, tmp_path, route):
+    from sqlalchemy import select
+
+    from evoagent.db.models import RunSkillSelectionRecord
+
+    _, identity = await setup(fencing_db, "data")
+    service = TaskService(fencing_db.session_factory)
+    workspace = await service.create_workspace("other workspace")
+    scope = await service.create_session("other", workspace_id=workspace.id)
+    aggregate = await service.create_task(
+        session_id=scope.id, goal="calculate report", family="data", provider="mock", model="mock"
+    )
+    registry = ToolRegistry([CalculatorTool()])
+    if route == "bm25":
+        assert (
+            await SkillRetrievalService(fencing_db.session_factory, registry).select(
+                aggregate.run.id, aggregate.task.goal
+            )
+            == ()
+        )
+    else:
+        # Claim order does not matter: finalize the unused first task before
+        # claiming this one so the resolver receives its own fenced Run.
+        manager = JobLeaseManager(fencing_db.session_factory, lease_seconds=60)
+        first = await manager.claim_next("other")
+        from evoagent.tasks.lease import TaskExecutionResult
+        from evoagent.tasks.state_machine import PersistentRunStatus
+
+        await manager.finalize(first, TaskExecutionResult(status=PersistentRunStatus.COMPLETED))
+        lease = await manager.claim_next("other")
+        resolver = ContextResolver(
+            fencing_db.session_factory,
+            Settings(workspace=tmp_path),
+            registry,
+            LeaseGuard(lease),
+            ContextBuilder(),
+        )
+        assert not (await resolver.resolve(aggregate.task, aggregate.run)).skills
+    async with fencing_db.session_factory() as session:
+        assert await load_source(session, f"skill:{identity}", scope_id=scope.id) is None
+        assert not list(
+            await session.scalars(
+                select(RunSkillSelectionRecord).where(
+                    RunSkillSelectionRecord.run_id == aggregate.run.id
+                )
+            )
+        )
+
+
+@pytest.mark.parametrize("route", ["bm25", "resolver"])
+async def test_scope_change_of_selected_skill_stops_restore(fencing_db, tmp_path, route):
+    from evoagent.memory.schema import MemoryError
+
+    aggregate, identity = await setup(fencing_db, "data")
+    registry = ToolRegistry([CalculatorTool()])
+    if route == "bm25":
+        retrieval = SkillRetrievalService(fencing_db.session_factory, registry)
+        assert await retrieval.select(aggregate.run.id, aggregate.task.goal)
+
+        async def restore():
+            return await retrieval.select(aggregate.run.id, aggregate.task.goal)
+    else:
+        lease = await JobLeaseManager(fencing_db.session_factory, lease_seconds=60).claim_next(
+            "test"
+        )
+        resolver = ContextResolver(
+            fencing_db.session_factory,
+            Settings(workspace=tmp_path),
+            registry,
+            LeaseGuard(lease),
+            ContextBuilder(),
+        )
+        assert (await resolver.resolve(aggregate.task, aggregate.run)).skills
+
+        async def restore():
+            return await resolver.resolve(aggregate.task, aggregate.run)
+
+    other = await TaskService(fencing_db.session_factory).create_workspace("moved scope")
+    async with fencing_db.session_factory() as session:
+        version = await session.get(SkillVersionRecord, identity)
+        skill = await session.get(SkillRecord, version.skill_id)
+        skill.workspace_id = other.id
+        await session.commit()
+    with pytest.raises(MemoryError, match="context_source_revoked"):
+        await restore()
+
+
+async def test_project_scoped_skill_requires_the_frozen_task_project(fencing_db, tmp_path):
+    from evoagent.db.models import ProjectRecord, SessionRecord
+
+    aggregate, identity = await setup(fencing_db, "data")
+    async with fencing_db.session_factory() as session:
+        project = ProjectRecord(name="project", root=str(tmp_path))
+        session.add(project)
+        await session.flush()
+        version = await session.get(SkillVersionRecord, identity)
+        skill = await session.get(SkillRecord, version.skill_id)
+        skill.project_id = project.id
+        scope = await session.get(SessionRecord, aggregate.task.session_id)
+        # Changing the session project must not grant an old Task a new scope.
+        scope.project_id = project.id
+        await session.commit()
+    async with fencing_db.session_factory() as session:
+        assert (
+            await load_source(session, f"skill:{identity}", scope_id=aggregate.task.session_id)
+            is None
+        )
+        assert await load_source(
+            session, f"skill:{identity}", scope_id=aggregate.task.session_id, project_id=project.id
+        )
+    assert not await SkillRetrievalService(
+        fencing_db.session_factory, ToolRegistry([CalculatorTool()])
+    ).select(aggregate.run.id, aggregate.task.goal)

@@ -8,14 +8,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from evoagent.core.models import ToolRisk
-from evoagent.db.models import RunSkillSelectionRecord, SkillVersionRecord
+from evoagent.db.models import (
+    RunSkillSelectionRecord,
+    SessionRecord,
+    SkillRecord,
+    SkillVersionRecord,
+)
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.schema import MemoryError
 from evoagent.privacy.redaction import redact_value
 from evoagent.retrieval.lexical import bm25, tokenize  # noqa: F401
 from evoagent.runtime.run_config import RunMode
-from evoagent.skills.applicability import SkillApplicabilityEvaluator, VerifiedSkillFacts
+from evoagent.skills.applicability import VerifiedSkillFacts
 from evoagent.skills.schema import SkillDefinition
+from evoagent.skills.selection import FormalSkillReader
 from evoagent.tasks.lease_guard import LeaseGuard
 from evoagent.tools.registry import ToolRegistry
 
@@ -124,14 +130,21 @@ class SkillRetrievalService:
                 )
                 rows = await unit.skills.active_versions()
                 documents = []
-                evaluator = SkillApplicabilityEvaluator()
-                for _, version in rows:
-                    document = self._document(version)
-                    if (
-                        self._compatible(document.definition)
-                        and evaluator.assess(document.definition, facts).status == "applicable"
-                    ):
-                        documents.append(document)
+                scope = await unit.session.get(SessionRecord, task.session_id)
+                reader = FormalSkillReader()
+                for _, version in sorted(rows, key=lambda row: str(row[0].id)):
+                    eligible = await reader.read(
+                        unit.session,
+                        version.id,
+                        workspace_id=scope.workspace_id,
+                        project_id=task.project_id,
+                        registry=self._registry,
+                        max_risk=self._max_risk.value,
+                        facts=facts,
+                        lock=True,
+                    )
+                    if eligible is not None:
+                        documents.append(self._document(eligible.version))
                 documents = tuple(documents)
                 candidates = tuple(
                     item
@@ -172,6 +185,14 @@ class SkillRetrievalService:
         self, unit: UnitOfWork, selection: RunSkillSelectionRecord
     ) -> RetrievalMatch:
         version = await unit.skill_versions.get(selection.skill_version_id)
+        if selection.mode == RunMode.RETRIEVAL.value:
+            run = await unit.runs.get(selection.run_id)
+            task = await unit.tasks.get(run.task_id)
+            scope = await unit.session.get(SessionRecord, task.session_id)
+            skill = await unit.session.get(SkillRecord, version.skill_id)
+            FormalSkillReader.check_frozen_scope(
+                skill, workspace_id=scope.workspace_id, project_id=task.project_id
+            )
         return RetrievalMatch(
             self._document(version), selection.score, tuple(selection.query_terms)
         )
@@ -185,12 +206,4 @@ class SkillRetrievalService:
             version.id,
             SkillDefinition.model_validate(version.definition),
             version.content_hash,
-        )
-
-    def _compatible(self, definition: SkillDefinition) -> bool:
-        allowed = set(definition.preconditions.allowed_tools)
-        return (
-            allowed <= set(self._registry.names)
-            and "shell" not in allowed
-            and definition.preconditions.max_effective_risk.value <= self._max_risk.value
         )
