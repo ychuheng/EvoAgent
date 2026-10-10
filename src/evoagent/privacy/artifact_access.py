@@ -146,6 +146,7 @@ class ArtifactInjectionGuard:
         # 那种情况下 `read_verified_text` 会显式报错，而不是静默放行。
         self._session_factory = session_factory
         self._store = artifact_store
+        self._scan_cache_enabled = bool(getattr(settings, "runtime_scan_cache_enabled", False))
         self._scan_budget_ms = settings.artifact_scan_wall_ms if settings else scan_budget_ms
         self._max_scan_bytes = (
             settings.artifact_scan_inline_max_bytes if settings else max_scan_bytes
@@ -370,7 +371,9 @@ class ArtifactInjectionGuard:
 
         limits = limits or self._limits
         try:
-            result = await shared_scanner(limits).scan(text, limits, deadline=deadline)
+            scanner = shared_scanner(limits)
+            scan = scanner.scan_identical if self._scan_cache_enabled else scanner.scan
+            result = await scan(text, limits, deadline=deadline)
         except ScanUnavailable as error:
             return None, error.reason
         return result, None

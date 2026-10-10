@@ -2,10 +2,12 @@
 
 import asyncio
 import ctypes
+import hashlib
 import json
 import os
 import subprocess
 import sys
+from collections import OrderedDict
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,6 +63,30 @@ class BoundedScanner:
         self.queue_size = queue_size
         self._slots = asyncio.Semaphore(concurrency)
         self._admitted = 0
+        self._safe_results = OrderedDict()
+
+    async def scan_identical(self, text: str, limits: ScanLimits, *, deadline=None):
+        """Cache only exact safe detection metadata, never authorization or text."""
+        data = text.encode("utf-8")
+        if len(data) > limits.max_bytes:
+            raise ScanUnavailable("scan_budget_exceeded")
+        if deadline is not None and monotonic() >= deadline:
+            raise ScanUnavailable("scan_timeout")
+        key = (POLICY_VERSION, limits, len(data), hashlib.sha256(data).digest())
+        if deadline is not None and monotonic() >= deadline:
+            raise ScanUnavailable("scan_timeout")
+        if key in self._safe_results:
+            self._safe_results.move_to_end(key)
+            return self._safe_results[key]
+        result = await self.scan(text, limits, deadline=deadline)
+        if not result.categories and result.policy_version == POLICY_VERSION:
+            self._safe_results[key] = RedactionResult(
+                text="", categories=(), policy_version=POLICY_VERSION
+            )
+            self._safe_results.move_to_end(key)
+            while len(self._safe_results) > 256:
+                self._safe_results.popitem(last=False)
+        return result
 
     def command(self, limits):
         return (

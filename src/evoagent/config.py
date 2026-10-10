@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     runtime_maintenance_idle_backoff_enabled: bool = False
     runtime_heartbeat_status_merge_enabled: bool = False
     runtime_snapshot_deduplication_enabled: bool = False
+    runtime_scan_cache_enabled: bool = False
     learning_enabled: bool = False
     personal_trial_enabled: bool = False
     personal_validation_real_enabled: bool = False
