@@ -357,6 +357,9 @@ class JobLeaseManager:
             from evoagent.sessions.service import project_terminal
 
             await project_terminal(unit.session, task, run)
+            from evoagent.skills.observation_jobs import schedule_observation
+
+            await schedule_observation(unit.session, run)
             await unit.events.append(
                 run_id=run.id,
                 event_type=(

@@ -500,11 +500,13 @@ async def run_maintenance_worker():
             ),
         )
         from evoagent.learning.bootstrap import assemble_learning
+        from evoagent.skills.observation_jobs import ObservationJobHandler
 
         learning_handler, learning_provider = assemble_learning(
             database.session_factory, worker.store, settings, ServiceGate(settings, client)
         )
         handlers = {
+            "learning_observe": ObservationJobHandler(database.session_factory),
             "learning_revoke": learning_handler,
             "learning_budget_reconcile": learning_handler,
             "learning_validation_completed": learning_handler,
@@ -515,6 +517,9 @@ async def run_maintenance_worker():
         worker.allowed_kinds = worker.allowed_kinds | handlers.keys()
         listener = None
         lanes = []
+        observations_reconciler = asyncio.create_task(
+            handlers["learning_observe"].periodic_reconciliation()
+        )
         try:
             if settings.runtime_maintenance_idle_backoff_enabled or settings.learning_enabled:
                 from evoagent.workers.maintenance import MaintenanceLane
@@ -584,6 +589,7 @@ async def run_maintenance_worker():
                 if not handled:
                     await asyncio.sleep(settings.worker_poll_seconds)
         finally:
+            lanes.append(observations_reconciler)
             if listener is not None:
                 lanes.append(listener)
             for lane in lanes:

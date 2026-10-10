@@ -85,6 +85,7 @@ class MaintenanceWorker:
                             "learning_revoke",
                             "learning_budget_reconcile",
                             "learning_validation_completed",
+                            "learning_observe",
                         }
                     )
                 )

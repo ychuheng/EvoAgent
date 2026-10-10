@@ -157,6 +157,10 @@ class LearningService:
             row = await LearningRepository(session).append_feedback(
                 run_id, client_request_id, payload, "local-user", expected_revision
             )
+            from evoagent.skills.observation_jobs import schedule_observation
+
+            run = await session.get(RunRecord, run_id)
+            await schedule_observation(session, run, row.revision)
             routing = route_feedback(payload)
             request = None
             if routing == "method":
