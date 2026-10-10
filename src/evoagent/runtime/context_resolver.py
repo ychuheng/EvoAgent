@@ -58,11 +58,21 @@ class ResolvedContext:
 
 class ContextResolver:
     def __init__(
-        self, factory, settings, registry, guard, builder, provider=None, service_gate=None
+        self,
+        factory,
+        settings,
+        registry,
+        guard,
+        builder,
+        provider=None,
+        service_gate=None,
+        *,
+        external_skill_choice=None,
     ):
         self.factory, self.settings, self.registry = factory, settings, registry
         self.guard, self.builder = guard, builder
         self.provider = provider
+        self.external_skill_choice = external_skill_choice
         self.service_gate = service_gate
         # 派生正文（archive.summary 等）在注入前过当前敏感策略；这条路径不需要
         # artifact 存储，因此不传 artifact_store。
@@ -70,7 +80,7 @@ class ContextResolver:
 
     def config(self):
         s = self.settings
-        return {
+        config = {
             "algorithm": "bm25-rrf-v1",
             "route_top_n": ROUTE_TOP_N,
             "backend": s.retrieval_backend,
@@ -86,6 +96,11 @@ class ContextResolver:
             "skill_budget": s.retrieval_skill_budget,
             "memory_budget": s.retrieval_memory_budget,
         }
+
+        if self.external_skill_choice is not None:
+            config["external_skill_selection_hash"] = self.external_skill_choice.selection_hash
+            config["skill_top_k"] = 0
+        return config
 
     async def resolve(self, task, run):
         config = self.config()
@@ -111,7 +126,9 @@ class ContextResolver:
                 self.registry, task.frozen_inputs, task_family=task.family
             )
             candidates = {}
-            for key in await source_keys(session):
+            for key in await source_keys(
+                session, include_skills=self.external_skill_choice is None
+            ):
                 kind = key.split(":")[0]
                 if (
                     kind == "memory"
@@ -229,6 +246,9 @@ class ContextResolver:
                 )
             )
             if saved:
+                # Refusal scanners can append events on this Run. Release the
+                # Task/Run fencing locks before any restoration scanner IO.
+                await unit.commit()
                 return await self._restore(unit.session, saved, config)
             batch = RetrievalBatchRecord(
                 run_id=run.id,
@@ -283,6 +303,8 @@ class ContextResolver:
                     memories = [s.rendered for s in chosen_memories] + (
                         [source.rendered] if kind != "skill" else []
                     )
+                    if self.external_skill_choice is not None and self.external_skill_choice.text:
+                        skills = [self.external_skill_choice.text, *skills]
                     messages = self.builder.build(
                         task.goal,
                         skill_context="\n\n".join(skills) or None,
@@ -380,6 +402,8 @@ class ContextResolver:
             except ToolError as error:
                 raise MemoryError("context_source_blocked") from error
             if row.source_key.startswith("skill:"):
+                if self.external_skill_choice is not None:
+                    raise MemoryError("context_skill_selection_conflict")
                 version = await session.get(SkillVersionRecord, UUID(row.source_key.split(":")[1]))
                 skill = await session.get(SkillRecord, version.skill_id)
                 if (
@@ -415,6 +439,15 @@ class ContextResolver:
             "degraded": batch.degraded,
             "selection_hash": content_hash([(s.source_key, s.text_hash) for s in selections]),
         }
+        if self.external_skill_choice is not None:
+            if len(selections) != batch.selected_count:
+                raise MemoryError("context_source_revoked")
+            return ResolvedContext(
+                self.external_skill_choice.matches,
+                self.external_skill_choice.text,
+                tuple(memories),
+                frozen_config,
+            )
         return ResolvedContext(
             tuple(matches), "\n\n".join(skills) or None, tuple(memories), frozen_config
         )

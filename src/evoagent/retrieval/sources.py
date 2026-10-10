@@ -182,13 +182,15 @@ async def load_source(
     raise ValueError("unsupported source kind")
 
 
-async def source_keys(session):
+async def source_keys(session, *, include_skills=True):
     result = []
     for prefix, model in (
         ("skill", SkillVersionRecord),
         ("memory", MemoryVersionRecord),
         ("archive", SessionArchiveRecord),
     ):
+        if prefix == "skill" and not include_skills:
+            continue
         result.extend(
             f"{prefix}:{identity}" for identity in await session.scalars(select(model.id))
         )

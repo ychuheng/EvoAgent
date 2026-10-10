@@ -483,3 +483,80 @@ async def test_frozen_selection_is_regated_on_restore(env, tmp_path):
             )
         )
     assert [event.payload["purpose"] for event in events] == ["frozen_selection"]
+
+
+async def test_external_skill_decision_keeps_memory_and_never_selects_skills(
+    env, tmp_path, monkeypatch
+):
+    from evoagent.skills.selection import FormalSkillReader, FrozenSkillChoice
+
+    db, _, _, _ = env
+    await indexed(env)
+    task, resolve = await resolver(env, tmp_path)
+    resolve.external_skill_choice = FrozenSkillChoice((), None, ())
+
+    async def forbidden_skill_read(*_, **__):
+        raise AssertionError("ContextResolver must not make a second skill decision")
+
+    monkeypatch.setattr(FormalSkillReader, "read", forbidden_skill_read)
+    first = await resolve.resolve(task.task, task.run)
+    assert first.skills == () and first.skill_text is None
+    assert len(first.memory_texts) == 1
+    assert (
+        first.config["external_skill_selection_hash"]
+        == resolve.external_skill_choice.selection_hash
+    )
+    assert first.config["skill_top_k"] == 0
+    assert await resolve.resolve(task.task, task.run) == first
+    async with db.session_factory() as session:
+        batch = await session.scalar(
+            select(RetrievalBatchRecord).where(RetrievalBatchRecord.run_id == task.run.id)
+        )
+        rows = tuple(
+            await session.scalars(
+                select(RetrievalSelectionRecord).where(
+                    RetrievalSelectionRecord.batch_id == batch.id
+                )
+            )
+        )
+        assert rows and all(not row.source_key.startswith("skill:") for row in rows)
+
+
+async def test_concurrent_context_restore_releases_fencing_before_scanner(env, tmp_path):
+    import asyncio
+
+    db, _, _, _ = env
+    await indexed(env)
+    task, resolve = await resolver(env, tmp_path)
+    competing = ContextResolver(
+        db.session_factory,
+        resolve.settings,
+        resolve.registry,
+        resolve.guard,
+        resolve.builder,
+        provider=MockEmbeddingProvider(),
+    )
+
+    class Race(MockEmbeddingProvider):
+        async def embed(self, texts, profile):
+            await competing.resolve(task.task, task.run)
+            return await super().embed(texts, profile)
+
+    resolve.provider = Race()
+    original = resolve.injection.verify_derived_text
+    checked = []
+
+    async def check_scanner(**kwargs):
+        async def another_connection():
+            async with db.session_factory() as session:
+                await resolve.guard.check(session)
+                await session.commit()
+
+        # PostgreSQL would deadlock here if the saved-batch branch retained locks.
+        await asyncio.wait_for(another_connection(), timeout=2)
+        checked.append(kwargs["source_id"])
+        return await original(**kwargs)
+
+    resolve.injection.verify_derived_text = check_scanner
+    result = await resolve.resolve(task.task, task.run)
+    assert len(result.memory_texts) == 1 and checked
