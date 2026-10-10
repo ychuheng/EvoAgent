@@ -30,6 +30,18 @@ class RegisteredFixture:
     fixture_id: str
     files: tuple[tuple[str, bytes], ...]
 
+    def input_fingerprint(self):
+        """Conservative data identity: neither registry nor file renames add evidence."""
+        manifest = self.manifest()
+        return content_hash(
+            [
+                {"sha256": digest, "size_bytes": size}
+                for digest, size in sorted(
+                    {(row["sha256"], row["size_bytes"]) for row in manifest["files"]}
+                )
+            ]
+        )
+
     def manifest(self):
         if type(self.files) is not tuple or any(
             type(item) is not tuple
@@ -92,11 +104,12 @@ class ValidationReplica:
     root: Path
     input_manifest: dict
     fixture_hash: str
+    binding_manifest: dict
 
 
 class ValidationReplicaFactory:
     def __init__(self, root: Path, fixtures: tuple[RegisteredFixture, ...]):
-        if _is_link(root):
+        if any(_is_link(path) for path in (root.absolute(), *root.absolute().parents)):
             raise LearningError("validation_replica_root_unsafe")
         self.root = root.resolve()
         self.fixtures = {item.fixture_id: item for item in fixtures}
@@ -118,6 +131,65 @@ class ValidationReplicaFactory:
         if fixture is None:
             raise LearningError("validation_fixture_not_registered")
         return await asyncio.to_thread(self._create, request_id, case_key, arm, repeat, fixture)
+
+    async def resume(
+        self, request_id: UUID, case_key: str, arm: str, repeat: int, *, expected_manifest: dict
+    ):
+        """Restore a durable host binding without resetting legitimately edited files.
+
+        expected_manifest must come from the immutable execution binding, never
+        from model/user arguments or the mutable replica itself. Initial byte
+        verification belongs to create; later project authorization guards own
+        each file operation. Registry changes cannot rewrite an existing run.
+        """
+        if (
+            not isinstance(request_id, UUID)
+            or not re.fullmatch(r"[a-z][a-z0-9_-]{1,63}", case_key)
+            or arm not in {"control", "treatment"}
+            or type(repeat) is not int
+            or not 0 <= repeat < 3
+        ):
+            raise LearningError("validation_replica_identity_invalid")
+        return await asyncio.to_thread(
+            self._resume, request_id, case_key, arm, repeat, expected_manifest
+        )
+
+    def _resume(self, request_id, case_key, arm, repeat, expected_manifest):
+        target = self.root / f"{request_id.hex}-{case_key}-{repeat}-{arm}"
+        saved = target / ".validation-input-manifest.json"
+        if (
+            _is_link(self.root)
+            or self.root.resolve() != self.root
+            or _is_link(target)
+            or not target.is_dir()
+            or _is_link(saved)
+            or target.resolve().parent != self.root
+        ):
+            raise LearningError("validation_replica_path_unsafe")
+        try:
+            expected = canonical_json(expected_manifest).encode("utf8")
+            with saved.open("rb") as handle:
+                raw = handle.read(16385)
+            if len(expected) > 16384 or len(raw) > 16384 or raw != expected:
+                raise LearningError("validation_replica_manifest_changed")
+            manifest = json.loads(raw)
+            if (
+                manifest["request_id"] != str(request_id)
+                or manifest["case_key"] != case_key
+                or manifest["arm"] != arm
+                or manifest["repeat"] != repeat
+                or content_hash({"fixture_id": manifest["fixture_id"], "files": manifest["files"]})
+                != manifest["fixture_hash"]
+            ):
+                raise LearningError("validation_replica_manifest_changed")
+        except (OSError, ValueError, KeyError, TypeError):
+            raise LearningError("validation_replica_manifest_changed") from None
+        return ValidationReplica(
+            target,
+            {"fixture_id": manifest["fixture_id"], "files": manifest["files"]},
+            manifest["fixture_hash"],
+            manifest,
+        )
 
     def _create(self, request_id, case_key, arm, repeat, fixture):
         manifest = fixture.manifest()
@@ -149,8 +221,8 @@ class ValidationReplicaFactory:
                     raw = handle.read(16385)
                 if len(raw) > 16384 or json.loads(raw) != expected:
                     raise LearningError("validation_replica_manifest_changed")
-            except (OSError, ValueError) as error:
-                raise LearningError("validation_replica_manifest_changed") from error
+            except (OSError, ValueError):
+                raise LearningError("validation_replica_manifest_changed") from None
         else:
             for name, data in fixture.files:
                 path = target / name
@@ -174,4 +246,4 @@ class ValidationReplicaFactory:
                 raise LearningError("validation_replica_input_changed") from error
             if len(raw) != row["size_bytes"] or hashlib.sha256(raw).hexdigest() != row["sha256"]:
                 raise LearningError("validation_replica_input_changed")
-        return ValidationReplica(target, manifest, digest)
+        return ValidationReplica(target, manifest, digest, expected)
