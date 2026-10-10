@@ -1256,6 +1256,25 @@ class RunSkillSelectionRecord(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "rank"),
         CheckConstraint("rank >= 1", name="rank_positive"),
+        CheckConstraint(
+            "(content_hash IS NULL AND applicability IS NULL AND selection_policy_version IS NULL) "
+            "OR (content_hash IS NOT NULL AND applicability IS NOT NULL "
+            "AND selection_policy_version IS NOT NULL "
+            "AND selection_policy_version = 'skill-selector-v1' "
+            "AND rendered_hash IS NOT NULL AND scope_key IS NOT NULL "
+            "AND length(content_hash) = 71 AND content_hash LIKE 'sha256:%' "
+            "AND length(rendered_hash) = 71 AND rendered_hash LIKE 'sha256:%' "
+            "AND ((origin = 'trial' AND trial_id IS NOT NULL) "
+            "OR (origin IN ('formal','pinned') AND trial_id IS NULL)))",
+            name="v3_evidence_complete",
+        ),
+        Index(
+            "uq_run_skill_selections_v3_run",
+            "run_id",
+            unique=True,
+            postgresql_where=text("selection_policy_version IS NOT NULL"),
+            sqlite_where=text("selection_policy_version IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -1267,6 +1286,9 @@ class RunSkillSelectionRecord(Base):
     origin: Mapped[str] = mapped_column(String(16), default="legacy", server_default="legacy")
     scope_key: Mapped[str | None] = mapped_column(String(128))
     rendered_hash: Mapped[str | None] = mapped_column(String(71))
+    content_hash: Mapped[str | None] = mapped_column(String(71))
+    applicability: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
+    selection_policy_version: Mapped[str | None] = mapped_column(String(32))
     mode: Mapped[str] = mapped_column(String(32))
     rank: Mapped[int] = mapped_column(Integer)
     score: Mapped[float] = mapped_column()
@@ -1656,3 +1678,34 @@ event.listen(
 @event.listens_for(TaskRecord, "before_update")
 def protect_task_family(_mapper, _connection, record):
     _reject_changed_fields(record, ("family",))
+
+
+@event.listens_for(RunSkillSelectionRecord, "before_update")
+def protect_v3_skill_selection(_mapper, _connection, record):
+    fields = ("content_hash", "applicability", "selection_policy_version")
+    state = inspect(record)
+    if any(
+        getattr(record, field) is not None
+        or any(value is not None for value in state.attrs[field].history.deleted)
+        for field in fields
+    ):
+        _reject_changed_fields(
+            record,
+            (
+                "id",
+                "run_id",
+                "skill_version_id",
+                "trial_id",
+                "origin",
+                "scope_key",
+                "rendered_hash",
+                "content_hash",
+                "applicability",
+                "selection_policy_version",
+                "mode",
+                "rank",
+                "score",
+                "query_terms",
+                "created_at",
+            ),
+        )

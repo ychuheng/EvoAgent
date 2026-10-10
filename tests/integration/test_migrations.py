@@ -294,3 +294,92 @@ async def test_task_family_upgrade_preserves_unknown_history_and_blocks_loss(tmp
     await asyncio.to_thread(command.upgrade, config, "head")
     await asyncio.to_thread(command.check, config)
     await db.dispose()
+
+
+async def test_selection_evidence_migration_keeps_legacy_and_refuses_loss(tmp_path):
+    from evoagent.db.models import (
+        RunRecord,
+        RunSkillSelectionRecord,
+        SessionRecord,
+        SkillRecord,
+        SkillVersionRecord,
+        TaskRecord,
+    )
+    from evoagent.db.session import Database
+
+    url = f"sqlite+aiosqlite:///{tmp_path / 'selection-evidence.db'}"
+    config = alembic_config(url)
+    await asyncio.to_thread(command.upgrade, config, "20261010_0031")
+    db = Database(url)
+    digest = "sha256:" + "a" * 64
+    async with db.session_factory() as session:
+        chat = SessionRecord(title="legacy")
+        skill = SkillRecord(slug="legacy", name="legacy", description="fixture")
+        session.add_all([chat, skill])
+        await session.flush()
+        task = TaskRecord(session_id=chat.id, goal="legacy")
+        version = SkillVersionRecord(
+            skill_id=skill.id,
+            version=1,
+            schema_version=1,
+            definition={"fixture": True},
+            content_hash=digest,
+            extraction_key=digest,
+        )
+        session.add_all([task, version])
+        await session.flush()
+        run = RunRecord(task_id=task.id, provider="mock", model="mock")
+        session.add(run)
+        await session.flush()
+        for rank in [1, 2]:
+            await session.execute(
+                RunSkillSelectionRecord.__table__.insert().values(
+                    run_id=run.id,
+                    skill_version_id=version.id,
+                    mode="retrieval",
+                    rank=rank,
+                    score=1,
+                    query_terms=[],
+                )
+            )
+        await session.commit()
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with db.engine.begin() as connection:
+        rows = (
+            await connection.execute(
+                text(
+                    "SELECT rank,origin,content_hash,applicability,selection_policy_version "
+                    "FROM run_skill_selections ORDER BY rank"
+                )
+            )
+        ).all()
+        assert rows == [(1, "legacy", None, None, None), (2, "legacy", None, None, None)]
+        # Isolated synthetic fixture: prove downgrade protection, not a production retrofit.
+        await connection.execute(
+            text(
+                "UPDATE run_skill_selections SET origin='formal',scope_key='fixture', "
+                "content_hash=:hash,rendered_hash=:hash,applicability='{}', "
+                "selection_policy_version='skill-selector-v1' WHERE rank=1"
+            ),
+            {"hash": digest},
+        )
+    with pytest.raises(RuntimeError, match="frozen v3 selection evidence"):
+        await asyncio.to_thread(command.downgrade, config, "20261010_0031")
+    async with db.engine.begin() as connection:
+        assert (
+            await connection.scalar(
+                text("SELECT content_hash FROM run_skill_selections WHERE rank=1")
+            )
+            == digest
+        )
+        # Explicitly remove only the isolated synthetic evidence to exercise safe rollback.
+        await connection.execute(
+            text(
+                "UPDATE run_skill_selections SET content_hash=NULL,applicability=NULL, "
+                "selection_policy_version=NULL WHERE rank=1"
+            )
+        )
+    await asyncio.to_thread(command.downgrade, config, "20261010_0031")
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.check, config)
+    await db.dispose()
