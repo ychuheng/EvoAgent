@@ -639,6 +639,8 @@ class PersistentAgentRunner:
     async def _load_owned_records(self, lease: JobLease) -> tuple[TaskRecord, RunRecord]:
         async with self._session_factory() as session:
             task, run = await LeaseGuard(lease).check(session)
+            if task.cancel_requested:
+                raise asyncio.CancelledError
             from evoagent.skills.selection import FormalSkillReader
 
             await check_run_references(session, run.id)

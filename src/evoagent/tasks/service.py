@@ -189,6 +189,7 @@ class TaskService:
                 project_authorization_version=authorization_version,
                 goal=normalized_goal,
                 family=family,
+                selection_contract_version=3,
                 acceptance=acceptance.model_dump(mode="json") if acceptance else None,
                 frozen_inputs=frozen_inputs,
                 status=TaskStatus.QUEUED,

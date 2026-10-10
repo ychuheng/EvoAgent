@@ -58,6 +58,8 @@ async def test_create_task_is_atomic_and_returns_202(tmp_path: Path) -> None:
         assert body["latest_run"]["status"] == "queued"
 
         async with database.session_factory() as session:
+            created = await session.scalar(select(TaskRecord))
+            assert created.selection_contract_version == 3
             task_count = await session.scalar(select(func.count()).select_from(TaskRecord))
             run_count = await session.scalar(select(func.count()).select_from(RunRecord))
             events = tuple(

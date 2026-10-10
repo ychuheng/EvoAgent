@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy import select
 
-from evoagent.db.models import LearningSourceRecord, RunRecord, TaskRecord
+from evoagent.db.models import LearningSourceRecord, RunRecord, SkillRecord, TaskRecord
 from evoagent.memory.schema import MemoryError
 from evoagent.runtime.run_config import RunConfigSnapshot, RunMode, sha256_text
 from evoagent.skills.selection_boundary import check_ordinary_bindings
@@ -126,24 +126,33 @@ async def test_marked_task_reaches_model_with_actual_formal_context(trial_candid
         )
 
 
-async def test_source_revoked_by_tool_stops_the_next_model_turn(trial_candidate, learning_api):
+@pytest.mark.parametrize("change", ["source", "scope"])
+async def test_source_revoked_by_tool_stops_the_next_model_turn(
+    trial_candidate, learning_api, change
+):
     from evoagent.core.context import ContextBuilder
     from evoagent.core.models import FinishReason, Message, MessageRole, ModelResponse, ToolCall
     from evoagent.providers.mock import MockProvider
     from evoagent.runtime.persistent_runner import PersistentAgentRunner
+    from evoagent.tasks.service import TaskService
     from evoagent.tasks.state_machine import PersistentRunStatus
     from evoagent.tools.builtin.calculator import CalculatorTool
 
     await formal_fixture(trial_candidate)
     _, db, _, settings = learning_api
     selector, _, _ = await setup_run(trial_candidate, settings)
+    other = await TaskService(db.session_factory).create_workspace("foreign-scope")
 
     class Revoker(CalculatorTool):
         async def invoke(self, arguments):
             result = await super().invoke(arguments)
             async with db.session_factory() as session:
-                source = await session.scalar(select(LearningSourceRecord))
-                source.status = "revoked"
+                if change == "source":
+                    source = await session.scalar(select(LearningSourceRecord))
+                    source.status = "revoked"
+                else:
+                    skill = await session.scalar(select(SkillRecord))
+                    skill.workspace_id = other.id
                 await session.commit()
             return result
 
@@ -180,3 +189,109 @@ async def test_source_revoked_by_tool_stops_the_next_model_turn(trial_candidate,
     assert result.status is PersistentRunStatus.FAILED
     assert result.error_code == "skill_source_revoked"
     assert len(provider.requests) == 1 and provider.remaining_steps == 1
+
+
+async def test_requested_cancel_is_seen_before_the_next_model_call(trial_candidate, learning_api):
+    import asyncio
+
+    from evoagent.core.context import ContextBuilder
+    from evoagent.core.models import FinishReason, Message, MessageRole, ModelResponse, ToolCall
+    from evoagent.providers.mock import MockProvider
+    from evoagent.runtime.persistent_runner import PersistentAgentRunner
+    from evoagent.tools.builtin.calculator import CalculatorTool
+
+    _, db, _, settings = learning_api
+    selector, task, _ = await setup_run(trial_candidate, settings)
+
+    class Cancel(CalculatorTool):
+        async def invoke(self, arguments):
+            result = await super().invoke(arguments)
+            async with db.session_factory() as session:
+                row = await session.get(TaskRecord, task.id)
+                row.cancel_requested = True
+                await session.commit()
+            return result
+
+    selector.registry.register(Cancel())
+    provider = MockProvider(
+        [
+            ModelResponse(
+                message=Message(
+                    role=MessageRole.ASSISTANT,
+                    tool_calls=(
+                        ToolCall(
+                            call_id="cancel-before-next-turn",
+                            name="calculator",
+                            arguments={"expression": "1+1"},
+                        ),
+                    ),
+                ),
+                finish_reason=FinishReason.TOOL_CALLS,
+            ),
+            ModelResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="unreachable"),
+                finish_reason=FinishReason.STOP,
+            ),
+        ]
+    )
+    runner = PersistentAgentRunner(
+        settings=settings,
+        session_factory=db.session_factory,
+        context_builder=ContextBuilder(),
+        provider=provider,
+        registry=selector.registry,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await runner.handle(selector.guard.lease)
+    assert len(provider.requests) == 1 and provider.remaining_steps == 1
+
+
+async def test_new_task_service_and_configured_handler_adopt_without_manual_marker(
+    trial_candidate, learning_api, tmp_path, monkeypatch
+):
+    from evoagent.core.models import FinishReason, Message, MessageRole, ModelResponse
+    from evoagent.projects.service import ProjectService
+    from evoagent.providers.mock import MockProvider
+    from evoagent.tasks.lease import JobLeaseManager
+    from evoagent.tasks.service import TaskService
+    from evoagent.tasks.state_machine import PersistentRunStatus
+    from evoagent.workers.bootstrap import ConfiguredTaskHandler
+
+    await formal_fixture(trial_candidate)
+    _, db, _, settings = learning_api
+    root = tmp_path / "authorized-adoption-project"
+    root.mkdir()
+    (root / "README.md").write_text("# controlled project\n", encoding="utf8")
+    project = await ProjectService(db.session_factory).register(path=str(root))
+    tasks = TaskService(db.session_factory)
+    chat = await tasks.create_session("new entry")
+    aggregate = await tasks.create_task(
+        session_id=chat.id,
+        goal="核验 验证 检查",
+        family="general",
+        provider="mock",
+        model=settings.model or "mock-model",
+        project_id=project.id,
+    )
+    assert aggregate.task.selection_contract_version == 3
+    provider = MockProvider(
+        [
+            ModelResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="offline actual adoption"),
+                finish_reason=FinishReason.STOP,
+            )
+        ]
+    )
+    monkeypatch.setattr(ConfiguredTaskHandler, "_provider", lambda *_: provider)
+    lease = await JobLeaseManager(db.session_factory, lease_seconds=60).claim_next("new-entry")
+    assert lease and lease.run_id == aggregate.run.id
+    result = await ConfiguredTaskHandler(settings, db).handle(lease)
+    assert result.status is PersistentRunStatus.COMPLETED
+    assert len(provider.requests) == 1
+    async with db.session_factory() as session:
+        current = await session.get(RunRecord, aggregate.run.id)
+        assert current.config_snapshot["schema_version"] == 3
+        selected = current.config_snapshot["selected_skills"]
+        assert len(selected) == 1 and selected[0]["origin"] == "formal"
+        assert selected[0]["scope"]["project_id"] == str(project.id)
+        assert selected[0]["version_id"] == str(trial_candidate[4].id)

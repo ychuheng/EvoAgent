@@ -1,8 +1,9 @@
-"""Exercise ordinary selection, freeze revalidation and immutable user categories."""
+"""Legacy selection compatibility, freeze revalidation and immutable user categories."""
 
 import pytest
 import test_lease_fencing as fencing
 from pydantic import ValidationError
+from sqlalchemy import update
 
 from evoagent.config import Settings
 from evoagent.core.context import ContextBuilder
@@ -67,6 +68,14 @@ async def setup(db, family=None, v2=True):
         model="mock",
     )
     async with db.session_factory() as session:
+        # Historical tasks retain the old selector. This fixture deliberately
+        # has no source graph or formal gate, so it cannot represent a new v3
+        # adoption. New sourced/gated adoption is covered by the boundary suite.
+        await session.execute(
+            update(TaskRecord)
+            .where(TaskRecord.id == aggregate.task.id)
+            .values(selection_contract_version=None)
+        )
         skill = SkillRecord(slug="calculate_report", name="calculate_report", description="report")
         session.add(skill)
         await session.flush()

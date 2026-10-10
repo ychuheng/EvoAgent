@@ -205,6 +205,8 @@ class ConfiguredTaskHandler:
             try:
                 async with self._database.session_factory() as session:
                     current_task, current_run = await LeaseGuard(lease).check(session)
+                    if current_task.cancel_requested:
+                        raise asyncio.CancelledError
                     await check_ordinary_bindings(session, task=current_task, run=current_run)
             except ContextAuthorizationError as error:
                 # Waiting for a model slot can outlive the loop's earlier check.

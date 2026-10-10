@@ -165,3 +165,37 @@ async def test_legacy_queued_task_and_foreign_scope_cannot_be_upgraded(
     instance.scope = SkillSelectionScope(workspace_id=uuid4())
     with pytest.raises(MemoryError, match="scope_invalid"):
         await resolve_ordinary(instance, task, run)
+
+
+async def test_queued_legacy_personal_task_keeps_v2_after_new_runtime(
+    trial_candidate, learning_api
+):
+    from evoagent.core.context import ContextBuilder
+    from evoagent.core.models import FinishReason, Message, MessageRole, ModelResponse
+    from evoagent.providers.mock import MockProvider
+    from evoagent.runtime.persistent_runner import PersistentAgentRunner
+    from evoagent.tasks.state_machine import PersistentRunStatus
+
+    _, db, _, settings = learning_api
+    selector, _, run = await setup_run(trial_candidate, settings, legacy=True)
+    provider = MockProvider(
+        [
+            ModelResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="legacy queued result"),
+                finish_reason=FinishReason.STOP,
+            )
+        ]
+    )
+    result = await PersistentAgentRunner(
+        settings=settings,
+        session_factory=db.session_factory,
+        context_builder=ContextBuilder(),
+        provider=provider,
+        registry=selector.registry,
+    ).handle(selector.guard.lease)
+    assert result.status is PersistentRunStatus.COMPLETED
+    async with db.session_factory() as session:
+        current = await session.get(RunRecord, run.id)
+        assert current.config_snapshot["schema_version"] == settings.snapshot_schema_version
+        assert "selector_version" not in current.config_snapshot
+        assert (await session.get(TaskRecord, run.task_id)).selection_contract_version is None
