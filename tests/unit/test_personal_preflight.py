@@ -61,3 +61,47 @@ def test_required_fields_are_reported_by_name(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="EVOAGENT_CONTEXT_WINDOW_TOKENS"):
         validate(path)
+
+
+@pytest.mark.parametrize(
+    "extra,expected",
+    [
+        ("EVOAGENT_PERSONAL_VALIDATION_REAL_ENABLED=true\n", "learning_enabled"),
+        (
+            "EVOAGENT_LEARNING_ENABLED=true\nEVOAGENT_PERSONAL_VALIDATION_REAL_ENABLED=true\n",
+            "validation_budget_unapproved",
+        ),
+    ],
+)
+def test_real_validation_preflight_requires_opt_in_and_known_numeric_budget(
+    tmp_path, extra, expected
+):
+    path = tmp_path / ".env.personal"
+    write_config(path, extra=extra)
+    with pytest.raises(ValueError, match=expected) as error:
+        validate(path)
+    assert "private-test-value" not in str(error.value)
+    assert "example.com" not in str(error.value)
+
+
+def test_real_validation_profile_check_is_offline(tmp_path, monkeypatch):
+    import socket
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("preflight must never contact provider")
+
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    path = tmp_path / ".env.personal"
+    write_config(
+        path,
+        extra=(
+            "EVOAGENT_LEARNING_ENABLED=true\n"
+            "EVOAGENT_PERSONAL_VALIDATION_REAL_ENABLED=true\n"
+            "EVOAGENT_BUDGET_SCOPE=trial\n"
+            "EVOAGENT_BUDGET_TRIAL_LIMIT_MICROS=100000\n"
+            "EVOAGENT_BUDGET_TASK_LIMIT_MICROS=10000\n"
+            "EVOAGENT_BUDGET_INPUT_PRICE_MICROS_PER_MILLION=1\n"
+            "EVOAGENT_BUDGET_OUTPUT_PRICE_MICROS_PER_MILLION=1\n"
+        ),
+    )
+    assert validate(path) == ("example-model", "mock")

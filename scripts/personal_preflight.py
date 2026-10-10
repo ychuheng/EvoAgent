@@ -80,6 +80,16 @@ def _settings_from_env_file(path: Path) -> Settings:
         # Model validators have hand-written messages that mention setting names,
         # but never include the secret values supplied in this file.
         raise
+    if settings.personal_validation_real_enabled:
+        if not settings.learning_enabled:
+            raise ValueError("personal validation requires learning_enabled")
+        from evoagent.learning.schema import LearningError
+        from evoagent.learning.validation_profiles import real_profile
+
+        try:
+            real_profile(settings)
+        except LearningError as error:
+            raise ValueError("personal validation configuration: " + error.code) from None
     return settings
 
 
@@ -93,6 +103,12 @@ def main() -> int:
     except ValueError as error:
         parser.exit(2, f"personal configuration error: {error}\n")
     print(f"configuration valid: model={_model}, search={_search}; remote services not checked")
+    if settings.learning_enabled:
+        print("learning enabled: workspace policy and numeric quotas require explicit approval")
+    if settings.personal_validation_real_enabled:
+        print("real validation profile registered locally: no network check or paid call performed")
+    if settings.personal_trial_enabled:
+        print("trial controls enabled: report, source, budget and health gates still apply")
     # K2 / §13.4：这里跑的是**宿主**可观测性检查，它**不能替代**实际 Worker 容器、
     # UID 与命名空间里的预检；两者共用同一个 probe，结论不互为证明。
     result = ProjectCommandReadinessProbe().check(settings)
