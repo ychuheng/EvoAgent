@@ -9,6 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from evoagent.db.models import (
+    LearningRequestRecord,
+    MaintenanceJobRecord,
     RunRecord,
     RunSkillSelectionRecord,
     SkillEventRecord,
@@ -30,8 +32,15 @@ async def trial_candidate(learning_api):
     client, db, run_id, settings = learning_api
     request = await submit(client, run_id)
     runner = worker(db, settings)
-    for _ in range(3):
-        assert await runner.run_once()
+    for stage in range(3):
+        if not await runner.run_once():
+            async with db.session_factory() as session:
+                current = await session.get(LearningRequestRecord, UUID(request["id"]))
+                jobs = list(await session.scalars(select(MaintenanceJobRecord)))
+                diagnostics = [(j.kind, j.status, j.error_code) for j in jobs]
+            pytest.fail(
+                f"stage {stage}: request={current.status}/{current.error_code}; jobs={diagnostics}"
+            )
     state = (await client.get(f"/api/v1/learning-requests/{request['id']}")).json()
     async with db.session_factory() as session:
         version = await session.get(SkillVersionRecord, UUID(state["candidate_version_id"]))

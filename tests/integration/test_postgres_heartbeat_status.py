@@ -106,6 +106,7 @@ async def test_notification_is_delivered_only_after_cancel_commit(pg_task, commi
 async def test_real_cancel_committing_after_merged_snapshot_cannot_wait_another_tick(pg_task):
     db, service, task, _, lease, notifier, _ = pg_task
     calls = []
+    committed, release_snapshot = asyncio.Event(), asyncio.Event()
 
     class RaceManager(JobLeaseManager):
         async def heartbeat_and_status(self, current):
@@ -113,6 +114,8 @@ async def test_real_cancel_committing_after_merged_snapshot_cannot_wait_another_
             assert not status.cancel_requested
             calls.append("captured_false")
             await service.cancel_task(task.task.id)
+            committed.set()
+            await release_snapshot.wait()
             return status
 
         async def cancellation_requested(self, current):
@@ -120,13 +123,23 @@ async def test_real_cancel_committing_after_merged_snapshot_cannot_wait_another_
             return await super().cancellation_requested(current)
 
     manager = RaceManager(db.session_factory, lease_seconds=60)
-    with pytest.raises(TaskCancellationRequested):
-        await asyncio.wait_for(
-            LeaseHeartbeat(manager, interval_seconds=0.01, cancellation_notifier=notifier).run(
-                lease, asyncio.Event()
-            ),
-            1,
+    running = asyncio.create_task(
+        LeaseHeartbeat(manager, interval_seconds=0.01, cancellation_notifier=notifier).run(
+            lease, asyncio.Event()
         )
+    )
+    try:
+        # Arrange the durable commit outside the post-commit observation budget.
+        # This remains bounded; a hung cancellation transaction still fails.
+        await asyncio.wait_for(committed.wait(), 5)
+        release_snapshot.set()
+        with pytest.raises(TaskCancellationRequested):
+            await asyncio.wait_for(running, 1)
+    finally:
+        release_snapshot.set()
+        if not running.done():
+            running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
     assert calls == ["captured_false", "racing_cancel_rechecked"]
 
 

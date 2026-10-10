@@ -366,7 +366,7 @@ async def test_legacy_extraction_cannot_bypass_disabled_learning(learning_api, p
 
 
 async def test_acknowledging_candidate_never_activates_formal_version(learning_api):
-    from evoagent.db.models import SkillRecord, SkillVersionRecord
+    from evoagent.db.models import SkillRecord, SkillSourceRecord, SkillVersionRecord
     from evoagent.skills.canonical import content_hash
     from tests.unit.test_phase_three_services import make_skill
 
@@ -375,7 +375,7 @@ async def test_acknowledging_candidate_never_activates_formal_version(learning_a
     sources = PersonalSourceService(
         db.session_factory, artifact_store=LocalArtifactStore(settings.artifact_root)
     )
-    await sources.freeze(
+    frozen = await sources.freeze(
         run_id, None, source_revision=row.frozen_inputs["source_revision"], job_guard=guard
     )
     async with db.session_factory() as session:
@@ -395,6 +395,16 @@ async def test_acknowledging_candidate_never_activates_formal_version(learning_a
         )
         session.add(candidate)
         await session.flush()
+        session.add(
+            SkillSourceRecord(
+                skill_version_id=candidate.id,
+                source_run_id=run_id,
+                source_kind="personal",
+                learning_source_id=frozen.id,
+                trace_artifact_id=frozen.artifact_id,
+                source_trace_hash=frozen.content_hash,
+            )
+        )
         request = await session.get(LearningRequestRecord, row.id)
         request.candidate_version_id = candidate.id
         request.status = "ready_for_review"
