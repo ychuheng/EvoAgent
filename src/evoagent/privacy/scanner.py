@@ -12,7 +12,7 @@ from pathlib import Path
 from time import monotonic
 from weakref import WeakKeyDictionary
 
-from evoagent.privacy.redaction import POLICY_VERSION, RedactionResult
+from evoagent.privacy.redaction import POLICY_VERSION, SENSITIVE_CATEGORIES, RedactionResult
 
 
 @dataclass(frozen=True)
@@ -130,8 +130,7 @@ class BoundedScanner:
                     raise ScanUnavailable("scan_cpu_limit")
                 categories = payload["categories"]
                 if not isinstance(categories, list) or any(
-                    item not in {"private_key", "credential", "dsn_credentials", "jwt"}
-                    for item in categories
+                    item not in SENSITIVE_CATEGORIES for item in categories
                 ):
                     raise ScanUnavailable("scan_failed")
                 return RedactionResult(

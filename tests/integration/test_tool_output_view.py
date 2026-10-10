@@ -121,6 +121,20 @@ async def test_clean_short_output_is_marked_verbatim(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_json_credential_output_has_visible_marker(tmp_path: Path) -> None:
+    database, _aggregate, executor = await _environment(
+        tmp_path, '{"password":"fixture only value","normal":"unchanged"}'
+    )
+    try:
+        result = await executor.execute(ToolCall(call_id="json", name="scripted", arguments={}))
+        assert result.view_metadata.redacted is True
+        assert result.view_metadata.rule_categories == ("quoted_json_credential",)
+        assert json.loads(result.content) == {"password": "[REDACTED]", "normal": "unchanged"}
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.asyncio
 async def test_existing_placeholder_is_not_treated_as_a_secret(tmp_path: Path) -> None:
     """合法字面量 `[REDACTED]` 不是命中：没有新替换就不得声称脱敏过。"""
 

@@ -1,6 +1,6 @@
 {
-  "policy_version": 2,
-  "declared_by": "S0b（规则扩容：带凭据 DSN/URL、JWT）",
+  "policy_version": 3,
+  "declared_by": "S0b 规则扩容 v2（DSN/JWT）及 v3（带引号 JSON 凭据字符串）",
   "note": "本文件登记**预期**的新旧差异。未登记的差异一律算回归。哈希对应「实际运行新旧实现」的输出，不写入手写值；不含真实密钥。",
   "changes": [
     {
@@ -47,6 +47,42 @@
       "new_output_hash": "6975c2ca81b20ceca66e0ceb3fa3801ce60d75619c32e1d5fc10b8677ea828fa",
       "old_output_len": 97,
       "new_output_len": 16
+    },
+    {
+      "id": "tp-quoted-json-password",
+      "rule_version": 3,
+      "reason": "v3 修复原始文本中的带引号 JSON 凭据字符串；保留 JSON 键与结构",
+      "old_output_hash": "7be3adbbb17bde934ec71afd3817d30e9d763da97882f348ddddba3fd021be92",
+      "new_output_hash": "adbb0da654ed1175ea0139af071bb92f0ee6856e9b1c5bb0459a61b2fc5b782f",
+      "old_output_len": 34,
+      "new_output_len": 26
+    },
+    {
+      "id": "tp-quoted-json-apikey",
+      "rule_version": 3,
+      "reason": "v3 修复原始文本中的带引号 JSON 凭据字符串；保留 JSON 键与结构",
+      "old_output_hash": "f4610f04977f4f66930f15f1e82a593a3950b8e7ed513811422ce2b6caca38f4",
+      "new_output_hash": "c449f03f269f122dcb37afcd3e29d489149edf4a29a792114a72b39981eb7739",
+      "old_output_len": 32,
+      "new_output_len": 25
+    },
+    {
+      "id": "tp-quoted-json-unicode",
+      "rule_version": 3,
+      "reason": "v3 修复原始文本中的带引号 JSON 凭据字符串；保留 JSON 键与结构",
+      "old_output_hash": "12eda843b53971f7e986ab93058dc679f4c088210581831665181f5b3ce7bc61",
+      "new_output_hash": "de793f530c7546f12271adf00496d8039e3df85f0dc0aac924cb8c3d0bc2ebc1",
+      "old_output_len": 13,
+      "new_output_len": 20
+    },
+    {
+      "id": "tp-quoted-json-authorization",
+      "rule_version": 3,
+      "reason": "v3 修复原始文本中的带引号 JSON 凭据字符串；保留 JSON 键与结构",
+      "old_output_hash": "57deadbe53c09b068645d9e9ca90b51071d057bd7c339a62839d0d3cb8687baf",
+      "new_output_hash": "be75bf45c2a35ac2a21a6391f93ea29ad91ff33d8d5e495d4528e729bd586a0e",
+      "old_output_len": 41,
+      "new_output_len": 31
     }
   ]
 }

@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from typing import Any
 
 #: 只增的规则包版本。规则扩容或替换语义必须升版，否则旧检查结果会被误复用。
-#: v2（S0b）：新增带凭据 DSN 与 JWT 两类；v1 是 S0a 的等价抽取版本。
-POLICY_VERSION = 2
+#: v3：补充双引号 JSON 凭据字符串；v2 新增 DSN/JWT；v1 是等价抽取版本。
+POLICY_VERSION = 3
 
 REDACTED = "[REDACTED]"
 PRIVATE_KEY_PLACEHOLDER = "[REDACTED PRIVATE KEY]"
@@ -53,6 +53,7 @@ _RULE_PREFILTER: dict[str, bytes] = {
     "private_key": b"PRIVATE KEY",
     "dsn_credentials": b"://",
     "jwt": b"eyJ",
+    "quoted_json_credential": b'"',
 }
 
 
@@ -82,7 +83,19 @@ _SENSITIVE_TEXT_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ),
     ("dsn_credentials", _DSN_PATTERN, REDACTED),
     ("jwt", _JWT_PATTERN, REDACTED),
+    (
+        "quoted_json_credential",
+        re.compile(
+            r'("(?:password|api[_ -]?key|authorization|密码|密钥)"\s*:\s*")'
+            r'(?!\[REDACTED\]")(?:\\.|[^"\\])+"',
+            re.IGNORECASE,
+        ),
+        r'\1[REDACTED]"',
+    ),
 )
+
+
+SENSITIVE_CATEGORIES = frozenset(name for name, _pattern, _replacement in _SENSITIVE_TEXT_RULES)
 
 
 @dataclass(frozen=True, slots=True)

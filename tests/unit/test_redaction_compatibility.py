@@ -101,7 +101,7 @@ def test_text_output_matches_oracle_or_is_declared(case: dict[str, Any]) -> None
         assert actual != expected, f"{case['id']} 登记了差异，但新旧输出实际相同"
         assert _sha256(expected) == declared["old_output_hash"], f"{case['id']} 旧输出哈希不符"
         assert _sha256(actual) == declared["new_output_hash"], f"{case['id']} 新输出哈希不符"
-        assert declared["rule_version"] == redaction.POLICY_VERSION, case["id"]
+        assert 1 <= declared["rule_version"] <= redaction.POLICY_VERSION, case["id"]
         assert declared["reason"], case["id"]
     changed = actual != text
     if changed != case["expect_change"]:
@@ -148,7 +148,7 @@ def test_detect_sensitive_agrees_with_declared_change() -> None:
         changed = redaction.redact_text(case["input"]) != case["input"]
         assert bool(categories) is changed, case["id"]
         assert changed is case["expect_change"], case["id"]
-        assert set(categories) <= {"private_key", "credential", "dsn_credentials", "jwt"}
+        assert set(categories) <= redaction.SENSITIVE_CATEGORIES
 
 
 def test_redaction_result_carries_policy_version() -> None:
@@ -157,6 +157,21 @@ def test_redaction_result_carries_policy_version() -> None:
     assert result.policy_version == redaction.POLICY_VERSION
     assert result.categories == ("credential",)
     assert redaction.redact_text_result("clean").redacted is False
+
+
+@pytest.mark.parametrize("value", ["fixture only value", 'fake "quoted" value', "合成值"])
+def test_quoted_json_preserves_structure_and_is_idempotent(value: str) -> None:
+    raw = json.dumps({"password": value, "normal": "unchanged"}, ensure_ascii=False)
+    safe = redaction.redact_text(raw)
+    assert json.loads(safe) == {"password": "[REDACTED]", "normal": "unchanged"}
+    assert redaction.redact_text(safe) == safe
+    assert redaction.detect_sensitive(safe) == ()
+
+
+def test_empty_json_password_does_not_claim_a_secret() -> None:
+    raw = '{"password":"","normal":"fixture"}'
+    assert redaction.redact_text(raw) == raw
+    assert redaction.detect_sensitive(raw) == ()
 
 
 @pytest.mark.parametrize("case", STRUCTURED_CASES, ids=[c["id"] for c in STRUCTURED_CASES])

@@ -1024,3 +1024,36 @@ async def test_review_replay_is_bound_to_the_artifact(tmp_path: Path) -> None:
     assert replay.replayed is True
     assert replay.checked_hash == first.content_hash
     await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_v2_verified_json_secret_is_quarantined_under_v3(tmp_path: Path) -> None:
+    database, aggregate, artifacts, store, guard = await _environment(tmp_path)
+    raw = '{"password":"fixture only value","normal":"unchanged"}'
+    record = await _add_artifact(artifacts, aggregate, raw)
+    try:
+        async with database.session_factory() as session:
+            stored = await session.get(ArtifactRecord, record.id)
+            stored.redaction_status = "verified"
+            stored.redaction_policy_version = 2
+            stored.redaction_checked_hash = record.content_hash
+            await session.commit()
+        with pytest.raises(ArtifactSensitiveContent):
+            await guard.read_verified_text(
+                artifact_id=record.id, run_id=aggregate.run.id, purpose="artifact_read"
+            )
+        async with database.session_factory() as session:
+            stored = await session.get(ArtifactRecord, record.id)
+            assert stored.redaction_status == "quarantined"
+            assert stored.redaction_policy_version == POLICY_VERSION
+            events = list(
+                await session.scalars(
+                    select(RunEventRecord).where(RunEventRecord.event_type == BLOCK_EVENT_TYPE)
+                )
+            )
+            assert len(events) == 1
+            assert events[0].payload["rule_categories"] == ["quoted_json_credential"]
+            assert "fixture only value" not in str(events[0].payload)
+        assert (store._root / record.uri).read_text(encoding="utf8") == raw
+    finally:
+        await database.dispose()

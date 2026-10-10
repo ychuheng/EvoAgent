@@ -12,6 +12,8 @@ async def test_worker_checks_real_rules():
     result = await scanner.scan("postgres://fake:fake@localhost/example", ScanLimits())
     assert result.categories == ("dsn_credentials",)
     assert not (await scanner.scan("normal data", ScanLimits())).redacted
+    quoted = await scanner.scan('{"password":"fixture only value"}', ScanLimits())
+    assert quoted.categories == ("quoted_json_credential",)
 
 
 @pytest.mark.asyncio

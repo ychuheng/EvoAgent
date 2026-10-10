@@ -37,3 +37,7 @@
 {"id": "ctl-url-path-with-colon", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "URL 路径里出现冒号与 @ 但不是 userinfo：不得匹配", "input": "https://example.com/docs/user:pass@host 只是路径里的冒号"}
 {"id": "ctl-dotted-version", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "版本号与点分标识符：JWT 规则最容易误伤的形状", "input": "版本 1.2.3 与标识符 a.b.c 都不该被改写"}
 {"id": "ctl-jwt-like-two-segments", "kind": "control_no_secret", "expect_change": false, "origin": "synthetic", "assumption": "只有两段的 JWT 形状：缺第三段，不得当成令牌", "input": "header.eyJzdWIiOiIxIn0 不是令牌"}
+{"id": "tp-quoted-json-password", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "合成 JSON 凭据字段；不含真实秘密；结构化路径原已脱敏", "input": "{\"password\": \"fixture only value\"}"}
+{"id": "tp-quoted-json-apikey", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "合成 JSON 凭据字段；不含真实秘密；结构化路径原已脱敏", "input": "{\"api_key\": \"fixture-key-value\"}"}
+{"id": "tp-quoted-json-unicode", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "合成 JSON 凭据字段；不含真实秘密；结构化路径原已脱敏", "input": "{\"密码\": \"合成值\"}"}
+{"id": "tp-quoted-json-authorization", "kind": "true_positive", "expect_change": true, "origin": "synthetic", "assumption": "合成 JSON 凭据字段；不含真实秘密；结构化路径原已脱敏", "input": "{\"authorization\": \"fixture-opaque-value\"}"}
