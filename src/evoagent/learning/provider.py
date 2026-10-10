@@ -30,8 +30,20 @@ class LearningBudgetedProvider:
         )
         await self.budget.reconcile_stale(limit=100)
         await self.check()
-        call_key = f"learning:{self.request_id}:{self.guard.job_id}:{content_hash(body)}"
-        identity = await self.budget.reserve(self.request_id, call_key, maximum, guard=self.guard)
+        kwargs = {}
+        if hasattr(self.guard, "reservation_binding"):
+            if request.runtime_iteration is None:
+                raise LearningError("validation_invocation_step_required")
+            call_key = (
+                f"validation:{self.request_id}:{self.guard.lease.run_id}:"
+                f"{request.runtime_iteration}"
+            )
+            kwargs["request_body_hash"] = content_hash(body)
+        else:
+            call_key = f"learning:{self.request_id}:{self.guard.job_id}:{content_hash(body)}"
+        identity = await self.budget.reserve(
+            self.request_id, call_key, maximum, guard=self.guard, **kwargs
+        )
         sent, usage = False, None
         try:
             await self.check()

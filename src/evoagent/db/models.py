@@ -597,6 +597,13 @@ class LearningSpendReservationRecord(Base):
             "status IN ('reserved','settled','unknown','released')", name="status_valid"
         ),
         Index("ix_learning_spend_day", "workspace_id", "budget_day", "status"),
+        CheckConstraint(
+            "(dispatcher_kind = 'maintenance' AND task_id IS NULL AND run_id IS NULL "
+            "AND task_epoch IS NULL) OR (dispatcher_kind = 'task' AND task_id IS NOT NULL "
+            "AND run_id IS NOT NULL AND task_epoch IS NOT NULL AND job_id IS NULL "
+            "AND job_epoch IS NULL AND request_body_hash IS NOT NULL)",
+            name="learning_dispatch_identity",
+        ),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
@@ -609,6 +616,15 @@ class LearningSpendReservationRecord(Base):
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     job_id: Mapped[UUID | None] = mapped_column(ForeignKey("maintenance_jobs.id"))
     job_epoch: Mapped[int | None] = mapped_column(Integer)
+    dispatcher_kind: Mapped[str] = mapped_column(
+        String(16), default="maintenance", server_default="maintenance"
+    )
+    task_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("tasks.id", name="fk_learning_spend_task")
+    )
+    run_id: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id", name="fk_learning_spend_run"))
+    task_epoch: Mapped[int | None] = mapped_column(Integer)
+    request_body_hash: Mapped[str | None] = mapped_column(String(71))
     scope: Mapped[str] = mapped_column(String(32), default="legacy", server_default="legacy")
     input_price_micros_per_million: Mapped[int | None] = mapped_column(Integer)
     output_price_micros_per_million: Mapped[int | None] = mapped_column(Integer)

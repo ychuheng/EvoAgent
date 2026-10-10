@@ -210,6 +210,7 @@ class TokenUsage(ContractModel):
 
 
 class ModelRequest(ContractModel):
+    runtime_iteration: int | None = Field(default=None, ge=1, exclude=True)
     messages: tuple[Message, ...] = Field(min_length=1)
     tool_definitions: tuple[ToolDefinition, ...] = ()
     model: str = Field(min_length=1)

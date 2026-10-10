@@ -1,5 +1,6 @@
 """Durable per-workspace learning reservations; unknown usage is never free."""
 
+import re
 from datetime import UTC
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from evoagent.db.models import (
     MaintenanceJobRecord,
     RunRecord,
     SpendRecord,
+    TaskRecord,
 )
 from evoagent.learning.schema import LearningError
 from evoagent.learning.sources import PersonalSourceService
@@ -30,7 +32,9 @@ class LearningBudgetService:
     def __init__(self, factory, settings):
         self.factory, self.settings = factory, settings
 
-    async def _lock(self, session, request_id):
+    async def _lock(self, session, request_id, guard=None):
+        if guard is not None and hasattr(guard, "lock_lease"):
+            await guard.lock_lease(session)
         row = await session.get(LearningRequestRecord, request_id)
         if row is None:
             raise LearningError("learning_request_not_found")
@@ -49,11 +53,38 @@ class LearningBudgetService:
 
     _upper_bound = staticmethod(usage_upper_bound)
 
-    async def reserve(self, request_id, call_key, max_cost_micros, *, guard):
+    @staticmethod
+    def _binding(guard):
+        if hasattr(guard, "reservation_binding"):
+            return guard.reservation_binding()
+        return dict(
+            dispatcher_kind="maintenance",
+            job_id=guard.job_id,
+            job_epoch=guard.epoch,
+            task_id=None,
+            run_id=None,
+            task_epoch=None,
+        )
+
+    async def _accounting_task(self, session, row, request):
+        return (
+            row.task_id
+            if row.dispatcher_kind == "task"
+            else (await session.get(RunRecord, request.origin_run_id)).task_id
+        )
+
+    async def reserve(
+        self, request_id, call_key, max_cost_micros, *, guard, request_body_hash=None
+    ):
+        binding = self._binding(guard)
+        if binding["dispatcher_kind"] == "task" and (
+            request_body_hash is None or not re.fullmatch(r"sha256:[a-f0-9]{64}", request_body_hash)
+        ):
+            raise LearningError("validation_call_body_hash_required")
         if max_cost_micros < 0 or max_cost_micros > 2147483647:
             raise LearningError("invalid_learning_cost_bound")
         async with self.factory() as session:
-            request = await self._lock(session, request_id)
+            request = await self._lock(session, request_id, guard)
             job, checked = await guard.check(session)
             if checked.id != request_id:
                 raise LearningError("learning_job_fenced")
@@ -68,13 +99,22 @@ class LearningBudgetService:
                 .with_for_update()
             )
             if old is not None:
-                if old.request_id != request_id or old.reserved_micros != max_cost_micros:
+                if (
+                    old.request_id != request_id
+                    or old.reserved_micros != max_cost_micros
+                    or old.request_body_hash != request_body_hash
+                    or any(
+                        getattr(old, key) != binding[key]
+                        for key in ("dispatcher_kind", "task_id", "run_id")
+                    )
+                ):
                     raise LearningError("learning_call_identity_conflict")
                 if old.dispatched_at is not None or old.status not in {"reserved", "released"}:
                     raise LearningError("learning_call_already_sent")
                 # An undispatched reservation can transfer to a new job lease.
                 if old.status == "reserved":
-                    old.job_id, old.job_epoch = guard.job_id, guard.epoch
+                    for key, value in binding.items():
+                        setattr(old, key, value)
                     await session.commit()
                     return old.id
             limits = limits_from_settings(self.settings, BudgetScope(self.settings.budget_scope))
@@ -108,7 +148,8 @@ class LearningBudgetService:
             global_known, task_known = await spend_totals(
                 session,
                 scope=limits.scope,
-                task_id=(await session.get(RunRecord, request.origin_run_id)).task_id,
+                task_id=binding["task_id"]
+                or (await session.get(RunRecord, request.origin_run_id)).task_id,
             )
             unresolved = await session.scalar(
                 select(
@@ -124,7 +165,9 @@ class LearningBudgetService:
                 select(
                     func.coalesce(func.sum(LearningSpendReservationRecord.reserved_micros), 0)
                 ).where(
-                    LearningSpendReservationRecord.request_id == request_id,
+                    (LearningSpendReservationRecord.task_id == binding["task_id"])
+                    if binding["dispatcher_kind"] == "task"
+                    else (LearningSpendReservationRecord.request_id == request_id),
                     unresolved_usage(),
                 )
             )
@@ -140,8 +183,8 @@ class LearningBudgetService:
                 budget_day=day,
                 reserved_micros=max_cost_micros,
                 status="reserved",
-                job_id=guard.job_id,
-                job_epoch=guard.epoch,
+                **binding,
+                request_body_hash=request_body_hash,
                 scope=limits.scope.value,
                 input_price_micros_per_million=limits.input_price_micros_per_million,
                 output_price_micros_per_million=limits.output_price_micros_per_million,
@@ -160,7 +203,7 @@ class LearningBudgetService:
             initial = await session.get(LearningSpendReservationRecord, reservation_id)
             if initial is None:
                 raise LearningError("learning_reservation_not_found")
-            request = await self._lock(session, initial.request_id)
+            request = await self._lock(session, initial.request_id, guard)
             _, checked = await guard.check(session)
             row = await session.scalar(
                 select(LearningSpendReservationRecord)
@@ -205,8 +248,7 @@ class LearningBudgetService:
             if (
                 row.status != "reserved"
                 or row.dispatched_at is not None
-                or row.job_id != guard.job_id
-                or row.job_epoch != guard.epoch
+                or any(getattr(row, key) != value for key, value in self._binding(guard).items())
                 or checked.id != request.id
             ):
                 raise LearningError("learning_call_already_sent")
@@ -234,7 +276,7 @@ class LearningBudgetService:
                 session,
                 self.settings,
                 scope=BudgetScope(row.scope),
-                task_id=(await session.get(RunRecord, request.origin_run_id)).task_id,
+                task_id=await self._accounting_task(session, row, request),
             )
             # This reservation is already included in status.spent. Reaching the
             # threshold is allowed only exactly at the bound, never beyond it.
@@ -314,7 +356,7 @@ class LearningBudgetService:
                     raise LearningError("learning_usage_conflict")
                 return actual
             request = await session.get(LearningRequestRecord, row.request_id)
-            run = await session.get(RunRecord, request.origin_run_id)
+            run = await session.get(RunRecord, row.run_id or request.origin_run_id)
             session.add(
                 SpendRecord(
                     purpose="skill_learning"
@@ -351,14 +393,30 @@ class LearningBudgetService:
                     MaintenanceJobRecord,
                     MaintenanceJobRecord.id == LearningSpendReservationRecord.job_id,
                 )
+                .outerjoin(TaskRecord, TaskRecord.id == LearningSpendReservationRecord.task_id)
+                .outerjoin(RunRecord, RunRecord.id == LearningSpendReservationRecord.run_id)
                 .where(
                     or_(
-                        MaintenanceJobRecord.id.is_(None),
-                        MaintenanceJobRecord.status != "running",
-                        MaintenanceJobRecord.lease_epoch
-                        != LearningSpendReservationRecord.job_epoch,
-                        MaintenanceJobRecord.lease_expires_at <= now,
-                        MaintenanceJobRecord.cancel_requested.is_(True),
+                        (LearningSpendReservationRecord.dispatcher_kind == "maintenance")
+                        & or_(
+                            MaintenanceJobRecord.id.is_(None),
+                            MaintenanceJobRecord.status != "running",
+                            MaintenanceJobRecord.lease_epoch
+                            != LearningSpendReservationRecord.job_epoch,
+                            MaintenanceJobRecord.lease_expires_at <= now,
+                            MaintenanceJobRecord.cancel_requested.is_(True),
+                        ),
+                        (LearningSpendReservationRecord.dispatcher_kind == "task")
+                        & or_(
+                            TaskRecord.id.is_(None),
+                            TaskRecord.status.not_in(("running", "waiting_tool")),
+                            TaskRecord.lease_epoch != LearningSpendReservationRecord.task_epoch,
+                            TaskRecord.lease_expires_at <= now,
+                            TaskRecord.lease_expires_at.is_(None),
+                            TaskRecord.lease_owner.is_(None),
+                            TaskRecord.cancel_requested.is_(True),
+                            RunRecord.status != "running",
+                        ),
                     )
                 )
                 .order_by(LearningSpendReservationRecord.created_at)
@@ -368,6 +426,27 @@ class LearningBudgetService:
             if budget_day is not None:
                 statement = statement.where(LearningSpendReservationRecord.budget_day == budget_day)
             for row in await session.scalars(statement):
+                if row.dispatcher_kind == "task":
+                    task = await session.get(TaskRecord, row.task_id, populate_existing=True)
+                    run = await session.get(RunRecord, row.run_id, populate_existing=True)
+                    expiry = task.lease_expires_at if task else None
+                    if expiry and expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=UTC)
+                    if (
+                        task
+                        and run
+                        and task.status in {"running", "waiting_tool"}
+                        and run.status == "running"
+                        and task.lease_owner
+                        and task.lease_epoch == row.task_epoch
+                        and expiry
+                        and expiry > now
+                        and not task.cancel_requested
+                    ):
+                        continue
+                    row.status = "unknown" if row.dispatched_at else "released"
+                    changed += 1
+                    continue
                 job = await session.get(MaintenanceJobRecord, row.job_id) if row.job_id else None
                 expiry = job.lease_expires_at if job else None
                 if expiry and expiry.tzinfo is None:

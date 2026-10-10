@@ -177,6 +177,7 @@ class AgentLoop:
                         },
                     )
             request = ModelRequest(
+                runtime_iteration=iteration,
                 messages=tuple(messages),
                 tool_definitions=self._registry.definitions(),
                 model=self._model,

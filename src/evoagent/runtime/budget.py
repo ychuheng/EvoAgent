@@ -212,7 +212,18 @@ async def evaluate_budget(
                     LearningRequestRecord.id == LearningSpendReservationRecord.request_id,
                 )
                 .join(RunRecord, RunRecord.id == LearningRequestRecord.origin_run_id)
-                .where(RunRecord.task_id == task_id, unresolved)
+                .where(
+                    (
+                        (LearningSpendReservationRecord.dispatcher_kind == "task")
+                        & (LearningSpendReservationRecord.task_id == task_id)
+                    )
+                    | (
+                        (LearningSpendReservationRecord.dispatcher_kind == "maintenance")
+                        & (RunRecord.task_id == task_id)
+                    ),
+                    LearningSpendReservationRecord.scope.in_((scope.value, "legacy")),
+                    unresolved,
+                )
             )
             or 0
         )

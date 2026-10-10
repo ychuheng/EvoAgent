@@ -121,6 +121,8 @@ async def test_loop_executes_tool_and_feeds_result_back_to_model() -> None:
     assert result.status is AgentLoopStatus.COMPLETED
     assert result.final_answer == "the answer is 36"
     assert len(provider.requests) == 2
+    assert [item.runtime_iteration for item in provider.requests] == [1, 2]
+    assert all("runtime_iteration" not in item.model_dump() for item in provider.requests)
     second_messages = provider.requests[1].messages
     assert second_messages[-2].role is MessageRole.ASSISTANT
     assert second_messages[-2].tool_calls == (call,)
