@@ -154,20 +154,39 @@ class ConfiguredTaskHandler:
                     LocalArtifactStore(self._settings.artifact_root),
                     lease.run_id,
                     learning_enabled=self._settings.learning_enabled,
+                    settings=self._settings,
                 )
                 if validation_guard is not None:
                     await validation_guard.check()
                     selection_context = await validation_guard.selection_context()
-                    self._settings = self._settings.model_copy(
-                        update={
-                            "provider": ProviderName.MOCK,
-                            "model": "mock",
-                            "search_provider": "mock",
-                            "memory_retrieval_enabled": False,
-                            "archive_retrieval_enabled": False,
-                            "retrieval_backend": "bm25",
-                        }
-                    )
+                    from evoagent.learning.validation_profiles import require_frozen_profile
+
+                    async with self._database.session_factory() as session:
+                        from evoagent.db.models import LearningRequestRecord
+
+                        request = await session.get(
+                            LearningRequestRecord, validation_guard.request_id
+                        )
+                        profile = require_frozen_profile(request.policy_snapshot, self._settings)
+                    update = {
+                        "provider": ProviderName(profile.provider)
+                        if profile
+                        else ProviderName.MOCK,
+                        "model": profile.model if profile else "mock",
+                        "search_provider": "mock",
+                        "memory_retrieval_enabled": False,
+                        "archive_retrieval_enabled": False,
+                        "retrieval_backend": "lexical" if profile else "bm25",
+                    }
+                    if profile:
+                        update.update(
+                            max_iterations=profile.max_iterations,
+                            max_total_tokens=profile.max_total_tokens,
+                            model_request_max_output_tokens=profile.max_output_tokens,
+                            model_timeout_seconds=profile.model_timeout_seconds,
+                            task_timeout_seconds=profile.task_timeout_seconds,
+                        )
+                    self._settings = self._settings.model_copy(update=update)
             except ContextAuthorizationError as error:
                 return TaskExecutionResult(
                     status=PersistentRunStatus.FAILED,
@@ -218,16 +237,31 @@ class ConfiguredTaskHandler:
         gated = GatedProvider(provider, self._gate, f"model:{self._settings.model}", check)
         # Mock Provider 不产生真实费用，因此不经过预算闸门；付费路径才需要额度。
         if self._settings.provider is not ProviderName.MOCK:
-            gated = BudgetedProvider(
-                gated,
-                settings=self._settings,
-                session_factory=self._database.session_factory,
-                scope=self._budget_scope(),
-                task_id=lease.task_id,
-                run_id=lease.run_id,
-                provider_name=self._settings.provider.value,
-                model=expected_model,
-            )
+            if validation_guard is not None:
+                from evoagent.learning.budget import LearningBudgetService
+                from evoagent.learning.provider import ValidationBudgetedProvider
+                from evoagent.learning.task_budget_guard import ValidationTaskBudgetGuard
+
+                paid = ValidationBudgetedProvider(
+                    provider,
+                    LearningBudgetService(self._database.session_factory, self._settings),
+                    validation_guard.request_id,
+                    ValidationTaskBudgetGuard(lease, validation_guard),
+                    check=check,
+                    provider_name=self._settings.provider.value,
+                )
+                gated = GatedProvider(paid, self._gate, f"model:{self._settings.model}", check)
+            else:
+                gated = BudgetedProvider(
+                    gated,
+                    settings=self._settings,
+                    session_factory=self._database.session_factory,
+                    scope=self._budget_scope(),
+                    task_id=lease.task_id,
+                    run_id=lease.run_id,
+                    provider_name=self._settings.provider.value,
+                    model=expected_model,
+                )
         search_provider = self._search_provider()
         web_fetch = WebFetchTool(URLGuard(), timeout_seconds=self._settings.tool_timeout_seconds)
         artifact_service = ArtifactService(

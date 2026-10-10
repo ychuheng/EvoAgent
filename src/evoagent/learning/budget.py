@@ -118,6 +118,20 @@ class LearningBudgetService:
                     await session.commit()
                     return old.id
             limits = limits_from_settings(self.settings, BudgetScope(self.settings.budget_scope))
+            maximum_calls = request.policy_snapshot.get("maximum_model_calls")
+            if maximum_calls is not None:
+                if type(maximum_calls) is not int or not 1 <= maximum_calls <= 6000:
+                    raise LearningError("validation_call_bound_invalid")
+                active_calls = await session.scalar(
+                    select(func.count())
+                    .select_from(LearningSpendReservationRecord)
+                    .where(
+                        LearningSpendReservationRecord.request_id == request.id,
+                        LearningSpendReservationRecord.status != "released",
+                    )
+                )
+                if active_calls >= maximum_calls:
+                    raise LearningError("validation_call_bound_exceeded")
             if not limits.priced or limits.limit_micros is None:
                 raise LearningError("learning_budget_unapproved")
             amount = self._upper_bound()

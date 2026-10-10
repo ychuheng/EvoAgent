@@ -1,8 +1,7 @@
-"""Offline personal validation stages; no paid dispatch or trial activation.
+"""Fenced personal validation with explicit host profiles and private replicas.
 
-The maintenance handler must supply its fenced provenance check and atomic
-stage completion. Trusted HTTP entry and human judging are available for Mock
-runs; completed runtime checks cannot grant business success or trial adoption.
+Mock execution remains offline and cannot grant trial adoption. Paid execution
+requires frozen host registration and task-bound learning budget reservations.
 """
 
 import json
@@ -29,6 +28,7 @@ from evoagent.learning.repository import LearningRepository
 from evoagent.learning.schema import LearningError
 from evoagent.learning.selection_evidence import actual_selection_evidence, adoption_contract_passed
 from evoagent.learning.sources import PersonalSourceService
+from evoagent.learning.validation_profiles import real_trial_eligible, require_frozen_profile
 from evoagent.learning.validation_schema import PersonalValidationCase
 from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
@@ -38,9 +38,10 @@ from evoagent.trace.artifacts import ArtifactService
 
 
 class PersonalValidationExecution:
-    def __init__(self, factory, store, validators, check_request):
+    def __init__(self, factory, store, validators, check_request, *, settings=None):
         self.factory, self.store, self.validators = factory, store, validators
         self.check_request = check_request
+        self.settings = settings
 
     async def _load(self, session, request_id, guard):
         _, request, source = await self.check_request(session, guard, source_required=True)
@@ -81,11 +82,7 @@ class PersonalValidationExecution:
             raise LearningError("validation_candidate_unavailable")
         if LearningRepository.build_source_key("validate", frozen) != request.source_key:
             raise LearningError("validation_execution_identity_invalid")
-        if (
-            request.policy_snapshot.get("provider") != "mock"
-            or request.policy_snapshot.get("model") != "mock"
-        ):
-            raise LearningError("personal_paid_dispatch_not_connected")
+        profile = require_frozen_profile(request.policy_snapshot, self.settings)
         if (
             frozen.get("source_id") != str(source.id)
             or frozen.get("source_hash") != source.content_hash
@@ -96,6 +93,10 @@ class PersonalValidationExecution:
                 PersonalValidationCase.model_validate(item) for item in frozen["validation_cases"]
             )
             dataset_id = UUID(frozen["validation_dataset_id"])
+            if profile is not None and request.policy_snapshot.get("maximum_model_calls") != (
+                len(cases) * request.policy_snapshot["repeats"] * 2 * profile.max_iterations
+            ):
+                raise LearningError("validation_call_bound_invalid")
         except (KeyError, ValueError, TypeError):
             raise LearningError("validation_frozen_contract_invalid") from None
         criteria = {
@@ -161,13 +162,14 @@ class PersonalValidationExecution:
             dataset_id=UUID(request.frozen_inputs["validation_dataset_id"]),
             candidate_version_id=request.candidate_version_id,
             comparison_version_id=request.base_version_id,
-            provider="mock",
-            model="mock",
+            provider=request.policy_snapshot["provider"],
+            model=request.policy_snapshot["model"],
             repeats=request.policy_snapshot["repeats"],
             code_version=code_version,
             job_guard=guard,
             complete_stage=complete,
             replicas=replicas,
+            execution_profile=require_frozen_profile(request.policy_snapshot, self.settings),
         )
 
     async def collect(self, request_id, guard, complete_stage):
@@ -225,8 +227,8 @@ class PersonalValidationExecution:
                     or run.data_role != "dev"
                     or row.skill_version_id != version_id
                     or run.pinned_skill_version_id != version_id
-                    or run.provider != "mock"
-                    or run.model != "mock"
+                    or run.provider != request.policy_snapshot["provider"]
+                    or run.model != request.policy_snapshot["model"]
                     or task.goal
                     != json.dumps(case.public_input, ensure_ascii=False, sort_keys=True)
                     or str(run.status) not in {"completed", "failed", "cancelled"}
@@ -331,6 +333,21 @@ class PersonalValidationExecution:
                 if adoption_contract_passed(items, request.candidate_version_id)
                 else "failed"
             )
+        if request.policy_snapshot.get("execution_profile") is not None:
+            async with self.factory() as session:
+                from evoagent.learning.validation_evidence import validation_cost
+
+                report["cost"] = await validation_cost(session, request)
+            report["execution_profile_hash"] = request.policy_snapshot["execution_profile_hash"]
+            business = [item for item in items if item["business_criterion"]]
+            report["business_verification"] = (
+                "failed"
+                if any(item["verdict"] == "fail" for item in business)
+                else "passed"
+                if business and all(item["verdict"] == "pass" for item in business)
+                else "pending"
+            )
+            report["trial_eligible"] = real_trial_eligible(report, request.policy_snapshot)
         if len(canonical_json(report).encode()) > 128 * 1024 or detect_sensitive(
             canonical_json(report)
         ):

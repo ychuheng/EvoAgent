@@ -12,6 +12,7 @@ export type LearningRequest = {
   id: string; workspace_id: string; origin_run_id: string; status: string; stage: string;
   request_kind: string; lock_version: number; candidate_version_id: string | null;
   validation_report_hash: string | null; error_code: string | null; available_actions: string[];
+  policy_snapshot?: { provider?: string; model?: string; execution_profile_hash?: string };
   source?: { id: string; status: string; revocation_epoch: number; content_hash?: string; artifact_id?: string } | null;
   validation_report?: { items: ValidationItem[]; business_verification: string; adoption_verification?: "passed" | "failed"; trial_eligible: boolean; cost: { provider: string }; } | null;
   cost?: { known_spent_micros: number; outstanding_reserved_micros: number; unknown_usage_count: number } | null;
@@ -50,9 +51,15 @@ export type TrialReadiness = {
   ready: boolean; evidence_ready: boolean; reasons: string[]; report_hash: string | null;
   skill_lock_version: number | null;
 };
+export type ValidationProfile = {
+  profile_id: "offline-mock-v1" | "host-real-v1"; available: boolean;
+  provider?: string; model?: string; profile_hash?: string; reason?: string;
+  max_output_tokens?: number; max_iterations?: number;
+};
 
 const post = <T,>(path: string, body: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
 export const learning = {
+  validationProfiles: () => request<ValidationProfile[]>("/personal-validation-profiles"),
   trialReadiness: (version: string, validation: string) => request<TrialReadiness>(`/skill-versions/${version}/trial-readiness?validation_request_id=${encodeURIComponent(validation)}`),
   activateTrial: (version: string, body: unknown) => post<SkillTrial>(`/skill-versions/${version}/trial`, body),
   trials: (workspace: string) => request<{ items: SkillTrial[] }>(`/skill-trials?workspace_id=${encodeURIComponent(workspace)}&limit=100`),

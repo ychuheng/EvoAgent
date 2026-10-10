@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { chat, type TaskTrace } from "../api/chat";
-import { learning, learningError, type LearningRequest, type ValidationItem, type ValidationFixture } from "../api/learning";
+import { learning, learningError, type LearningRequest, type ValidationItem, type ValidationFixture, type ValidationProfile } from "../api/learning";
 
 type CaseForm = { goal: string; input: string; expected: string; fixtureId: string };
 type Verdict = "pass" | "fail" | "unknown";
@@ -14,6 +14,8 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
   const [negative, setNegative] = useState<CaseForm>(blank);
   const [family, setFamily] = useState("general");
   const [fixtures, setFixtures] = useState<ValidationFixture[]>([]);
+  const [profiles, setProfiles] = useState<ValidationProfile[]>([]);
+  const [profileId, setProfileId] = useState<ValidationProfile["profile_id"]>("offline-mock-v1");
   const [review, setReview] = useState("");
   const [consent, setConsent] = useState(false);
   const [claims, setClaims] = useState<Record<string, Claim>>({});
@@ -55,7 +57,7 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
       ...(value.fixtureId ? { fixture_id: value.fixtureId } : {}),
       criteria: [{ criterion_id: "business_check", kind: "user", description: "按你提交的业务结果核对实际输出", expected: value.expected, business_criterion: true }],
     }));
-    const body = { expected_parent_lock_version: detail.lock_version, reviewed_source_hash: detail.source.content_hash, independence_reason: review, repeats: 1, cases };
+    const body = { expected_parent_lock_version: detail.lock_version, reviewed_source_hash: detail.source.content_hash, independence_reason: review, repeats: 1, cases, ...(profileId === "host-real-v1" ? { execution_profile_id: profileId } : {}) };
     await learning.prepareValidation(row.id, { ...body, client_request_id: identity(body) });
     await onChanged(); setDetail(null);
   }
@@ -72,7 +74,16 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
   }
   const filled = [positive, negative].every(value => value.goal.trim() && (value.input.trim() || value.fixtureId) && value.expected.trim());
   return <section aria-label={`个人验证 ${row.id}`}>
-    <p>当前仅提供离线 Mock 演练，不调用付费模型；人工判定也不会启用 Skill。真实试用尚未开放。</p>
+    <p>默认使用离线 Mock 演练，不调用付费模型。真实验证须先登记模型并批准数值额度，再显式选择；人工判定不会直接启用 Skill。</p>
+    {row.available_actions.includes("prepare_validation") && <>
+      <button type="button" disabled={!writable} onClick={() => void act(async () => { setProfiles(await learning.validationProfiles()); })}>查看已登记的验证模型</button>
+      <label>验证执行配置<select aria-label={`验证执行配置 ${row.id}`} disabled={!writable} value={profileId} onChange={event => setProfileId(event.target.value as ValidationProfile["profile_id"])}>
+        <option value="offline-mock-v1">离线 Mock（无模型费用）</option>
+        {profiles.filter(profile => profile.profile_id === "host-real-v1" && profile.available).map(profile => <option key={profile.profile_id} value={profile.profile_id}>{profile.model}（使用已授权额度）</option>)}
+      </select></label>
+      {profiles.filter(profile => !profile.available).map(profile => <p key={profile.profile_id}>真实验证尚不可用：{profile.reason}</p>)}
+      {profileId === "host-real-v1" && <p>冻结后执行真实模型验证会消耗已授权的全局和个人学习额度；正反例、比较组和重复运行均计费。</p>}
+    </>}
     <button disabled={busy} type="button" onClick={() => void act(load)}>{row.request_kind === "validate" ? "查看验证与业务判定" : "准备新输入验证"}</button>
     {detail && row.request_kind === "propose" && <>
       <p>请先审查这份方法的来源，再提供不同于学习素材的新输入。反例应包含不适用或容易误用的情况。</p>
@@ -86,7 +97,7 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
       <label><input type="checkbox" disabled={!writable} checked={consent} onChange={event => setConsent(event.target.checked)} />我已核对来源，这些输入没有用于提炼此方法</label>
       <button type="button" disabled={!writable || !filled || !consent || !review.trim() || !detail.source?.content_hash} onClick={() => void act(prepare)}>冻结正反例（暂不执行）</button>
     </>}
-    {detail?.available_actions.includes("start_validation") && <button type="button" disabled={!writable} onClick={() => void act(async () => { await learning.startValidation(detail); await onChanged(); setDetail(null); })}>执行离线验证</button>}
+    {detail?.available_actions.includes("start_validation") && <button type="button" disabled={!writable} onClick={() => void act(async () => { await learning.startValidation(detail); await onChanged(); setDetail(null); })}>{detail.policy_snapshot?.provider && detail.policy_snapshot.provider !== "mock" ? "执行真实验证（使用已授权额度）" : "执行离线验证"}</button>}
     {detail && report && <>
       <p>业务判定：{report.business_verification === "passed" ? "已确认" : report.business_verification === "failed" ? "有失败项" : "待核对"}。本轮模型：{report.cost.provider}；不具备试用资格。</p>
       <p>方法采用检查：{report.adoption_verification === "passed" ? "正例采用、反例未采用" : report.adoption_verification === "failed" ? "未通过，不能据此试用" : "历史报告缺少实际采用证据"}。进入上下文不代表已经遵循方法或业务正确。</p>

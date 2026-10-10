@@ -2,6 +2,7 @@
 
 from evoagent.core.models import ProviderEventType
 from evoagent.learning.schema import LearningError
+from evoagent.providers.base import ProviderError
 from evoagent.runtime.budget import BudgetScope, cost_micros, limits_from_settings
 from evoagent.sandbox.cancellation import finish_on_cancel
 from evoagent.skills.canonical import canonical_json, content_hash
@@ -69,3 +70,14 @@ class LearningBudgetedProvider:
                 )
             else:
                 await finish_on_cancel(self.budget.release_before_dispatch(identity))
+
+
+class ValidationBudgetedProvider(LearningBudgetedProvider):
+    """Preserve stable learning budget failures at the ordinary task boundary."""
+
+    async def stream(self, request):
+        try:
+            async for event in super().stream(request):
+                yield event
+        except LearningError as error:
+            raise ProviderError("personal validation dispatch denied", code=error.code) from None

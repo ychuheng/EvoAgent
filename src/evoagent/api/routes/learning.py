@@ -131,13 +131,28 @@ async def get_policy(
     workspace_id: UUID, database: DatabaseDependency, settings: SettingsDependency
 ):
     result = await respond(service(database, settings).policy(workspace_id))
+    from evoagent.learning.validation_profiles import real_profile
+
+    try:
+        real_profile(settings)
+        real_available = bool(
+            settings.learning_enabled
+            and result["mode"] != "off"
+            and all(
+                result[key] is not None and result[key] > 0
+                for key in ("daily_limit_micros", "request_limit_micros")
+            )
+        )
+    except LearningError:
+        real_available = False
     return {
         **result,
         "learning_enabled": settings.learning_enabled,
         "automatic_discovery_available": False,
         "personal_validation_available": settings.learning_enabled,
         "personal_validation_provider": "mock",
-        "trial_adoption_available": False,
+        "personal_real_validation_available": real_available,
+        "trial_adoption_available": real_available and settings.personal_trial_enabled,
     }
 
 
@@ -186,6 +201,7 @@ def validation_service(database, settings):
         default_validator_registry(),
         learning_enabled=settings.learning_enabled,
         fixtures=default_personal_fixtures(),
+        settings=settings,
     )
 
 
@@ -204,6 +220,29 @@ async def validation_fixture_catalog():
         }
         for fixture in default_personal_fixtures()
     ]
+
+
+@router.get("/personal-validation-profiles")
+async def validation_profiles(settings: SettingsDependency):
+    from evoagent.learning.validation_profiles import real_profile
+
+    result = [{"profile_id": "offline-mock-v1", "available": True, "provider": "mock"}]
+    try:
+        profile = real_profile(settings)
+        result.append(
+            {
+                "profile_id": profile.profile_id,
+                "available": True,
+                "provider": profile.provider,
+                "model": profile.model,
+                "profile_hash": profile.identity()["profile_hash"],
+                "max_output_tokens": profile.max_output_tokens,
+                "max_iterations": profile.max_iterations,
+            }
+        )
+    except LearningError as error:
+        result.append({"profile_id": "host-real-v1", "available": False, "reason": error.code})
+    return result
 
 
 @router.post(

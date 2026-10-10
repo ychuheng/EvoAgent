@@ -178,10 +178,15 @@ class EvalCoordinator:
         job_guard,
         complete_stage=None,
         replicas=None,
+        execution_profile=None,
     ):
-        # This coordinator is not a payment authorization boundary. Until the
-        # task dispatch reservation adapter is wired, only offline runs enter.
-        if provider != "mock":
+        # Declaring real task identities is not payment authorization. The
+        # worker still reserves each call against the task-bound learning ledger.
+        if provider != "mock" and (
+            execution_profile is None
+            or execution_profile.provider != provider
+            or execution_profile.model != model
+        ):
             raise EvalCoordinatorError("personal_paid_dispatch_not_connected")
         config = EvalExperimentConfig(
             provider=provider, model=model, repeats=repeats, code_version=code_version
@@ -197,6 +202,16 @@ class EvalCoordinator:
                 unit.session, initial.origin_run_id
             )
             _, request = await job_guard.check(unit.session)
+            if provider != "mock":
+                identity = execution_profile.model_dump(mode="json")
+                if (
+                    request.policy_snapshot.get("execution_profile") != identity
+                    or request.policy_snapshot.get("execution_profile_hash")
+                    != content_hash(identity)
+                    or request.policy_snapshot.get("provider") != provider
+                    or request.policy_snapshot.get("model") != model
+                ):
+                    raise EvalCoordinatorError("personal_validation_profile_conflict")
             config = EvalExperimentConfig(
                 provider=provider,
                 model=model,

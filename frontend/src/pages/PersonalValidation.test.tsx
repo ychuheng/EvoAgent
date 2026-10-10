@@ -128,3 +128,52 @@ test("区分实际采用、不采用和历史未知，不让业务通过覆盖�
   expect(screen.getByText("实际方法：未采用")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /启用|试用/ })).not.toBeInTheDocument();
 });
+
+
+test("真实验证须显式选择宿主配置；冻结输入不会执行模型", async () => {
+  const submissions: Record<string, unknown>[] = [];
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push(url);
+    if (url.endsWith("personal-validation-profiles")) return json([
+      { profile_id: "offline-mock-v1", available: true, provider: "mock", model: "mock" },
+      { profile_id: "host-real-v1", available: true, provider: "openai_compatible", model: "registered-fixture" },
+    ]);
+    if (!init?.method) return json(parent);
+    submissions.push(JSON.parse(String(init.body)));
+    return json({ ...parent, id: "real-child" }, 202);
+  }));
+  const changed = vi.fn(async () => {});
+  render(<PersonalValidationPanel row={parent} enabled onChanged={changed} />);
+  fireEvent.click(screen.getByRole("button", { name: "查看已登记的验证模型" }));
+  const option = await screen.findByRole("option", { name: "registered-fixture（使用已授权额度）" });
+  const select = option.closest("select")!;
+  expect(select).toHaveValue("offline-mock-v1");
+  fireEvent.change(select, { target: { value: "host-real-v1" } });
+  fireEvent.click(screen.getByRole("button", { name: "准备新输入验证" }));
+  await screen.findByRole("button", { name: "冻结正反例（暂不执行）" });
+  for (const label of ["正例", "反例"]) {
+    fireEvent.change(screen.getByLabelText(`${label}任务 parent`), { target: { value: "核对输出" } });
+    fireEvent.change(screen.getByLabelText(`${label}输入 parent`), { target: { value: `${label}新内容` } });
+    fireEvent.change(screen.getByLabelText(`${label}结果 parent`), { target: { value: "内容保持完整" } });
+  }
+  fireEvent.change(screen.getByLabelText("输入审查依据 parent"), { target: { value: "已独立核对" } });
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "冻结正反例（暂不执行）" }));
+  await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+  expect(submissions[0].execution_profile_id).toBe("host-real-v1");
+  expect(submissions[0]).not.toHaveProperty("provider");
+  expect(submissions[0]).not.toHaveProperty("api_key");
+  expect(calls.some(url => url.endsWith("validation-start"))).toBe(false);
+});
+
+test("未登记的真实配置没有可选入口", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => json([
+    { profile_id: "offline-mock-v1", available: true, provider: "mock", model: "mock" },
+    { profile_id: "host-real-v1", available: false, reason: "validation_budget_unapproved" },
+  ])));
+  render(<PersonalValidationPanel row={parent} enabled onChanged={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "查看已登记的验证模型" }));
+  await screen.findByText("真实验证尚不可用：validation_budget_unapproved");
+  expect(screen.getAllByRole("option")).toHaveLength(1);
+});

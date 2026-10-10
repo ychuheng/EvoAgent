@@ -18,7 +18,9 @@ from evoagent.db.models import (
 )
 from evoagent.learning.replica_bindings import replica_factory, require_replica_binding
 from evoagent.learning.replicas import validation_input_fingerprint
+from evoagent.learning.schema import LearningError
 from evoagent.learning.sources import PersonalSourceService
+from evoagent.learning.validation_profiles import require_frozen_profile
 from evoagent.learning.validation_schema import PersonalValidationCase
 from evoagent.memory.schema import MemoryError
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
@@ -27,13 +29,16 @@ from evoagent.skills.lifecycle import SkillVersionStatus
 
 
 class PersonalValidationRunGuard:
-    def __init__(self, factory, store, run_id, evaluation_id, request_id, *, learning_enabled):
+    def __init__(
+        self, factory, store, run_id, evaluation_id, request_id, *, learning_enabled, settings=None
+    ):
         self.factory, self.store = factory, store
         self.run_id, self.evaluation_id, self.request_id = run_id, evaluation_id, request_id
         self.enabled = learning_enabled
+        self.settings = settings
 
     @classmethod
-    async def for_run(cls, factory, store, run_id, *, learning_enabled):
+    async def for_run(cls, factory, store, run_id, *, learning_enabled, settings=None):
         async with factory() as session:
             rows = list(
                 await session.execute(
@@ -53,7 +58,13 @@ class PersonalValidationRunGuard:
         if len(rows) != 1 or rows[0][1] is None:
             raise MemoryError("personal_validation_identity_invalid")
         return cls(
-            factory, store, run_id, rows[0][0], rows[0][1], learning_enabled=learning_enabled
+            factory,
+            store,
+            run_id,
+            rows[0][0],
+            rows[0][1],
+            learning_enabled=learning_enabled,
+            settings=settings,
         )
 
     async def _verify(self, session):
@@ -97,8 +108,8 @@ class PersonalValidationRunGuard:
             or case.dataset_id != experiment.dataset_id
             or str(case.split) != "train"
             or task.goal != json.dumps(case.public_input, ensure_ascii=False, sort_keys=True)
-            or run.provider != "mock"
-            or run.model != "mock"
+            or run.provider != request.policy_snapshot.get("provider")
+            or run.model != request.policy_snapshot.get("model")
             or content_hash(request.policy_snapshot) != request.policy_hash
             or request.policy_hash != request.frozen_inputs.get("validation_policy_hash")
             or experiment.config_snapshot.get("selection_contract_version")
@@ -108,6 +119,10 @@ class PersonalValidationRunGuard:
             and run.config_snapshot.get("schema_version") != 3
         ):
             raise MemoryError("personal_validation_authorization_revoked")
+        try:
+            require_frozen_profile(request.policy_snapshot, self.settings)
+        except LearningError as error:
+            raise MemoryError(error.code) from None
         try:
             frozen_case = next(
                 PersonalValidationCase.model_validate(item)

@@ -87,7 +87,11 @@ class LearningJobHandler:
                 from evoagent.learning.validation_execution import PersonalValidationExecution
 
                 execution = PersonalValidationExecution(
-                    self.factory, self.store, default_validator_registry(), self._check
+                    self.factory,
+                    self.store,
+                    default_validator_registry(),
+                    self._check,
+                    settings=self.budget.settings if self.budget else None,
                 )
 
                 async def complete(session, guard, request, next_stage, **result):

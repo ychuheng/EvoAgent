@@ -79,6 +79,8 @@ class ValidationJudgmentService:
             or request.project_id is not None
             or not isinstance(request.validation_report, dict)
             or content_hash(request.validation_report) != request.validation_report_hash
+            or content_hash(request.policy_snapshot) != request.policy_hash
+            or request.policy_hash != request.frozen_inputs.get("validation_policy_hash")
             or LearningRepository.build_source_key("validate", request.frozen_inputs)
             != request.source_key
         ):
@@ -121,6 +123,10 @@ class ValidationJudgmentService:
             or report.get("criteria_hash") != request.frozen_inputs["validation_criteria_hash"]
         ):
             raise LearningError("validation_execution_binding_invalid")
+        if request.policy_snapshot.get("execution_profile") is not None:
+            from evoagent.learning.validation_evidence import verify_report_cost
+
+            await verify_report_cost(session, request, report)
         return (
             source.id,
             source.revocation_epoch,
@@ -222,8 +228,10 @@ class ValidationJudgmentService:
                 if business and all(item["verdict"] == "pass" for item in business)
                 else "pending"
             )
-            # Human agreement with a Mock run is never real-model trial evidence.
-            report["trial_eligible"] = False
+            # Human agreement with Mock runs or unknown costs cannot grant trial.
+            from evoagent.learning.validation_profiles import real_trial_eligible
+
+            report["trial_eligible"] = real_trial_eligible(report, request.policy_snapshot)
             report["latest_judgment_id"] = str(identifier)
             if len(canonical_json(report).encode()) > 128 * 1024 or detect_sensitive(
                 canonical_json(report)

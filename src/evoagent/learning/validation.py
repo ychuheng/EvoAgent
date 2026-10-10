@@ -1,10 +1,11 @@
 """Freeze user-supplied personal cases atomically; execution is a separate stage.
 
 This service is a trusted local control-plane entry, never a model tool.
-prepare_cases only freezes inputs; start explicitly enqueues offline execution.
-The trusted HTTP route exposes offline execution; trial adoption remains closed.
+prepare_cases only freezes inputs; start explicitly enqueues execution.
+Real execution additionally requires a frozen host profile and numeric budgets.
 """
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field, model_validator
@@ -26,6 +27,7 @@ from evoagent.learning.repository import LearningRepository
 from evoagent.learning.schema import LearningError
 from evoagent.learning.service import LearningService, request_view
 from evoagent.learning.sources import PersonalSourceService
+from evoagent.learning.validation_profiles import real_profile, require_frozen_profile
 from evoagent.learning.validation_schema import ValidationSubmission
 from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.access import SkillAccessPolicy
@@ -36,6 +38,7 @@ from evoagent.tasks.lease_guard import database_now
 
 
 class ValidationAdmission(ValidationSubmission):
+    execution_profile_id: Literal["offline-mock-v1", "host-real-v1"] = "offline-mock-v1"
     expected_parent_lock_version: int = Field(ge=0)
     reviewed_source_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     independence_reason: str = Field(min_length=1, max_length=2000)
@@ -48,9 +51,12 @@ class ValidationAdmission(ValidationSubmission):
 
 
 class PersonalValidationService:
-    def __init__(self, factory, store, validators, *, learning_enabled=False, fixtures=()):
+    def __init__(
+        self, factory, store, validators, *, learning_enabled=False, fixtures=(), settings=None
+    ):
         self.factory, self.store, self.validators = factory, store, validators
         self.enabled = learning_enabled
+        self.settings = settings
         self.fixtures = {item.fixture_id: item for item in fixtures}
         if len(self.fixtures) != len(fixtures):
             raise LearningError("validation_fixture_registry_duplicate")
@@ -58,7 +64,7 @@ class PersonalValidationService:
             fixture.manifest()
 
     async def start(self, request_id, expected_lock_version):
-        """Explicit, source-authorized offline dispatch with durable replay identity."""
+        """Explicit, source-authorized dispatch with durable replay identity."""
         if not self.enabled:
             raise LearningError("learning_disabled")
         if type(expected_lock_version) is not int or expected_lock_version < 0:
@@ -83,8 +89,14 @@ class PersonalValidationService:
             control = LearningService(self.factory)
             request = await control._locked_request(session, request_id, None)
             policy = await control._policy(session, request.workspace_id)
+            profile = require_frozen_profile(request.policy_snapshot, self.settings)
             if policy["mode"] == "off":
                 raise LearningError("learning_policy_off")
+            if profile is not None and any(
+                policy[key] is None or policy[key] <= 0
+                for key in ("daily_limit_micros", "request_limit_micros")
+            ):
+                raise LearningError("learning_waiting_budget")
             source = await session.get(LearningSourceRecord, token[0], populate_existing=True)
             if (
                 source is None
@@ -113,8 +125,6 @@ class PersonalValidationService:
                 or candidate.content_hash != request.frozen_inputs["candidate_content_hash"]
                 or request.policy_hash != content_hash(request.policy_snapshot)
                 or request.policy_hash != request.frozen_inputs["validation_policy_hash"]
-                or request.policy_snapshot.get("provider") != "mock"
-                or request.policy_snapshot.get("model") != "mock"
                 or LearningRepository.build_source_key("validate", request.frozen_inputs)
                 != request.source_key
             ):
@@ -149,7 +159,11 @@ class PersonalValidationService:
             await RunEventRepository(session).append(
                 run_id=request.origin_run_id,
                 event_type="learning.validation_dispatched",
-                payload={"request_id": str(request.id), "actor": "local-user", "provider": "mock"},
+                payload={
+                    "request_id": str(request.id),
+                    "actor": "local-user",
+                    "provider": request.policy_snapshot["provider"],
+                },
                 created_at=await database_now(session),
             )
             result = request_view(request)
@@ -226,6 +240,11 @@ class PersonalValidationService:
     async def prepare_cases(self, parent_id: UUID, payload: ValidationAdmission):
         if not self.enabled:
             raise LearningError("learning_disabled")
+        profile = None
+        if payload.execution_profile_id == "host-real-v1":
+            if self.settings is None:
+                raise LearningError("validation_model_not_registered")
+            profile = real_profile(self.settings)
         control = LearningService(self.factory, learning_enabled=self.enabled)
         async with self.factory() as session:
             initial = await control._locked_request(
@@ -298,6 +317,8 @@ class PersonalValidationService:
         if compared_inputs & input_hashes:
             raise LearningError("validation_input_reuses_source")
         body = payload.model_dump(mode="json", exclude={"client_request_id"})
+        if payload.execution_profile_id == "offline-mock-v1":
+            body.pop("execution_profile_id")
         criteria = {
             case.case_key: [item.model_dump(mode="json") for item in case.criteria]
             for case in payload.cases
@@ -317,6 +338,11 @@ class PersonalValidationService:
             policy = await control._policy(session, parent.workspace_id)
             if policy["mode"] == "off":
                 raise LearningError("learning_policy_off")
+            if profile is not None and any(
+                policy[key] is None or policy[key] <= 0
+                for key in ("daily_limit_micros", "request_limit_micros")
+            ):
+                raise LearningError("learning_waiting_budget")
             source = await session.get(LearningSourceRecord, source_id, populate_existing=True)
             artifact = await session.get(ArtifactRecord, source.artifact_id) if source else None
             if (
@@ -367,6 +393,18 @@ class PersonalValidationService:
                 },
                 "independence_scope": "user_review_plus_exact_known_input_hashes",
             }
+            if profile is not None:
+                identity = profile.identity()
+                policy_snapshot.update(
+                    provider=profile.provider,
+                    model=profile.model,
+                    execution_profile=identity["profile"],
+                    execution_profile_hash=identity["profile_hash"],
+                    maximum_model_calls=len(payload.cases)
+                    * payload.repeats
+                    * 2
+                    * profile.max_iterations,
+                )
             definition = EvalDatasetDefinition(
                 purpose="personal_dev",
                 name="pv_" + content_hash({"parent_id": str(parent.id), "body": body})[7:39],

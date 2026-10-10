@@ -125,6 +125,20 @@ class SkillTrialService:
             or report.get("cost", {}).get("provider") == "mock"
         ):
             return TrialReadiness(False, ("real_validation_and_adoption_pipeline_required",))
+        from evoagent.learning.schema import LearningError
+        from evoagent.learning.validation_evidence import verify_report_cost
+        from evoagent.learning.validation_profiles import real_trial_eligible
+
+        if (
+            content_hash(request.policy_snapshot) != request.policy_hash
+            or request.policy_hash != request.frozen_inputs.get("validation_policy_hash")
+            or not real_trial_eligible(report, request.policy_snapshot)
+        ):
+            return TrialReadiness(False, ("real_validation_identity_invalid",))
+        try:
+            await verify_report_cost(session, request, report)
+        except LearningError:
+            return TrialReadiness(False, ("real_validation_payment_invalid",))
         items = report.get("items")
         if not isinstance(items, list) or not 2 <= len(items) <= 100:
             return TrialReadiness(False, ("positive_and_counterexample_required",))
