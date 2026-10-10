@@ -19,6 +19,7 @@ from evoagent.skills.applicability import VerifiedSkillFacts
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.selection import FrozenSkillChoice
 from evoagent.skills.selection_snapshot import SkillSelectionSnapshot
+from evoagent.skills.selection_vectors import SkillVectorScores, vector_scores
 from evoagent.skills.service import GateNotPassedError, SkillService
 from evoagent.skills.source_verification import SkillSourceVerifier
 from evoagent.skills.trials import SkillTrialService, TrialScope
@@ -171,6 +172,9 @@ async def resolve_ordinary(selector, task, run):
         "minimum_score": selector.settings.skill_retrieval_min_score,
         "rrf_k": selector.settings.retrieval_rrf_k,
         "maximum_distance": selector.settings.retrieval_max_vector_distance,
+        "embedding_model": selector.settings.embedding_model,
+        "embedding_dimension": selector.settings.embedding_dimension,
+        "embedding_preprocessing": selector.settings.embedding_preprocessing,
     }
     async with UnitOfWork(selector.factory) as unit:
         owned, _ = await _owned(selector, unit, task, run)
@@ -192,7 +196,18 @@ async def resolve_ordinary(selector, task, run):
             await unit.commit()
         return choice
     candidates = await selector.candidates(run_mode=run.run_mode)
-    ranked = await selector.rank(task.goal, candidates, facts=facts, backend=config["backend"])
+    vectors = SkillVectorScores({})
+    if config["backend"] == "hybrid":
+        vectors = await vector_scores(
+            selector,
+            task.goal,
+            candidates,
+            facts=facts,
+            service_gate=getattr(selector, "service_gate", None),
+        )
+    ranked = await selector.rank(
+        task.goal, candidates, facts=facts, backend=config["backend"], distances=vectors.distances
+    )
     plan = selector.choose(ranked, token_budget=config["skill_budget"], max_skills=config["top_k"])
     if plan.selected is not None:
         version_id = plan.selected.candidate.document.version_id
@@ -220,7 +235,9 @@ async def resolve_ordinary(selector, task, run):
                 session_id=chat.id,
                 config=config,
                 selected_count=int(plan.selected is not None),
-                degraded="skill_vector_not_requested" if config["backend"] == "hybrid" else None,
+                profile_id=vectors.profile_id,
+                generation=vectors.generation,
+                degraded=vectors.degraded,
             )
             unit.session.add(batch)
             await unit.session.flush()
@@ -283,6 +300,7 @@ async def resolve_ordinary(selector, task, run):
                     "origin": plan.selected.candidate.origin if plan.selected else None,
                     "applied": plan.selected is not None,
                     "degraded": batch.degraded,
+                    "embedding_tokens": vectors.usage,
                 },
                 created_at=utc_now(),
             )
