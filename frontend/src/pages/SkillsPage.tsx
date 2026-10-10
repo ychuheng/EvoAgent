@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { SkillDetail, SkillSummary } from "../api/types";
 import { Badge, Empty, ErrorNotice, Loading } from "../components/State";
 import { SkillSupersessionPanel } from "./SkillSupersessionPanel";
+import { SkillLibraryPanel } from "./SkillLibraryPanel";
 import { SkillMergePanel } from "./SkillMergePanel";
 
 export function SkillsPage() {
@@ -73,6 +74,7 @@ export function SkillsPage() {
             </tbody></table>
           </>
         )}
+        {skills && selected && <SkillLibraryPanel key={`${selected.workspace_id}:${selected.project_id ?? "workspace"}`} scope={selected} skills={skills} />}
         {skills && <SkillMergePanel skills={skills} onCreated={reload} />}
       </article>
     </section>

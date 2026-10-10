@@ -1,5 +1,6 @@
 import type {
   ApiErrorBody,
+  LibrarySuggestions,
   MergeProposalBody,
   SupersessionBody,
   ReportEnvelope,
@@ -46,6 +47,11 @@ export const api = {
   finalizeExperiment: (id: string) => request<ReportEnvelope>(`/eval-experiments/${id}/finalize`, { method: "POST" }),
   supersede: (skillId: string, body: SupersessionBody) => request(`/skills/${skillId}/supersede`, { method: "POST", body: JSON.stringify(body) }),
   proposeMerge: (body: MergeProposalBody) => request<{ id: string; status: string; candidate_version_id: string }>("/skills/merge-proposals", { method: "POST", body: JSON.stringify(body) }),
+  librarySuggestions: (workspaceId: string, projectId: string | null) => {
+    const query = new URLSearchParams({ workspace_id: workspaceId });
+    if (projectId) query.set("project_id", projectId);
+    return request<LibrarySuggestions>(`/skills/library-suggestions?${query}`);
+  },
   listSkills: () => request<SkillSummary[]>("/skills"),
   getSkill: (id: string) => request<SkillDetail>(`/skills/${id}`),
   getVersion: (id: string) => request<VersionDetail>(`/skill-versions/${id}`),

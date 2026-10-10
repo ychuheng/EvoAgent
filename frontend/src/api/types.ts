@@ -103,3 +103,14 @@ export interface SupersessionBody {
   expected_lock_version: number; expected_replacement_lock_version: number;
   expected_trial_lock_version: number; reason: string;
 }
+
+export interface LibrarySuggestions {
+  examined_count: number;
+  truncated: boolean;
+  unavailable_count: number;
+  merge_hints: Array<{ parents: Array<{ skill_id: string; version_id: string; content_hash: string; lock_version: number }>; reason: string; score: number; requires_human_review: boolean }>;
+  low_usage: Array<{ skill_id: string; reason: string }>;
+  automatically_changed: false;
+  semantic_equivalence_established: false;
+  low_usage_means_invalid: false;
+}

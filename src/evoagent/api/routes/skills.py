@@ -181,6 +181,16 @@ async def list_skills(request: Request) -> tuple[dict[str, Any], ...]:
     return await _service(request).list_skills()
 
 
+@router.get("/library-suggestions")
+async def library_suggestions(request: Request, workspace_id: UUID, project_id: UUID | None = None):
+    from evoagent.skills.library import SkillLibrarySuggestions
+    from evoagent.skills.trials import TrialScope
+
+    return await SkillLibrarySuggestions(request.app.state.database.session_factory).inspect(
+        TrialScope(workspace_id, project_id)
+    )
+
+
 @router.post("/merge-proposals", status_code=status.HTTP_202_ACCEPTED)
 async def propose_merge(payload: MergeProposal, request: Request):
     from evoagent.api.routes.learning import respond
