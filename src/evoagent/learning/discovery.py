@@ -21,7 +21,9 @@ from evoagent.skills.canonical import content_hash
 from evoagent.tasks.lease_guard import database_now
 
 
-async def check_discovery_limits(session, workspace_id, task, policy, fingerprint):
+async def check_discovery_limits(
+    session, workspace_id, task, policy, fingerprint, *, join_history=False
+):
     # Caller already owns Run -> Workspace locks; checks and request insertion
     # share that short transaction, including cross-worker daily limits.
     if policy["mode"] != "suggest" or not fingerprint:
@@ -42,26 +44,47 @@ async def check_discovery_limits(session, workspace_id, task, policy, fingerprin
         raise LearningError("learning_discovery_daily_limit")
     # Exact fingerprints are deduplication, lexical similarity is not authority
     # to overwrite, merge or delete existing versions.
-    previous = list(
-        await session.scalars(
-            base.order_by(LearningRequestRecord.created_at.desc(), LearningRequestRecord.id).limit(
-                1001
-            )
+    ordered = base.order_by(
+        LearningRequestRecord.created_at.desc(), LearningRequestRecord.id
+    ).limit(1001)
+    if join_history:
+        # Metadata only, in the same admission transaction. Never cache authority
+        # across transactions or load each historical Run/Task separately.
+        previous = list(
+            (
+                await session.execute(
+                    ordered.with_only_columns(
+                        LearningRequestRecord.policy_snapshot,
+                        LearningRequestRecord.created_at,
+                        TaskRecord.family,
+                        TaskRecord.project_id,
+                    )
+                    .join(RunRecord, LearningRequestRecord.origin_run_id == RunRecord.id)
+                    .join(TaskRecord, RunRecord.task_id == TaskRecord.id)
+                )
+            ).all()
         )
-    )
+    else:
+        previous = list(await session.scalars(ordered))
     if len(previous) > 1000:
         raise LearningError("learning_discovery_history_bound")
     for row in previous:
-        if row.policy_snapshot.get("discovery_fingerprint") == fingerprint:
+        snapshot, timestamp = (
+            (row[0], row[1]) if join_history else (row.policy_snapshot, row.created_at)
+        )
+        if snapshot.get("discovery_fingerprint") == fingerprint:
             raise LearningError("learning_discovery_duplicate")
-        timestamp = row.created_at
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=now.tzinfo)
         if timestamp >= now - timedelta(seconds=policy["cooldown_seconds"]):
-            original = await session.get(
-                TaskRecord, (await session.get(RunRecord, row.origin_run_id)).task_id
-            )
-            if original.family == task.family and original.project_id == task.project_id:
+            if join_history:
+                family, project_id = row[2], row[3]
+            else:
+                original = await session.get(
+                    TaskRecord, (await session.get(RunRecord, row.origin_run_id)).task_id
+                )
+                family, project_id = original.family, original.project_id
+            if family == task.family and project_id == task.project_id:
                 raise LearningError("learning_discovery_cooldown")
 
 

@@ -612,6 +612,7 @@ async def run_maintenance_worker():
                             database.session_factory,
                             learning_enabled=True,
                             generator_configuration=candidate_configuration(settings),
+                            discovery_history_join_enabled=settings.runtime_discovery_history_join_enabled,
                         )
                     )
                     lanes.append(asyncio.create_task(discovery.periodic_discovery()))

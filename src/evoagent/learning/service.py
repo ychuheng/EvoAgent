@@ -94,10 +94,18 @@ def request_view(row):
 
 
 class LearningService:
-    def __init__(self, session_factory, *, learning_enabled=False, generator_configuration=None):
+    def __init__(
+        self,
+        session_factory,
+        *,
+        learning_enabled=False,
+        generator_configuration=None,
+        discovery_history_join_enabled=False,
+    ):
         self.factory = session_factory
         self.enabled = learning_enabled
         self.generator_configuration = generator_configuration
+        self.discovery_history_join_enabled = discovery_history_join_enabled
 
     async def _scope(self, session, run_id):
         run = await session.get(RunRecord, run_id)
@@ -236,7 +244,12 @@ class LearningService:
             from evoagent.learning.discovery import check_discovery_limits
 
             await check_discovery_limits(
-                session, chat.workspace_id, task, policy, discovery_fingerprint
+                session,
+                chat.workspace_id,
+                task,
+                policy,
+                discovery_fingerprint,
+                join_history=self.discovery_history_join_enabled,
             )
         source_service = PersonalSourceService(
             self.factory, max_source_risk=policy["max_source_risk"]

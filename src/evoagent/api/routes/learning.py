@@ -38,6 +38,7 @@ def service(database, settings):
         database.session_factory,
         learning_enabled=settings.learning_enabled,
         generator_configuration=candidate_configuration(settings),
+        discovery_history_join_enabled=settings.runtime_discovery_history_join_enabled,
     )
 
 

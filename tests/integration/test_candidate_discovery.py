@@ -180,3 +180,99 @@ async def test_switch_to_manual_stops_automatic_candidate_before_generation(lear
         },
     )
     assert response.status_code == 422
+
+
+async def test_history_join_is_equivalent_and_bounds_sql_independent_of_history(learning_api):
+    from types import SimpleNamespace
+
+    from sqlalchemy import event
+
+    from evoagent.learning.discovery import check_discovery_limits
+    from evoagent.learning.schema import LearningError
+    from evoagent.skills.canonical import content_hash
+
+    await suggest(learning_api)
+    _, db, _, _ = learning_api
+    for index in range(20):
+        run_id = await add_run(learning_api, f"bounded-history-{index}")
+        async with db.session_factory() as session:
+            snapshot = {"discovery_fingerprint": content_hash({"index": index})}
+            session.add(
+                LearningRequestRecord(
+                    request_kind="propose",
+                    workspace_id=DEFAULT_WORKSPACE_ID,
+                    origin_run_id=run_id,
+                    trigger="discover",
+                    source_key=f"propose:v1:{index}",
+                    client_request_id=f"history-{index}",
+                    request_body_hash=content_hash({}),
+                    policy_snapshot=snapshot,
+                    policy_hash=content_hash(snapshot),
+                    frozen_inputs={},
+                )
+            )
+            await session.commit()
+    async with db.session_factory() as session:
+        origin = await session.get(RunRecord, learning_api[2])
+        original_family = (await session.get(TaskRecord, origin.task_id)).family
+    policy = {"mode": "suggest", "daily_candidate_limit": 100, "cooldown_seconds": 86400}
+    calls = []
+
+    def statement(_connection, _cursor, sql, _parameters, _context, _many):
+        calls.append(sql.split()[0].lower())  # no body, bindings or credentials
+
+    event.listen(db.engine.sync_engine, "before_cursor_execute", statement)
+    try:
+        counts = {}
+        for enabled in (False, True):
+            async with db.session_factory() as session:
+                calls.clear()
+                await check_discovery_limits(
+                    session,
+                    DEFAULT_WORKSPACE_ID,
+                    SimpleNamespace(family="coding", project_id=None),
+                    policy,
+                    "new-fingerprint",
+                    join_history=enabled,
+                )
+                counts[enabled] = len(calls)
+        clock_queries = int(db.engine.dialect.name == "postgresql")
+        assert counts[True] == 2 + clock_queries and counts[False] == 42 + clock_queries, counts
+        print(f"history=20 old_sql={counts[False]} joined_sql={counts[True]}")
+        for enabled in (False, True):
+            for task, selected_policy, fingerprint, expected in (
+                (
+                    SimpleNamespace(family="coding", project_id=None),
+                    policy,
+                    content_hash({"index": 19}),
+                    "learning_discovery_duplicate",
+                ),
+                (
+                    SimpleNamespace(family=original_family, project_id=None),
+                    policy,
+                    "new",
+                    "learning_discovery_cooldown",
+                ),
+                (
+                    SimpleNamespace(family="coding", project_id=None),
+                    {**policy, "daily_candidate_limit": 1},
+                    "new",
+                    "learning_discovery_daily_limit",
+                ),
+            ):
+                async with db.session_factory() as session:
+                    try:
+                        await check_discovery_limits(
+                            session,
+                            DEFAULT_WORKSPACE_ID,
+                            task,
+                            selected_policy,
+                            fingerprint,
+                            join_history=enabled,
+                        )
+                    except LearningError as error:
+                        assert error.code == expected
+                    else:
+                        raise AssertionError(f"missing {expected} with join={enabled}")
+    finally:
+        event.remove(db.engine.sync_engine, "before_cursor_execute", statement)
