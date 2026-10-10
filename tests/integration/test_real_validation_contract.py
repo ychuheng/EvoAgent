@@ -349,3 +349,69 @@ async def test_real_call_cap_counts_reserved_and_settled_calls_without_resending
     async with db.session_factory() as session:
         rows = list(await session.scalars(select(LearningSpendReservationRecord)))
         assert len(rows) == 4 and first in {row.id for row in rows}
+
+
+async def test_start_budget_revocation_is_durable_and_explicitly_resumable(selection_candidate):
+    client, db, *_ = selection_candidate
+    await register_host(selection_candidate)
+    parent, body = await admission(selection_candidate)
+    prepared = (
+        await client.post(f"/api/v1/learning-requests/{parent.id}/validations", json=body)
+    ).json()
+    async with db.session_factory() as session:
+        policy = await session.get(LearningPolicyRecord, DEFAULT_WORKSPACE_ID)
+        original_limit = policy.daily_limit_micros
+        policy.daily_limit_micros = None
+        await session.commit()
+    endpoint = f"/api/v1/learning-requests/{prepared['id']}/validation-start"
+    paused = await client.post(endpoint, json={"expected_lock_version": prepared["lock_version"]})
+    assert paused.status_code == 202, paused.text
+    waiting = paused.json()
+    assert waiting["status"] == "waiting_budget"
+    assert waiting["available_actions"] == ["start_validation", "cancel"]
+    assert waiting["lock_version"] == prepared["lock_version"] + 1
+    assert (await client.get(f"/api/v1/learning-requests/{prepared['id']}")).json()[
+        "status"
+    ] == "waiting_budget"
+    repeated = await client.post(endpoint, json={"expected_lock_version": waiting["lock_version"]})
+    assert repeated.json()["lock_version"] == waiting["lock_version"]
+    denied = await client.post(
+        f"/api/v1/learning-requests/{prepared['id']}/retry",
+        json={
+            "expected_lock_version": waiting["lock_version"],
+            "client_request_id": "no-generic-start",
+        },
+    )
+    assert denied.status_code == 422
+    assert denied.json()["detail"]["code"] == "validation_explicit_start_required"
+    from evoagent.db.models import MaintenanceJobRecord
+
+    async with db.session_factory() as session:
+        assert not list(
+            await session.scalars(
+                select(MaintenanceJobRecord).where(
+                    MaintenanceJobRecord.learning_request_id == UUID(prepared["id"])
+                )
+            )
+        )
+        assert not list(await session.scalars(select(LearningSpendReservationRecord)))
+        (await session.get(LearningPolicyRecord, DEFAULT_WORKSPACE_ID)).daily_limit_micros = (
+            original_limit * 2
+        )
+        await session.commit()
+    resumed = await client.post(endpoint, json={"expected_lock_version": waiting["lock_version"]})
+    assert resumed.status_code == 202, resumed.text
+    assert resumed.json()["status"] == "queued"
+    async with db.session_factory() as session:
+        request = await session.get(LearningRequestRecord, UUID(prepared["id"]))
+        jobs = list(
+            await session.scalars(
+                select(MaintenanceJobRecord).where(
+                    MaintenanceJobRecord.learning_request_id == request.id
+                )
+            )
+        )
+        assert len(jobs) == 1
+        assert request.policy_snapshot == prepared["policy_snapshot"]
+    replay = await client.post(endpoint, json={"expected_lock_version": waiting["lock_version"]})
+    assert replay.status_code == 202

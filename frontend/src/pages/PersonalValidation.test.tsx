@@ -177,3 +177,21 @@ test("未登记的真实配置没有可选入口", async () => {
   await screen.findByText("真实验证尚不可用：validation_budget_unapproved");
   expect(screen.getAllByRole("option")).toHaveLength(1);
 });
+
+
+test("预算等待不自动派发，显式恢复使用当前版本并提示原额度上限", async () => {
+  const waiting: LearningRequest = { ...parent, id: "waiting", request_kind: "validate", status: "waiting_budget", stage: "task_validate", lock_version: 4, available_actions: ["start_validation", "cancel"], policy_snapshot: { provider: "openai_compatible" } };
+  const bodies: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") bodies.push(JSON.parse(String(init.body)));
+    return json(waiting);
+  }));
+  const changed = vi.fn(async () => {});
+  render(<PersonalValidationPanel row={waiting} enabled onChanged={changed} />);
+  fireEvent.click(screen.getByRole("button", { name: "查看验证与业务判定" }));
+  const resume = await screen.findByRole("button", { name: "恢复真实验证（保留原额度上限）" });
+  expect(bodies).toHaveLength(0);
+  fireEvent.click(resume);
+  await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+  expect(bodies).toEqual([{ expected_lock_version: 4 }]);
+});

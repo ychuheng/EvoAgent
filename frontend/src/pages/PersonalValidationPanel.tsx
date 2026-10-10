@@ -97,7 +97,8 @@ export function PersonalValidationPanel({ row, enabled, onChanged }: { row: Lear
       <label><input type="checkbox" disabled={!writable} checked={consent} onChange={event => setConsent(event.target.checked)} />我已核对来源，这些输入没有用于提炼此方法</label>
       <button type="button" disabled={!writable || !filled || !consent || !review.trim() || !detail.source?.content_hash} onClick={() => void act(prepare)}>冻结正反例（暂不执行）</button>
     </>}
-    {detail?.available_actions.includes("start_validation") && <button type="button" disabled={!writable} onClick={() => void act(async () => { await learning.startValidation(detail); await onChanged(); setDetail(null); })}>{detail.policy_snapshot?.provider && detail.policy_snapshot.provider !== "mock" ? "执行真实验证（使用已授权额度）" : "执行离线验证"}</button>}
+    {detail?.status === "waiting_budget" && detail.available_actions.includes("start_validation") && <p>验证尚未派发，等待当前额度恢复。显式恢复前会重新核对来源和执行配置，仍使用原冻结的额度上限。</p>}
+    {detail?.available_actions.includes("start_validation") && <button type="button" disabled={!writable} onClick={() => void act(async () => { await learning.startValidation(detail); await onChanged(); setDetail(null); })}>{detail.policy_snapshot?.provider && detail.policy_snapshot.provider !== "mock" ? detail.status === "waiting_budget" ? "恢复真实验证（保留原额度上限）" : "执行真实验证（使用已授权额度）" : "执行离线验证"}</button>}
     {detail && report && <>
       <p>业务判定：{report.business_verification === "passed" ? "已确认" : report.business_verification === "failed" ? "有失败项" : "待核对"}。本轮模型：{report.cost.provider}；不具备试用资格。</p>
       <p>方法采用检查：{report.adoption_verification === "passed" ? "正例采用、反例未采用" : report.adoption_verification === "failed" ? "未通过，不能据此试用" : "历史报告缺少实际采用证据"}。进入上下文不代表已经遵循方法或业务正确。</p>

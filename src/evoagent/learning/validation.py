@@ -95,11 +95,10 @@ class PersonalValidationService:
             profile = require_frozen_profile(request.policy_snapshot, self.settings)
             if policy["mode"] == "off":
                 raise LearningError("learning_policy_off")
-            if profile is not None and any(
+            budget_waiting = profile is not None and any(
                 policy[key] is None or policy[key] <= 0
                 for key in ("daily_limit_micros", "request_limit_micros")
-            ):
-                raise LearningError("learning_waiting_budget")
+            )
             source = await session.get(LearningSourceRecord, token[0], populate_existing=True)
             if (
                 source is None
@@ -145,8 +144,35 @@ class PersonalValidationService:
                 return request_view(request)
             if request.lock_version != expected_lock_version:
                 raise ConcurrentUpdateError("learning_request_version_conflict")
-            if request.stage != "task_validate" or request.status != "queued":
+            if request.stage != "task_validate" or request.status not in {
+                "queued",
+                "waiting_budget",
+            }:
                 raise LearningError("validation_already_dispatched_or_terminal")
+            if request.status == "waiting_budget" and (
+                request.error_code != "learning_waiting_budget"
+                or request.validation_experiment_id is not None
+            ):
+                raise LearningError("validation_already_dispatched_or_terminal")
+            if budget_waiting:
+                if request.status != "waiting_budget":
+                    request.status = "waiting_budget"
+                    request.error_code = "learning_waiting_budget"
+                    request.lock_version += 1
+                    await control._audit(
+                        session,
+                        request,
+                        "waiting_budget",
+                        "explicit start lacks current numeric approval",
+                    )
+                result = request_view(request)
+                await session.commit()
+                return result
+            if request.status == "waiting_budget":
+                # Same immutable profile, cases and original spending caps. No
+                # previously dispatched job is retried by this admission path.
+                request.status = "queued"
+                request.error_code = None
             session.add(
                 MaintenanceJobRecord(
                     dedupe_key=dedupe,

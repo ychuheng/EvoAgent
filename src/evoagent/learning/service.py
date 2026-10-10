@@ -64,6 +64,13 @@ def request_view(row):
             actions = ("start_validation", "cancel")
     elif row.status == "ready_for_review":
         actions = ("judge_validation",) if row.request_kind == "validate" else ("review", "reject")
+    elif (
+        row.status == "waiting_budget"
+        and row.request_kind == "validate"
+        and row.stage == "task_validate"
+        and row.error_code == "learning_waiting_budget"
+    ):
+        actions = ("start_validation", "cancel")
     elif row.status in {"failed", "waiting_budget", "waiting_disabled"}:
         actions = ("retry",)
     elif row.request_kind == "propose" and row.status == "completed" and row.stage == "reviewed":
@@ -563,6 +570,12 @@ class LearningService:
                 raise ConcurrentUpdateError("learning_request_version_conflict")
             if row.status not in {"failed", "waiting_budget", "waiting_disabled"}:
                 raise LearningError("learning_request_not_retryable")
+            if (
+                row.request_kind == "validate"
+                and row.stage == "task_validate"
+                and row.error_code == "learning_waiting_budget"
+            ):
+                raise LearningError("validation_explicit_start_required")
             if await session.scalar(
                 select(LearningSpendReservationRecord.id)
                 .where(
