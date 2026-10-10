@@ -378,9 +378,13 @@ class SkillService:
 
     @staticmethod
     async def _require_gate(unit, version: SkillVersionRecord) -> None:
+        await SkillService.check_formal_gate(unit.session, version)
+
+    @staticmethod
+    async def check_formal_gate(session, version: SkillVersionRecord) -> None:
         if version.gate_report_hash is None:
             raise GateNotPassedError("skill version has no gate report")
-        experiment = await unit.session.scalar(
+        experiment = await session.scalar(
             select(EvalExperimentRecord)
             .where(
                 EvalExperimentRecord.skill_version_id == version.id,
@@ -389,7 +393,7 @@ class SkillService:
             .order_by(EvalExperimentRecord.created_at.desc())
             .limit(1)
         )
-        if experiment is None or experiment.gate_report is None:
+        if experiment is None or experiment.purpose != "formal" or experiment.gate_report is None:
             raise GateNotPassedError("accepted gate report does not exist")
         report = GateReport.model_validate(experiment.gate_report)
         if (

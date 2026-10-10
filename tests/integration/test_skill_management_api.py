@@ -200,6 +200,42 @@ async def test_skill_query_publish_conflict_and_rollback_api(tmp_path: Path) -> 
         assert rollback.json()["active_version_id"] == str(versions[0].id)
 
 
+async def test_personal_experiment_gate_cannot_publish_formal_version(tmp_path):
+    from sqlalchemy import select
+
+    async with management_client(tmp_path) as (client, database):
+        skill, versions = await seed_versions(database)
+        async with database.session_factory() as session:
+            experiment = await session.scalar(
+                select(EvalExperimentRecord).where(
+                    EvalExperimentRecord.skill_version_id == versions[1].id
+                )
+            )
+            # Isolated corrupt historical fixture; API cannot alter frozen purpose.
+            await session.execute(
+                EvalExperimentRecord.__table__.update()
+                .where(EvalExperimentRecord.id == experiment.id)
+                .values(purpose="personal_validation")
+            )
+            await session.commit()
+        response = await client.post(
+            f"/api/v1/skill-versions/{versions[1].id}/review",
+            json={
+                "action": "approve",
+                "expected_lock_version": 0,
+                "reviewer": "local-user",
+                "reason": "explicit review cannot override formal purpose",
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "gate_not_passed"
+        async with database.session_factory() as session:
+            current = await session.get(SkillRecord, skill.id)
+            candidate = await session.get(SkillVersionRecord, versions[1].id)
+            assert current.active_version_id == versions[0].id
+            assert candidate.lifecycle_status is SkillVersionStatus.REVIEW_REQUIRED
+
+
 @pytest.mark.asyncio
 async def test_dataset_api_never_returns_private_validators(tmp_path: Path) -> None:
     async with management_client(tmp_path) as (client, _database):
