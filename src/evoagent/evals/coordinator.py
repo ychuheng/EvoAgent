@@ -3,9 +3,10 @@
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_serializer
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -55,6 +56,14 @@ class EvalExperimentConfig(BaseModel):
     repeats: int = Field(ge=1, le=100)
     pair_order: str = "alternating"
     code_version: str = Field(min_length=1, max_length=128)
+    selection_contract_version: Literal[3] | None = None
+
+    @model_serializer(mode="wrap")
+    def legacy_body(self, handler):
+        body = handler(self)
+        if self.selection_contract_version is None:
+            body.pop("selection_contract_version", None)
+        return body
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +197,15 @@ class EvalCoordinator:
                 unit.session, initial.origin_run_id
             )
             _, request = await job_guard.check(unit.session)
+            config = EvalExperimentConfig(
+                provider=provider,
+                model=model,
+                repeats=repeats,
+                code_version=code_version,
+                selection_contract_version=request.policy_snapshot.get(
+                    "selection_contract_version"
+                ),
+            )
             if (
                 request.id != learning_request_id
                 or request.request_kind != "validate"

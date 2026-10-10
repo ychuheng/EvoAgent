@@ -1,0 +1,10 @@
+{
+  "body": {
+    "provider": "mock",
+    "model": "mock",
+    "repeats": 1,
+    "pair_order": "alternating",
+    "code_version": "test"
+  },
+  "hash": "sha256:ce41b451b60561875b1e89e90284fea677f04d5fdd31cce2457c8e6d6b73fe24"
+}

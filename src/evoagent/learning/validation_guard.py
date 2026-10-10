@@ -101,6 +101,11 @@ class PersonalValidationRunGuard:
             or run.model != "mock"
             or content_hash(request.policy_snapshot) != request.policy_hash
             or request.policy_hash != request.frozen_inputs.get("validation_policy_hash")
+            or experiment.config_snapshot.get("selection_contract_version")
+            != request.policy_snapshot.get("selection_contract_version")
+            or request.policy_snapshot.get("selection_contract_version") == 3
+            and run.config_snapshot is not None
+            and run.config_snapshot.get("schema_version") != 3
         ):
             raise MemoryError("personal_validation_authorization_revoked")
         try:
@@ -122,6 +127,8 @@ class PersonalValidationRunGuard:
         if (
             frozen_case.public_input != case.public_input
             or frozen_case.task_family != case.task_family
+            or request.policy_snapshot.get("selection_contract_version") == 3
+            and task.family != frozen_case.task_family
             or fingerprint != request.frozen_inputs.get("input_fingerprints", {}).get(case.case_key)
         ):
             raise MemoryError("personal_validation_frozen_input_invalid")
@@ -203,6 +210,35 @@ class PersonalValidationRunGuard:
         async with self.factory() as session:
             if await self._verify(session) != (source_id, epoch, max_risk):
                 raise MemoryError("personal_validation_authorization_revoked")
+
+    async def selection_context(self):
+        """Host facts from the immutable initial replica, never from edited outputs."""
+        from evoagent.db.models import ValidationReplicaBindingRecord
+        from evoagent.projects.inputs import InputSet
+        from evoagent.skills.selection_snapshot import SkillSelectionScope
+
+        await self.check()
+        async with self.factory() as session:
+            await self._verify(session)
+            request = await session.get(LearningRequestRecord, self.request_id)
+            if request.policy_snapshot.get("selection_contract_version") is None:
+                return None
+            if request.policy_snapshot.get("selection_contract_version") != 3:
+                raise MemoryError("personal_validation_selection_contract_invalid")
+            binding = await session.scalar(
+                select(ValidationReplicaBindingRecord).where(
+                    ValidationReplicaBindingRecord.run_id == self.run_id
+                )
+            )
+            inputs = None
+            if binding is not None:
+                try:
+                    inputs = InputSet.model_validate(
+                        {"files": [{**row, "kind": "fixture"} for row in binding.manifest["files"]]}
+                    ).model_dump(mode="json")
+                except ValueError:
+                    raise MemoryError("personal_validation_replica_unavailable") from None
+            return SkillSelectionScope(workspace_id=request.workspace_id), inputs
 
     async def execution_project(self):
         """An execution root grants no access to the source user's project."""

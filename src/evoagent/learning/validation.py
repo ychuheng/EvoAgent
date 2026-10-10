@@ -355,6 +355,7 @@ class PersonalValidationService:
                 **policy,
                 "max_source_risk": sources.max_source_risk,
                 "validation_mode": "personal_validation",
+                "selection_contract_version": 3,
                 "provider": "mock",
                 "model": "mock",
                 "repeats": payload.repeats,

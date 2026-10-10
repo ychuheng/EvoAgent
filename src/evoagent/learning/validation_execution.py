@@ -27,6 +27,7 @@ from evoagent.learning.replica_bindings import prepare_replicas, require_replica
 from evoagent.learning.replicas import validation_input_fingerprint
 from evoagent.learning.repository import LearningRepository
 from evoagent.learning.schema import LearningError
+from evoagent.learning.selection_evidence import actual_selection_evidence, adoption_contract_passed
 from evoagent.learning.sources import PersonalSourceService
 from evoagent.learning.validation_schema import PersonalValidationCase
 from evoagent.privacy.redaction import detect_sensitive
@@ -235,6 +236,11 @@ class PersonalValidationExecution:
                 ):
                     raise LearningError("validation_execution_binding_invalid")
                 machine = [item for item in case.criteria if item.validator is not None]
+                selection_evidence = None
+                if request.policy_snapshot.get("selection_contract_version") == 3:
+                    selection_evidence = await actual_selection_evidence(
+                        session, run, workspace_id=request.workspace_id, target_id=version_id
+                    )
                 try:
                     results = [
                         ValidationResult.model_validate(item) for item in row.validation_results
@@ -283,6 +289,11 @@ class PersonalValidationExecution:
                             "independent_input": True,
                             "independence_origin": "user_review",
                             "business_criterion": criterion.business_criterion,
+                            **(
+                                {"actual_selection": selection_evidence}
+                                if selection_evidence is not None
+                                else {}
+                            ),
                         }
                     )
             experiment_id = experiment.id
@@ -298,7 +309,9 @@ class PersonalValidationExecution:
             experiment_id, ArtifactService(self.store, self.factory)
         )
         report = {
-            "schema_version": 1,
+            "schema_version": 2
+            if request.policy_snapshot.get("selection_contract_version") == 3
+            else 1,
             "validation_mode": "personal_validation",
             "candidate_version_id": str(request.candidate_version_id),
             "candidate_hash": request.frozen_inputs["candidate_content_hash"],
@@ -312,6 +325,12 @@ class PersonalValidationExecution:
             "cost": {"provider": "mock", "paid_calls": 0},
             "independence_review": request.policy_snapshot["input_review"],
         }
+        if report["schema_version"] == 2:
+            report["adoption_verification"] = (
+                "passed"
+                if adoption_contract_passed(items, request.candidate_version_id)
+                else "failed"
+            )
         if len(canonical_json(report).encode()) > 128 * 1024 or detect_sensitive(
             canonical_json(report)
         ):

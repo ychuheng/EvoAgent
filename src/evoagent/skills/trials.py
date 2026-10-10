@@ -16,6 +16,7 @@ from evoagent.db.models import (
     WorkspaceRecord,
 )
 from evoagent.db.repositories.skills import SkillRepository
+from evoagent.learning.selection_evidence import adoption_contract_passed
 from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
 from evoagent.skills.canonical import content_hash
@@ -145,6 +146,8 @@ class SkillTrialService:
             return TrialReadiness(False, ("positive_and_counterexample_required",))
         if report.get("business_verification") != "passed":
             return TrialReadiness(False, ("business_verification_required",))
+        if report.get("schema_version") != 2 or not adoption_contract_passed(items, version_id):
+            return TrialReadiness(False, ("verified_actual_adoption_required",))
         return TrialReadiness(True, (), request.validation_report_hash)
 
     async def _event(self, session, skill_id, event_type, payload):

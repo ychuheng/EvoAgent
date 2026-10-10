@@ -59,6 +59,8 @@ class PersistentAgentRunner:
         permission_policy: PermissionPolicy | None = None,
         service_gate=None,
         authorization_check=None,
+        selection_scope=None,
+        selection_inputs=None,
     ) -> None:
         self._settings = settings
         self._service_gate = service_gate
@@ -68,6 +70,8 @@ class PersistentAgentRunner:
         self._registry = registry
         self._base_registry = registry
         self._authorization_check = authorization_check
+        self._selection_scope = selection_scope
+        self._selection_inputs = selection_inputs
         self._retry_policy = retry_policy or RetryPolicy(
             max_attempts=settings.max_retry_attempts,
             base_seconds=settings.retry_base_seconds,
@@ -109,6 +113,11 @@ class PersistentAgentRunner:
     async def _handle_owned(self, lease: JobLease) -> TaskExecutionResult:
         guard = LeaseGuard(lease)
         task, run = await self._load_owned_records(lease)
+        use_v3 = self._selection_scope is not None or (
+            run.config_snapshot is not None and run.config_snapshot.get("schema_version") == 3
+        )
+        if use_v3 and (self._selection_scope is None or self._authorization_check is None):
+            raise SnapshotCompatibilityError("v3 selection requires internal authorization")
         renderer_version = (
             (run.config_snapshot.get("skill_renderer_version") or 1) if run.config_snapshot else 2
         )
@@ -120,7 +129,20 @@ class PersistentAgentRunner:
             or self._settings.archive_retrieval_enabled
         )
         resolved = None
-        if use_resolver:
+        choice = None
+        if use_v3:
+            from evoagent.skills.selection import SkillSelector
+
+            await self._authorization_check()
+            choice = await SkillSelector(
+                self._session_factory,
+                self._settings,
+                self._registry,
+                guard,
+                self._selection_scope,
+                frozen_inputs=self._selection_inputs,
+            ).resolve_pinned(task, run)
+        elif use_resolver:
             from evoagent.runtime.context_resolver import ContextResolver
 
             resolved = await ContextResolver(
@@ -132,7 +154,9 @@ class PersistentAgentRunner:
                 service_gate=self._service_gate,
             ).resolve(task, run)
         matches = (
-            resolved.skills
+            choice.matches
+            if choice is not None
+            else resolved.skills
             if resolved
             else await SkillRetrievalService(
                 self._session_factory,
@@ -144,7 +168,9 @@ class PersistentAgentRunner:
             ).select(run.id, task.goal)
         )
         skill_context = (
-            resolved.skill_text
+            choice.text
+            if choice is not None
+            else resolved.skill_text
             if resolved
             else (
                 "\n\n".join(
@@ -156,7 +182,11 @@ class PersistentAgentRunner:
         )
         selected = matches[0].document if matches else None
         skill_context_hash = (
-            content_hash([item.document.content_hash for item in matches]) if matches else None
+            sha256_text(choice.text)
+            if choice is not None and choice.text is not None
+            else content_hash([item.document.content_hash for item in matches])
+            if matches
+            else None
         )
         config_snapshot = RunConfigSnapshot(
             progress_write_mode=(
@@ -173,9 +203,15 @@ class PersistentAgentRunner:
                     "content_hash": item.document.content_hash,
                 }
                 for item in matches
-            ],
+            ]
+            if choice is None
+            else choice.selections,
+            selector_version="skill-selector-v1" if use_v3 else None,
+            renderer_version=2 if use_v3 else None,
+            skill_selection_hash=choice.selection_hash if choice is not None else None,
+            under_test_skill_version_id=run.pinned_skill_version_id if use_v3 else None,
             retrieval=resolved.config if resolved else None,
-            schema_version=self._settings.snapshot_schema_version,
+            schema_version=3 if use_v3 else self._settings.snapshot_schema_version,
             summarizer="extractive-v1" if self._settings.snapshot_schema_version == 2 else None,
             provider=run.provider,
             provider_thinking_mode=self._settings.provider_thinking_mode,
@@ -199,7 +235,9 @@ class PersistentAgentRunner:
             task_timeout_seconds=self._settings.task_timeout_seconds,
             tool_timeout_seconds=self._settings.tool_timeout_seconds,
             code_version=self._settings.code_version,
-            skill_retrieval_top_k=self._settings.skill_retrieval_top_k,
+            skill_retrieval_top_k=min(self._settings.skill_retrieval_top_k, 1)
+            if use_v3
+            else self._settings.skill_retrieval_top_k,
             skill_retrieval_min_score=self._settings.skill_retrieval_min_score,
             run_mode=RunMode(run.run_mode),
             skill_version_id=selected.version_id if selected else None,
@@ -229,7 +267,7 @@ class PersistentAgentRunner:
                 run,
                 resolved,
                 skill_context,
-                skill_context_hash,
+                choice.selection_hash if choice is not None else skill_context_hash,
                 project_context,
                 sink,
             )

@@ -144,6 +144,7 @@ class ConfiguredTaskHandler:
             run = await session.get(RunRecord, lease.run_id)
             task = await session.get(TaskRecord, lease.task_id)
         validation_guard = None
+        selection_context = None
         if run is not None and run.data_role == "dev":
             from evoagent.learning.validation_guard import PersonalValidationRunGuard
 
@@ -156,6 +157,7 @@ class ConfiguredTaskHandler:
                 )
                 if validation_guard is not None:
                     await validation_guard.check()
+                    selection_context = await validation_guard.selection_context()
                     self._settings = self._settings.model_copy(
                         update={
                             "provider": ProviderName.MOCK,
@@ -273,6 +275,8 @@ class ConfiguredTaskHandler:
             registry=registry,
             service_gate=self._gate,
             authorization_check=authorize if validation_guard is not None else project_check,
+            selection_scope=selection_context[0] if selection_context else None,
+            selection_inputs=selection_context[1] if selection_context else None,
         )
         try:
             result = await runner.handle(lease)
