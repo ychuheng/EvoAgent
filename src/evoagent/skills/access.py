@@ -22,6 +22,7 @@ from evoagent.db.models import (
 from evoagent.memory.repository import check_run_references
 from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.canonical import canonical_json, content_hash
+from evoagent.skills.lifecycle import SkillStatus, SkillVersionStatus
 from evoagent.skills.schema import SkillDefinition
 
 
@@ -51,6 +52,12 @@ class SkillAccessPolicy:
                 or content_hash(version.definition) != version.content_hash
             ):
                 raise SkillAccessError("skill_scope_or_hash_invalid")
+            # A retired pointer is compatible with a frozen lineage; explicit
+            # disabling/rejection is revocation and applies to every ancestor.
+            if skill.status is not SkillStatus.ENABLED or (
+                version.lifecycle_status is SkillVersionStatus.REJECTED
+            ):
+                raise SkillAccessError("skill_source_version_revoked")
             try:
                 definition = SkillDefinition.model_validate(version.definition)
             except ValueError:
@@ -64,6 +71,11 @@ class SkillAccessPolicy:
                 raise SkillAccessError("skill_sensitive_content")
             if root is None:
                 root = version
+            if version.parent_version_id is not None:
+                parent = await session.get(SkillVersionRecord, version.parent_version_id)
+                if parent is None or parent.skill_id != version.skill_id:
+                    raise SkillAccessError("skill_revision_parent_invalid")
+                pending.append((parent.id, ancestors | {current}))
             links = list(
                 await session.scalars(
                     select(SkillSourceRecord)

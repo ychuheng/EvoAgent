@@ -7,6 +7,7 @@ import pytest
 from evoagent.db.models import SkillRecord, SkillVersionRecord
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
 from evoagent.skills.canonical import content_hash
+from evoagent.skills.lifecycle import SkillStatus, SkillVersionStatus
 
 
 async def test_malformed_definition_does_not_survive_in_formatted_exception_chain():
@@ -17,8 +18,10 @@ async def test_malformed_definition_does_not_survive_in_formatted_exception_chai
         definition=body,
         content_hash=content_hash(body),
         schema_version=1,
+        lifecycle_status=SkillVersionStatus.DRAFT,
+        parent_version_id=None,
     )
-    skill = SimpleNamespace(workspace_id=workspace, project_id=None)
+    skill = SimpleNamespace(workspace_id=workspace, project_id=None, status=SkillStatus.ENABLED)
 
     class MetadataSession:
         async def get(self, model, identity):
