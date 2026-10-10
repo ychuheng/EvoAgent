@@ -54,3 +54,35 @@ test("挂起已有试用不依赖启用能力，发送试用自身CAS", async ()
   fireEvent.click(suspend);
   await waitFor(() => expect(screen.queryByRole("button", { name: "挂起试用 trial" })).not.toBeInTheDocument());
 });
+
+
+test("项目候选启用沿用服务器返回的项目范围", async () => {
+  let body: Record<string, unknown> = {};
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("trial-readiness")) return json({ ready: true, evidence_ready: true, reasons: [], report_hash: "hash", skill_lock_version: 9 });
+    body = JSON.parse(String(init?.body));
+    return json({ id: "project-trial", status: "active" });
+  }));
+  render(<TrialCandidatePanel row={{ ...row, project_id: "source-project" }} />);
+  fireEvent.click(screen.getByRole("button", { name: "检查试用就绪条件" }));
+  await screen.findByRole("button", { name: "确认限定试用" });
+  fireEvent.change(screen.getByLabelText("试用依据 validation"), { target: { value: "new project input verified" } });
+  fireEvent.click(screen.getByRole("button", { name: "确认限定试用" }));
+  await screen.findByRole("status");
+  expect(body.project_id).toBe("source-project");
+});
+
+test("试用管理通过登记项目选择范围，切换后清除旧范围记录", async () => {
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    calls.push(url);
+    if (url.endsWith("/projects")) return json([{ id: "registered-project", name: "我的项目" }]);
+    return json({ items: [] });
+  }));
+  render(<SkillTrialPanel workspaceId="workspace" />);
+  fireEvent.click(screen.getByRole("button", { name: "加载项目范围" }));
+  await screen.findByRole("option", { name: "我的项目" });
+  fireEvent.change(screen.getByLabelText("试用管理项目范围"), { target: { value: "registered-project" } });
+  fireEvent.click(screen.getByRole("button", { name: "查看或刷新试用记录" }));
+  await waitFor(() => expect(calls.some(url => url.includes("project_id=registered-project"))).toBe(true));
+});

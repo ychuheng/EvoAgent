@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { chat, type Project } from "../api/chat";
 import { learning, learningError, type LearningRequest, type SkillTrial, type TrialReadiness } from "../api/learning";
 
 export function TrialCandidatePanel({ row }: { row: LearningRequest }) {
@@ -19,7 +20,7 @@ export function TrialCandidatePanel({ row }: { row: LearningRequest }) {
     if (!readiness?.ready || readiness.skill_lock_version === null || !reason.trim()) return;
     setBusy(true); setError("");
     try {
-      setAdopted(await learning.activateTrial(versionId, { workspace_id: row.workspace_id, project_id: null, validation_request_id: row.id, expected_lock_version: readiness.skill_lock_version, reason }));
+      setAdopted(await learning.activateTrial(versionId, { workspace_id: row.workspace_id, project_id: row.project_id ?? null, validation_request_id: row.id, expected_lock_version: readiness.skill_lock_version, reason }));
       setReadiness(null);
     } catch (failure) { setError(learningError(failure)); setReadiness(null); }
     finally { setBusy(false); }
@@ -29,7 +30,7 @@ export function TrialCandidatePanel({ row }: { row: LearningRequest }) {
     {readiness && <p>{readiness.ready ? "独立验证已满足试用门禁；需你确认限定采用。" : `尚不能试用：${readiness.reasons.join("、")}`}</p>}
     {readiness?.ready && <>
       <label>试用依据<textarea aria-label={`试用依据 ${row.id}`} maxLength={1000} value={reason} onChange={event => setReason(event.target.value)} /></label>
-      <p>仅用于当前工作区的后续任务；不会移动正式版本指针。</p>
+      <p>仅用于当前工作区{row.project_id ? `的项目 ${row.project_id}` : ""}的后续任务；不会移动正式版本指针。</p>
       <button type="button" disabled={busy || !reason.trim() || readiness.skill_lock_version === null} onClick={() => void activate()}>确认限定试用</button>
     </>}
     {adopted && <p role="status">限定试用已启用：{adopted.id}。可在试用管理中挂起或回滚。</p>}
@@ -38,12 +39,14 @@ export function TrialCandidatePanel({ row }: { row: LearningRequest }) {
 }
 
 export function SkillTrialPanel({ workspaceId }: { workspaceId: string }) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [rows, setRows] = useState<SkillTrial[] | null>(null);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function load() { setRows((await learning.trials(workspaceId)).items); }
+  async function load() { setRows((await learning.trials(workspaceId, projectId)).items); }
   async function act(operation: () => Promise<unknown>) {
     setBusy(true); setError("");
     try { await operation(); await load(); }
@@ -52,8 +55,12 @@ export function SkillTrialPanel({ workspaceId }: { workspaceId: string }) {
   }
   return <section aria-label="限定试用管理">
     <h3>限定试用管理</h3>
+    <button type="button" disabled={busy} onClick={() => void act(async () => { setProjects(await chat.projects()); })}>加载项目范围</button>
+    <label>试用范围<select aria-label="试用管理项目范围" disabled={busy} value={projectId ?? ""} onChange={event => { setProjectId(event.target.value || null); setRows(null); setReasons({}); setTargets({}); }}>
+      <option value="">仅工作区范围</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+    </select></label>
     <button type="button" disabled={busy} onClick={() => void act(load)}>查看或刷新试用记录</button>
-    {rows?.length === 0 && <p>当前工作区没有限定试用。</p>}
+    {rows?.length === 0 && <p>当前所选范围没有限定试用。</p>}
     {rows?.map(row => <article key={row.id}>
       <p>试用 {row.id} / 版本 {row.version_id} / 状态 {row.status}</p>
       {row.suspension_reason && <p>挂起原因：{row.suspension_reason}</p>}

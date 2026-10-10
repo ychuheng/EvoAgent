@@ -71,6 +71,7 @@ def request_view(row):
     return LearningRequestView(
         id=row.id,
         workspace_id=row.workspace_id,
+        project_id=row.project_id,
         origin_run_id=row.origin_run_id,
         request_kind=row.request_kind,
         status=row.status,

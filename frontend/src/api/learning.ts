@@ -9,7 +9,7 @@ export type LearningPolicy = {
   trial_adoption_available?: boolean;
 };
 export type LearningRequest = {
-  id: string; workspace_id: string; origin_run_id: string; status: string; stage: string;
+  id: string; workspace_id: string; project_id?: string | null; origin_run_id: string; status: string; stage: string;
   request_kind: string; lock_version: number; candidate_version_id: string | null;
   validation_report_hash: string | null; error_code: string | null; available_actions: string[];
   policy_snapshot?: { provider?: string; model?: string; execution_profile_hash?: string };
@@ -62,7 +62,7 @@ export const learning = {
   validationProfiles: () => request<ValidationProfile[]>("/personal-validation-profiles"),
   trialReadiness: (version: string, validation: string) => request<TrialReadiness>(`/skill-versions/${version}/trial-readiness?validation_request_id=${encodeURIComponent(validation)}`),
   activateTrial: (version: string, body: unknown) => post<SkillTrial>(`/skill-versions/${version}/trial`, body),
-  trials: (workspace: string) => request<{ items: SkillTrial[] }>(`/skill-trials?workspace_id=${encodeURIComponent(workspace)}&limit=100`),
+  trials: (workspace: string, project: string | null = null) => request<{ items: SkillTrial[] }>(`/skill-trials?workspace_id=${encodeURIComponent(workspace)}${project ? `&project_id=${encodeURIComponent(project)}` : ""}&limit=100`),
   suspendTrial: (trial: SkillTrial, reason: string) => post<SkillTrial>(`/skill-trials/${trial.id}/suspend`, { expected_lock_version: trial.lock_version, reason }),
   rollbackTrial: (trial: SkillTrial, target: string, reason: string) => post<SkillTrial>(`/skill-trials/${trial.id}/rollback`, { expected_lock_version: trial.lock_version, target_trial_id: target, reason }),
   observationEvidence: (runId: string) => request<ObservationCatalog>(`/runs/${runId}/skill-observation-evidence`),

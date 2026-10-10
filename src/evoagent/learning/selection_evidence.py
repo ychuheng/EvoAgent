@@ -8,7 +8,7 @@ from evoagent.runtime.run_config import RunConfigSnapshot
 from evoagent.skills.canonical import content_hash
 
 
-async def actual_selection_evidence(session, run, *, workspace_id, target_id):
+async def actual_selection_evidence(session, run, *, workspace_id, target_id, project_id=None):
     if run.config_snapshot is None:
         return {"verified": False, "applied": None, "reason": "runtime_config_unavailable"}
     try:
@@ -34,7 +34,7 @@ async def actual_selection_evidence(session, run, *, workspace_id, target_id):
         binding = bindings[0]
         if (
             selected.scope.workspace_id != workspace_id
-            or selected.scope.project_id is not None
+            or selected.scope.project_id != project_id
             or binding.skill_version_id != selected.version_id
             or binding.content_hash != selected.content_hash
             or binding.rendered_hash != selected.rendered_hash

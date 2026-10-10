@@ -45,12 +45,11 @@ class PersonalValidationExecution:
 
     async def _load(self, session, request_id, guard):
         _, request, source = await self.check_request(session, guard, source_required=True)
-        if (
-            request.id != request_id
-            or request.request_kind != "validate"
-            or request.project_id is not None
-        ):
+        if request.id != request_id or request.request_kind != "validate":
             raise LearningError("validation_execution_identity_invalid")
+        from evoagent.learning.project_validation import require_project_replica_contract
+
+        require_project_replica_contract(request)
         frozen = request.frozen_inputs
         if (
             content_hash(request.policy_snapshot) != request.policy_hash
@@ -241,7 +240,11 @@ class PersonalValidationExecution:
                 selection_evidence = None
                 if request.policy_snapshot.get("selection_contract_version") == 3:
                     selection_evidence = await actual_selection_evidence(
-                        session, run, workspace_id=request.workspace_id, target_id=version_id
+                        session,
+                        run,
+                        workspace_id=request.workspace_id,
+                        project_id=request.project_id,
+                        target_id=version_id,
                     )
                 try:
                     results = [

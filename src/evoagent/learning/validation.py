@@ -73,8 +73,11 @@ class PersonalValidationService:
             request = await session.get(LearningRequestRecord, request_id)
             if request is None:
                 raise LearningError("learning_request_not_found")
-            if request.request_kind != "validate" or request.project_id is not None:
+            if request.request_kind != "validate":
                 raise LearningError("validation_project_replica_required")
+            from evoagent.learning.project_validation import require_project_replica_contract
+
+            require_project_replica_contract(request)
             source = await session.get(
                 LearningSourceRecord, UUID(request.frozen_inputs["source_id"])
             )
@@ -118,7 +121,7 @@ class PersonalValidationService:
                 session,
                 request.candidate_version_id,
                 workspace_id=request.workspace_id,
-                project_id=None,
+                project_id=request.project_id,
             )
             if (
                 candidate.lifecycle_status is not SkillVersionStatus.DRAFT
@@ -333,7 +336,9 @@ class PersonalValidationService:
                 or parent.stage != "reviewed"
             ):
                 raise LearningError("validation_candidate_review_required")
-            if parent.project_id is not None:
+            if parent.project_id is not None and any(
+                case.fixture_id is None for case in payload.cases
+            ):
                 raise LearningError("validation_project_replica_required")
             policy = await control._policy(session, parent.workspace_id)
             if policy["mode"] == "off":
@@ -393,6 +398,11 @@ class PersonalValidationService:
                 },
                 "independence_scope": "user_review_plus_exact_known_input_hashes",
             }
+            if parent.project_id is not None:
+                policy_snapshot.update(
+                    project_replica_policy="registered-fixtures:v1",
+                    source_project_id=str(parent.project_id),
+                )
             if profile is not None:
                 identity = profile.identity()
                 policy_snapshot.update(
@@ -438,7 +448,7 @@ class PersonalValidationService:
                 "validation_criteria_hash": content_hash(criteria),
                 "validation_policy_hash": content_hash(policy_snapshot),
                 "validator_version": "personal:v1",
-                "target_scope_key": TrialScope(parent.workspace_id).key,
+                "target_scope_key": TrialScope(parent.workspace_id, parent.project_id).key,
                 "validation_dataset_id": str(dataset.id),
                 "validation_cases": [case.model_dump(mode="json") for case in payload.cases],
                 "input_fingerprints": case_fingerprints,
@@ -453,6 +463,7 @@ class PersonalValidationService:
                 frozen["validation_policy_hash"] = content_hash(policy_snapshot)
             row = await LearningRepository(session).append_request(
                 workspace_id=parent.workspace_id,
+                project_id=parent.project_id,
                 origin_run_id=parent.origin_run_id,
                 client_request_id=payload.client_request_id,
                 kind="validate",

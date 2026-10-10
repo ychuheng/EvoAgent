@@ -101,6 +101,7 @@ class LearningRequestView(BaseModel):
 
     id: UUID
     workspace_id: UUID
+    project_id: UUID | None = None
     origin_run_id: UUID
     request_kind: str
     status: str

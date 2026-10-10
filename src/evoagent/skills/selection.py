@@ -492,12 +492,17 @@ class SkillSelector:
         owned_task = await unit.tasks.get(task.id)
         owned_run = await unit.runs.get(run.id)
         chat = await unit.session.get(SessionRecord, owned_task.session_id)
+        from evoagent.learning.project_validation import selection_project_matches
+
+        project_matches = await selection_project_matches(
+            unit.session, owned_run, owned_task, self.scope, factory=self.factory
+        )
         if (
             owned_run.data_role != "dev"
             or owned_run.run_mode not in {RunMode.BASELINE.value, RunMode.PINNED_SKILL.value}
             or chat is None
             or chat.workspace_id != self.scope.workspace_id
-            or owned_task.project_id != self.scope.project_id
+            or not project_matches
             or owned_task.goal != task.goal
             or owned_task.family != task.family
             or owned_run.pinned_skill_version_id != run.pinned_skill_version_id

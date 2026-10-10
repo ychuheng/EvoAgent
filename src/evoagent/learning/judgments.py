@@ -76,7 +76,6 @@ class ValidationJudgmentService:
             or request.request_kind != "validate"
             or request.status != "ready_for_review"
             or request.stage != "validation_review"
-            or request.project_id is not None
             or not isinstance(request.validation_report, dict)
             or content_hash(request.validation_report) != request.validation_report_hash
             or content_hash(request.policy_snapshot) != request.policy_hash
@@ -85,6 +84,9 @@ class ValidationJudgmentService:
             != request.source_key
         ):
             raise LearningError("validation_not_ready_for_human_review")
+        from evoagent.learning.project_validation import require_project_replica_contract
+
+        require_project_replica_contract(request)
         policy = await LearningService(self.factory)._policy(session, request.workspace_id)
         if policy["mode"] == "off":
             raise LearningError("learning_policy_off")

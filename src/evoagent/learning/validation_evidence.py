@@ -20,6 +20,14 @@ async def validation_cost(session, request):
     if not 2 <= len(evaluations) <= 100:
         raise LearningError("validation_execution_binding_invalid")
     bindings = {row.run_id: row.task_id for row in evaluations}
+    execution_rows = list(
+        await session.execute(
+            select(RunRecord.id, RunRecord.task_id, RunRecord.provider, RunRecord.model)
+            .where(RunRecord.id.in_(bindings))
+            .limit(101)
+        )
+    )
+    executions = {row.id: row for row in execution_rows}
     rows = list(
         await session.scalars(
             select(LearningSpendReservationRecord)
@@ -35,7 +43,7 @@ async def validation_cost(session, request):
     paid_runs = set()
     complete = True
     for row in rows:
-        run = await session.get(RunRecord, row.run_id)
+        run = executions.get(row.run_id)
         if (
             row.workspace_id != request.workspace_id
             or bindings.get(row.run_id) != row.task_id

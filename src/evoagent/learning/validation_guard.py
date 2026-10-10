@@ -87,7 +87,6 @@ class PersonalValidationRunGuard:
             or request.request_kind != "validate"
             or request.status != "running"
             or request.stage != "waiting_validation"
-            or request.project_id is not None
             or experiment is None
             or experiment.purpose != "personal_validation"
             or str(experiment.status) not in {"queued", "running"}
@@ -120,6 +119,9 @@ class PersonalValidationRunGuard:
         ):
             raise MemoryError("personal_validation_authorization_revoked")
         try:
+            from evoagent.learning.project_validation import require_project_replica_contract
+
+            require_project_replica_contract(request)
             require_frozen_profile(request.policy_snapshot, self.settings)
         except LearningError as error:
             raise MemoryError(error.code) from None
@@ -179,11 +181,14 @@ class PersonalValidationRunGuard:
                 session,
                 request.candidate_version_id,
                 workspace_id=request.workspace_id,
-                project_id=None,
+                project_id=request.project_id,
             )
             if version_id is not None and version_id != request.candidate_version_id:
                 comparison = await SkillAccessPolicy().check(
-                    session, version_id, workspace_id=request.workspace_id, project_id=None
+                    session,
+                    version_id,
+                    workspace_id=request.workspace_id,
+                    project_id=request.project_id,
                 )
                 if (
                     comparison.skill_id != candidate.skill_id
@@ -253,7 +258,9 @@ class PersonalValidationRunGuard:
                     ).model_dump(mode="json")
                 except ValueError:
                     raise MemoryError("personal_validation_replica_unavailable") from None
-            return SkillSelectionScope(workspace_id=request.workspace_id), inputs
+            return SkillSelectionScope(
+                workspace_id=request.workspace_id, project_id=request.project_id
+            ), inputs
 
     async def execution_project(self):
         """An execution root grants no access to the source user's project."""
