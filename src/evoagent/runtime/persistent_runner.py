@@ -12,7 +12,7 @@ from evoagent.core.context import ContextBuilder
 from evoagent.core.context_policy import policy_from_settings
 from evoagent.core.loop import AgentLoop
 from evoagent.core.models import AgentLoopStatus, EventType, Message, MessageRole
-from evoagent.db.models import RunRecord, TaskRecord
+from evoagent.db.models import RunRecord, SessionRecord, TaskRecord
 from evoagent.mcp.adapter import register_run_tools
 from evoagent.mcp.connections import ConnectionManager
 from evoagent.mcp.schema import MCPError
@@ -72,6 +72,9 @@ class PersistentAgentRunner:
         self._authorization_check = authorization_check
         self._selection_scope = selection_scope
         self._selection_inputs = selection_inputs
+        self._configured_selection_scope = selection_scope
+        self._configured_selection_inputs = selection_inputs
+        self._configured_authorization_check = authorization_check
         self._retry_policy = retry_policy or RetryPolicy(
             max_attempts=settings.max_retry_attempts,
             base_seconds=settings.retry_base_seconds,
@@ -112,9 +115,40 @@ class PersistentAgentRunner:
 
     async def _handle_owned(self, lease: JobLease) -> TaskExecutionResult:
         guard = LeaseGuard(lease)
+        self._selection_scope = self._configured_selection_scope
+        self._selection_inputs = self._configured_selection_inputs
+        self._authorization_check = self._configured_authorization_check
         task, run = await self._load_owned_records(lease)
-        use_v3 = self._selection_scope is not None or (
-            run.config_snapshot is not None and run.config_snapshot.get("schema_version") == 3
+        ordinary_v3 = task.selection_contract_version == 3 and run.data_role == "personal"
+        if ordinary_v3:
+            from evoagent.projects.boundaries import authorization_guard
+            from evoagent.skills.selection_snapshot import SkillSelectionScope
+
+            async with self._session_factory() as session:
+                chat = await session.get(SessionRecord, task.session_id)
+            if chat is None:
+                raise MemoryError("skill_selection_scope_invalid")
+            if self._selection_scope is None:
+                self._selection_scope = SkillSelectionScope(
+                    workspace_id=chat.workspace_id, project_id=task.project_id
+                )
+                self._selection_inputs = task.frozen_inputs
+            if self._authorization_check is None:
+                project_check = authorization_guard(
+                    self._session_factory,
+                    project_id=task.project_id,
+                    expected_authorization_version=task.project_authorization_version,
+                )
+
+                async def authorize_ordinary():
+                    if project_check is not None:
+                        await project_check()
+
+                self._authorization_check = authorize_ordinary
+        use_v3 = (
+            ordinary_v3
+            or self._selection_scope is not None
+            or (run.config_snapshot is not None and run.config_snapshot.get("schema_version") == 3)
         )
         if use_v3 and (self._selection_scope is None or self._authorization_check is None):
             raise SnapshotCompatibilityError("v3 selection requires internal authorization")
@@ -134,14 +168,35 @@ class PersistentAgentRunner:
             from evoagent.skills.selection import SkillSelector
 
             await self._authorization_check()
-            choice = await SkillSelector(
+            selector = SkillSelector(
                 self._session_factory,
                 self._settings,
                 self._registry,
                 guard,
                 self._selection_scope,
                 frozen_inputs=self._selection_inputs,
-            ).resolve_pinned(task, run)
+            )
+            selector.service_gate = self._service_gate
+            if ordinary_v3:
+                from evoagent.skills.selection_runtime import resolve_ordinary
+
+                choice = await resolve_ordinary(selector, task, run)
+            else:
+                choice = await selector.resolve_pinned(task, run)
+            if use_resolver and (
+                self._settings.memory_retrieval_enabled or self._settings.archive_retrieval_enabled
+            ):
+                from evoagent.runtime.context_resolver import ContextResolver
+
+                resolved = await ContextResolver(
+                    self._session_factory,
+                    self._settings,
+                    self._registry,
+                    guard,
+                    self._context_builder,
+                    service_gate=self._service_gate,
+                    external_skill_choice=choice,
+                ).resolve(task, run)
         elif use_resolver:
             from evoagent.runtime.context_resolver import ContextResolver
 
@@ -397,6 +452,7 @@ class PersistentAgentRunner:
             checkpoint_writer=checkpoints,
             context_hash=skill_context_hash or "",
             instruction_provider=self._instruction_provider(lease.task_id),
+            before_model_call=lambda: self._before_model_call(lease),
         )
         try:
             async with asyncio.timeout(self._settings.task_timeout_seconds):
@@ -575,12 +631,26 @@ class PersistentAgentRunner:
             return None
         return build_project_context(project)
 
+    async def _before_model_call(self, lease):
+        await self._load_owned_records(lease)
+        if self._authorization_check is not None:
+            await self._authorization_check()
+
     async def _load_owned_records(self, lease: JobLease) -> tuple[TaskRecord, RunRecord]:
         async with self._session_factory() as session:
             task, run = await LeaseGuard(lease).check(session)
             from evoagent.skills.selection import FormalSkillReader
 
-            await FormalSkillReader().check_run_bindings(session, task=task, run=run)
+            await check_run_references(session, run.id)
+            if (
+                run.data_role == "personal"
+                and (run.config_snapshot or {}).get("schema_version") == 3
+            ):
+                from evoagent.skills.selection_boundary import check_ordinary_bindings
+
+                await check_ordinary_bindings(session, task=task, run=run)
+            else:
+                await FormalSkillReader().check_run_bindings(session, task=task, run=run)
             return task, run
 
     async def _persist_run_config(

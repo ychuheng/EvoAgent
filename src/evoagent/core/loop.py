@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from evoagent.core.context_policy import ContextPolicy, ContextPolicyError, LegacyContextPolicy
@@ -67,6 +68,7 @@ class AgentLoop:
         context_policy: ContextPolicy | None = None,
         context_store=None,
         instruction_provider: InstructionProvider | None = None,
+        before_model_call: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         normalized_model = model.strip()
         if not normalized_model:
@@ -93,6 +95,7 @@ class AgentLoop:
         self._context_policy = context_policy or LegacyContextPolicy()
         self._context_store = context_store
         self._instruction_provider = instruction_provider
+        self._before_model_call = before_model_call
         self._context_revision_id = None
         self._history_before_sequence = 0
         self._config_hash = self._make_config_hash()
@@ -234,6 +237,10 @@ class AgentLoop:
                     else EventType.CONTEXT_CHECKED,
                     {"iteration": iteration, **decision.audit_payload()},
                 )
+            if self._before_model_call is not None:
+                # Authorization/lease failures belong to the runtime boundary,
+                # outside generic Provider exception normalization.
+                await self._before_model_call()
             await self._event_sink.emit(
                 EventType.MODEL_REQUESTED,
                 {

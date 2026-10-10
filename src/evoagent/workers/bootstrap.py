@@ -24,7 +24,7 @@ from evoagent.memory.schema import MemoryError as ContextAuthorizationError
 from evoagent.projects.inputs import InputChangedError
 from evoagent.projects.readiness import REASON_UNOBSERVABLE, ProjectCommandReadinessProbe
 from evoagent.projects.schema import ProjectAuthorizationRevoked
-from evoagent.providers.base import ModelProvider
+from evoagent.providers.base import ModelProvider, ProviderError
 from evoagent.providers.mock import MockProvider
 from evoagent.providers.openai_compatible import OpenAICompatibleProvider
 from evoagent.retrieval.embeddings import provider_from_settings
@@ -200,8 +200,16 @@ class ConfiguredTaskHandler:
         provider = self._provider(lease.run_id)
 
         async def check():
-            async with self._database.session_factory() as session:
-                await LeaseGuard(lease).check(session)
+            from evoagent.skills.selection_boundary import check_ordinary_bindings
+
+            try:
+                async with self._database.session_factory() as session:
+                    current_task, current_run = await LeaseGuard(lease).check(session)
+                    await check_ordinary_bindings(session, task=current_task, run=current_run)
+            except ContextAuthorizationError as error:
+                # Waiting for a model slot can outlive the loop's earlier check.
+                # Keep the stable authorization code rather than a generic provider error.
+                raise ProviderError("skill authorization unavailable", code=error.code) from None
             if validation_guard is not None:
                 await validation_guard.check()
 

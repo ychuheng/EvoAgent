@@ -362,3 +362,65 @@ def test_loop_rejects_invalid_settings(kwargs: dict[str, object], message: str) 
 
     with pytest.raises(ValueError, match=message):
         AgentLoop(MockProvider([]), registry, executor, sink, **settings)
+
+
+async def test_runtime_boundary_stops_model_before_request_event():
+    from evoagent.memory.schema import MemoryError
+
+    sink = InMemoryEventSink(uuid4())
+    registry = ToolRegistry([CalculatorTool()])
+    provider = MockProvider([text_response("unreachable")])
+    executor = ToolExecutor(registry, sink, timeout_seconds=1, max_result_chars=1000)
+
+    async def deny():
+        raise MemoryError("skill_source_revoked")
+
+    loop = AgentLoop(
+        provider,
+        registry,
+        executor,
+        sink,
+        model="mock",
+        max_iterations=8,
+        max_total_tokens=32000,
+        before_model_call=deny,
+    )
+    with pytest.raises(MemoryError, match="skill_source_revoked"):
+        await loop.run(ContextBuilder().build("test boundary"))
+    assert not provider.requests
+    assert all(event.type != EventType.MODEL_REQUESTED for event in sink.events)
+
+
+async def test_runtime_boundary_runs_before_each_model_turn_without_changing_loop_hash():
+    sink = InMemoryEventSink(uuid4())
+    registry = ToolRegistry([CalculatorTool()])
+    responses = [
+        tool_response(
+            ToolCall(call_id="boundary-calc", name="calculator", arguments={"expression": "1+1"})
+        ),
+        text_response("done"),
+    ]
+    provider = MockProvider(responses)
+    executor = ToolExecutor(registry, sink, timeout_seconds=1, max_result_chars=1000)
+    counts = []
+
+    async def check():
+        counts.append(len(provider.requests))
+
+    loop = AgentLoop(
+        provider,
+        registry,
+        executor,
+        sink,
+        model="mock",
+        max_iterations=8,
+        max_total_tokens=32000,
+        before_model_call=check,
+    )
+    legacy = AgentLoop(
+        provider, registry, executor, sink, model="mock", max_iterations=8, max_total_tokens=32000
+    )
+    assert loop._config_hash == legacy._config_hash
+    result = await loop.run(ContextBuilder().build("test repeated boundary"))
+    assert result.status == AgentLoopStatus.COMPLETED
+    assert counts == [0, 1]
