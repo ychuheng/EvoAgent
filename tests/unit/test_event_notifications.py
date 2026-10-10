@@ -196,10 +196,17 @@ async def test_backlog_is_paged_without_sleep_and_matches_off_projection(notify_
         return result
 
     monkeypatch.setattr(RunEventRepository, "page_for_run", measured)
+
+    async def unexpected_wait(*args, **kwargs):
+        raise AssertionError("terminal backlog must drain without waiting for notification")
+
+    monkeypatch.setattr(notifier, "wait", unexpected_wait)
     on = SseEventService(
         db.session_factory, poll_seconds=5, heartbeat_seconds=10, notifier=notifier
     )
-    async with asyncio.timeout(2):
+    # Prove the no-wait contract directly; database round-trip time on a shared
+    # CI runner is not a notification latency benchmark. Keep a deadlock bound.
+    async with asyncio.timeout(10):
         result = [event async for event in on.stream(run_id, after_sequence=1)]
     assert sizes == [200, 200, 50, 0]
     assert [e.id for e in result] == [str(n) for n in range(2, 452)]

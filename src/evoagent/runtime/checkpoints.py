@@ -1,5 +1,6 @@
 """版本化 LoopState 快照的保存与加载。"""
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import UUID
@@ -13,6 +14,7 @@ from evoagent.db.models import ContextRevisionRecord, RunSnapshotRecord
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.repository import check_run_references
 from evoagent.runtime.context_store import ContextStore
+from evoagent.skills.canonical import content_hash
 from evoagent.tasks.lease_guard import LeaseGuard
 
 
@@ -41,12 +43,44 @@ class PersistentCheckpointStore:
         self._run_id = run_id
         self._session_factory = session_factory
         self._schema_version = schema_version
+        self._committed_digest: str | None = None
+        self._save_lock = asyncio.Lock()
 
     async def save(self, state: LoopState) -> None:
+        await self._save(
+            state,
+            skip_unchanged=bool(
+                getattr(self._settings, "runtime_snapshot_deduplication_enabled", False)
+            ),
+        )
+
+    async def save_if_changed(self, state: LoopState) -> None:
+        await self._save(state, skip_unchanged=True)
+
+    async def _save(self, state: LoopState, *, skip_unchanged: bool) -> None:
+        body = state.model_dump(
+            mode="json", exclude_none=False, exclude_unset=False, exclude_defaults=False
+        )
+        digest = content_hash({"schema_version": self._schema_version, "state": body})
+        async with self._save_lock:
+            try:
+                await self._persist(body, state, digest, skip_unchanged=skip_unchanged)
+            except BaseException:
+                # A commit exception may mean the commit succeeded remotely. Do
+                # not use the previous cache entry after any ambiguous outcome.
+                self._committed_digest = None
+                raise
+
+    async def _persist(self, body, state, digest, *, skip_unchanged):
         async with UnitOfWork(self._session_factory) as unit:
             if self._lease_guard is not None:
                 await self._lease_guard.check(unit.session)
                 await check_run_references(unit.session, self._run_id)
+            if skip_unchanged and digest == self._committed_digest:
+                # Cache only saves writes; authority still comes from this
+                # transaction. A recovered worker starts with an empty cache.
+                await unit.commit()
+                return
             event = await unit.events.append(
                 run_id=self._run_id,
                 event_type="snapshot.saved",
@@ -60,11 +94,12 @@ class PersistentCheckpointStore:
                 RunSnapshotRecord(
                     run_id=self._run_id,
                     event_sequence=event.sequence,
-                    state=state.model_dump(mode="json"),
+                    state=body,
                     schema_version=self._schema_version,
                 )
             )
             await unit.commit()
+        self._committed_digest = digest
 
     async def load_latest(self) -> LoopState | None:
         async with UnitOfWork(self._session_factory) as unit:
