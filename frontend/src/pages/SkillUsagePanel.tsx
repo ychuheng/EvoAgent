@@ -1,16 +1,17 @@
 import { useState } from "react";
-import { learning, learningError, type SkillTrial, type SkillUsageEvidencePage, type SkillUsageSummary } from "../api/learning";
+import { learning, learningError, type SkillTrial, type SkillRevisionSignal, type SkillUsageEvidencePage, type SkillUsageSummary } from "../api/learning";
 
 export function SkillUsagePanel({ trial }: { trial: SkillTrial }) {
   const [summary, setSummary] = useState<SkillUsageSummary | null>(null);
+  const [signal, setSignal] = useState<SkillRevisionSignal | null>(null);
   const [page, setPage] = useState<SkillUsageEvidencePage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function load(cursor: string | null = null) {
     setBusy(true); setError("");
     try {
-      const [nextSummary, nextPage] = await Promise.all([learning.usageSummary(trial), learning.usageEvidence(trial, cursor)]);
-      setSummary(nextSummary); setPage(nextPage);
+      const [nextSummary, nextPage, nextSignal] = await Promise.all([learning.usageSummary(trial), learning.usageEvidence(trial, cursor), learning.revisionSignal(trial)]);
+      setSummary(nextSummary); setPage(nextPage); setSignal(nextSignal);
     } catch (failure) { setError(learningError(failure)); }
     finally { setBusy(false); }
   }
@@ -23,6 +24,7 @@ export function SkillUsagePanel({ trial }: { trial: SkillTrial }) {
       <p>耗时均值：{summary.elapsed_mean_seconds === null ? "暂无完整样本" : `${summary.elapsed_mean_seconds.toFixed(2)} 秒`}（{summary.elapsed_sample_count} 个完整样本{summary.elapsed_sample_truncated ? "，仅最近 1000 条运行" : ""}）。</p>
       <p>被选择仅表示进入上下文；观察目前覆盖限定试用，以上统计不能证明技能带来了因果收益。</p>
     </>}
+    {signal && <p role="status">该版本在 {signal.independent_input_count} 个不同输入上出现同类明确归因失败，建议修订。参考运行：{signal.origin_run_id}。尚未自动入队；请在任务反馈中说明纠正方法并明确授权学习。</p>}
     {page && <>
       <ul>{page.items.map(item => <li key={item.id}>运行 {item.run_id} / 反馈版本 {item.feedback_revision} / {item.outcome} / {item.attribution} / {item.verification_origin}</li>)}</ul>
       {page.items.length === 0 && <p>该版本在当前范围还没有观察记录。</p>}

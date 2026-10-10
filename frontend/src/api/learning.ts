@@ -51,6 +51,11 @@ export type TrialReadiness = {
   ready: boolean; evidence_ready: boolean; reasons: string[]; report_hash: string | null;
   skill_lock_version: number | null;
 };
+export type SkillRevisionSignal = {
+  version_id: string; target_skill_id: string; independent_input_count: number;
+  observation_ids: string[]; origin_run_id: string; reason: string;
+  requires_explicit_submission: boolean; automatically_queued: boolean;
+};
 export type SkillUsageSummary = {
   selected_count: number; projected_count: number; unprojected_count: number;
   outcomes: { verified_success: number; verified_failure: number; unknown: number };
@@ -71,6 +76,7 @@ export type ValidationProfile = {
 
 const post = <T,>(path: string, body: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
 export const learning = {
+  revisionSignal: (trial: SkillTrial) => request<SkillRevisionSignal | null>(`/skill-versions/${trial.version_id}/revision-signal?workspace_id=${encodeURIComponent(trial.workspace_id)}${trial.project_id ? `&project_id=${encodeURIComponent(trial.project_id)}` : ""}`),
   usageSummary: (trial: SkillTrial) => request<SkillUsageSummary>(`/skills/${trial.skill_id}/usage-summary?workspace_id=${encodeURIComponent(trial.workspace_id)}${trial.project_id ? `&project_id=${encodeURIComponent(trial.project_id)}` : ""}`),
   usageEvidence: (trial: SkillTrial, cursor: string | null = null) => request<SkillUsageEvidencePage>(`/skill-versions/${trial.version_id}/usage-evidence?workspace_id=${encodeURIComponent(trial.workspace_id)}${trial.project_id ? `&project_id=${encodeURIComponent(trial.project_id)}` : ""}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}&limit=20`),
   validationProfiles: () => request<ValidationProfile[]>("/personal-validation-profiles"),

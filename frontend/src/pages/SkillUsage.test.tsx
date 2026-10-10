@@ -11,7 +11,7 @@ test("使用证据按需加载并保留项目范围，未知不计作成功，�
   const calls: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     calls.push(url);
-    return new Response(JSON.stringify(url.includes("usage-summary") ? summary : { items: [{ id: url.includes("cursor=") ? "second" : "first", run_id: url.includes("cursor=") ? "run-second" : "run-first", feedback_revision: 1, outcome: "unknown", attribution: "uncertain", verification_origin: "unknown" }], next_cursor: url.includes("cursor=") ? null : "next" }));
+    return new Response(JSON.stringify(url.includes("revision-signal") ? null : url.includes("usage-summary") ? summary : { items: [{ id: url.includes("cursor=") ? "second" : "first", run_id: url.includes("cursor=") ? "run-second" : "run-first", feedback_revision: 1, outcome: "unknown", attribution: "uncertain", verification_origin: "unknown" }], next_cursor: url.includes("cursor=") ? null : "next" }));
   }));
   render(<SkillUsagePanel trial={trial} />);
   expect(calls).toHaveLength(0);

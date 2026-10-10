@@ -30,6 +30,11 @@ class SkillUsageService:
     def __init__(self, factory):
         self.factory = factory
 
+    async def suggest_revision(self, version_id, scope):
+        from evoagent.skills.revision_signals import SkillRevisionSignals
+
+        return await SkillRevisionSignals(self.factory).suggest_revision(version_id, scope)
+
     async def summarize(self, skill_id, scope, since=None):
         from evoagent.skills.usage_reports import SkillUsageReports
 

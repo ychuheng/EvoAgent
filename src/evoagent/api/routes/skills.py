@@ -309,3 +309,19 @@ async def usage_evidence(
         )
     except LearningError as error:
         raise HTTPException(422, detail={"code": error.code}) from None
+
+
+@versions_router.get("/{version_id}/revision-signal")
+async def revision_signal(
+    version_id: UUID, request: Request, workspace_id: UUID, project_id: UUID | None = None
+):
+    from evoagent.learning.schema import LearningError
+    from evoagent.skills.trials import TrialScope
+    from evoagent.skills.usage import SkillUsageService
+
+    try:
+        return await SkillUsageService(request.app.state.database.session_factory).suggest_revision(
+            version_id, TrialScope(workspace_id, project_id)
+        )
+    except LearningError as error:
+        raise HTTPException(422, detail={"code": error.code}) from None
