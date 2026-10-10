@@ -38,6 +38,7 @@ from evoagent.learning.schema import (
 )
 from evoagent.learning.sources import PersonalSourceService
 from evoagent.privacy.redaction import detect_sensitive, redact_text
+from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
 from evoagent.skills.canonical import canonical_json, content_hash
 from evoagent.skills.schema import SkillDefinition
 
@@ -519,6 +520,15 @@ class LearningService:
                 ):
                     raise LearningError("candidate_identity_invalid")
                 SkillDefinition.model_validate(candidate.definition)
+                try:
+                    await SkillAccessPolicy().check(
+                        session,
+                        candidate.id,
+                        workspace_id=row.workspace_id,
+                        project_id=row.project_id,
+                    )
+                except SkillAccessError as error:
+                    raise LearningError("candidate_source_graph_invalid") from error
                 if (
                     row.validation_report is None
                     or content_hash(row.validation_report) != row.validation_report_hash
