@@ -40,8 +40,14 @@ async def event_db(tmp_path, request):
         session.add(run)
         await session.commit()
         run_id = run.id
-    yield db, run_id
-    await db.dispose()
+    try:
+        yield db, run_id
+    finally:
+        # This fixture owns the isolated test database. Do not leak metadata
+        # tables into a following migration test or another test order.
+        async with db.engine.begin() as connection:
+            await connection.run_sync(Base.metadata.drop_all)
+        await db.dispose()
 
 
 async def rows(db, run_id):

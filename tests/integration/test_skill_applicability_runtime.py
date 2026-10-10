@@ -269,3 +269,110 @@ async def test_project_scoped_skill_requires_the_frozen_task_project(fencing_db,
     assert not await SkillRetrievalService(
         fencing_db.session_factory, ToolRegistry([CalculatorTool()])
     ).select(aggregate.run.id, aggregate.task.goal)
+
+
+@pytest.mark.parametrize("change_at", ["tool", "model"])
+async def test_scope_revoked_blocks_next_call(fencing_db, tmp_path, change_at):
+    from evoagent.core.models import (
+        FinishReason,
+        Message,
+        MessageRole,
+        ModelResponse,
+        ProviderEventType,
+        ToolCall,
+    )
+    from evoagent.providers.mock import MockProvider
+    from evoagent.runtime.persistent_runner import PersistentAgentRunner
+    from evoagent.tasks.state_machine import PersistentRunStatus
+
+    aggregate, identity = await setup(fencing_db, "data")
+    other = await TaskService(fencing_db.session_factory).create_workspace("moved")
+
+    calls = []
+
+    async def move_scope():
+        async with fencing_db.session_factory() as session:
+            version = await session.get(SkillVersionRecord, identity)
+            skill = await session.get(SkillRecord, version.skill_id)
+            skill.workspace_id = other.id
+            await session.commit()
+
+    class MoveScope(CalculatorTool):
+        async def invoke(self, arguments):
+            calls.append("calculate")
+            result = await super().invoke(arguments)
+            if change_at == "tool":
+                await move_scope()
+            return result
+
+    class ScopeProvider(MockProvider):
+        async def stream(self, request):
+            async for event in super().stream(request):
+                if change_at == "model" and event.type is ProviderEventType.COMPLETED:
+                    await move_scope()
+                yield event
+
+    provider = ScopeProvider(
+        [
+            ModelResponse(
+                message=Message(
+                    role=MessageRole.ASSISTANT,
+                    tool_calls=(
+                        ToolCall(
+                            call_id="calculate", name="calculator", arguments={"expression": "2+2"}
+                        ),
+                    ),
+                ),
+                finish_reason=FinishReason.TOOL_CALLS,
+            ),
+            ModelResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="should not run"),
+                finish_reason=FinishReason.STOP,
+            ),
+        ]
+    )
+    manager = JobLeaseManager(fencing_db.session_factory, lease_seconds=60)
+    lease = await manager.claim_next("boundary")
+    runner = PersistentAgentRunner(
+        settings=Settings(workspace=tmp_path),
+        session_factory=fencing_db.session_factory,
+        context_builder=ContextBuilder(),
+        provider=provider,
+        registry=ToolRegistry([MoveScope()]),
+    )
+    result = await runner.handle(lease)
+    assert result.status == PersistentRunStatus.FAILED
+    assert result.error_code == "skill_source_revoked"
+    assert len(provider.requests) == 1 and provider.remaining_steps == 1
+    assert calls == (["calculate"] if change_at == "tool" else [])
+    await manager.finalize(lease, result)
+    restored = await TaskService(fencing_db.session_factory).get_task(aggregate.task.id)
+    assert restored.run.error_code == "skill_source_revoked"
+
+
+async def test_formal_binding_checks_are_per_request_not_per_stream_delta(fencing_db, monkeypatch):
+    from evoagent.core.events import ProgressEventType
+    from evoagent.core.models import EventType
+    from evoagent.skills.selection import FormalSkillReader
+    from evoagent.trace.persistent_sink import PersistentEventSink
+
+    await setup(fencing_db, "data")
+    lease = await JobLeaseManager(fencing_db.session_factory, lease_seconds=60).claim_next("test")
+    checks = []
+
+    async def check(_self, _session, *, task, run):
+        checks.append((task.id, run.id))
+
+    monkeypatch.setattr(FormalSkillReader, "check_run_bindings", check)
+    sink = PersistentEventSink(
+        lease.run_id, fencing_db.session_factory, lease_guard=LeaseGuard(lease), batch_progress=True
+    )
+    try:
+        await sink.emit(EventType.MODEL_REQUESTED)
+        for _ in range(40):
+            await sink.append_progress(ProgressEventType.MODEL_DELTA, {"text": "chunk"})
+        await sink.flush()
+        await sink.emit(EventType.MODEL_COMPLETED)
+        assert checks == [(lease.task_id, lease.run_id)]
+    finally:
+        await sink.aclose()

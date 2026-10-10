@@ -21,6 +21,7 @@ export function errorLabel(code: string): string {
     search_timeout: "搜索服务超时",
     search_network_error: "搜索服务连接失败",
     search_invalid_response: "搜索服务返回的数据无效",
+    skill_source_revoked: "已冻结的 Skill 已停用、越范围或正文失效，请新建任务重新选择",
     context_budget_exceeded: "上下文超过预算",
     invalid_arguments: "工具参数无效",
     tool_timeout: "工具执行超时",

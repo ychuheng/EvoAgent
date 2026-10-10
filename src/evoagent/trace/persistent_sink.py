@@ -19,6 +19,7 @@ from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.repository import check_run_references
 from evoagent.memory.schema import MemoryError
 from evoagent.skills.canonical import canonical_json
+from evoagent.skills.selection import FormalSkillReader
 from evoagent.tasks.lease_guard import LeaseGuard
 
 
@@ -189,7 +190,12 @@ class PersistentEventSink:
             timestamp = datetime.now(UTC)
             async with UnitOfWork(self._session_factory) as unit:
                 if self._lease_guard is not None:
-                    await self._lease_guard.check(unit.session)
+                    task, run = await self._lease_guard.check(unit.session)
+                    if event_type is EventType.MODEL_REQUESTED:
+                        # One authoritative check per request; never one per delta.
+                        await FormalSkillReader().check_run_bindings(
+                            unit.session, task=task, run=run
+                        )
                     try:
                         await check_run_references(unit.session, self._run_id)
                     except MemoryError:

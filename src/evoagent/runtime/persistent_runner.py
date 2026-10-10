@@ -371,6 +371,9 @@ class PersistentAgentRunner:
             # 授权在运行中变化：不重试、不续跑，交给调用方落成明确终态；
             # 拒绝事件已由工具中间件写入 Run 事件，已执行的动作保留。
             raise
+        except MemoryError:
+            # Keep scope revocation distinct from an ordinary runtime failure.
+            raise
         except InputChangedError:
             # F-02：冻结输入被替换同样有明确终态 `input_changed`。
             # 这里必须原样抛出——早先被下面的兜底 `except Exception` 吃掉，
@@ -532,7 +535,11 @@ class PersistentAgentRunner:
 
     async def _load_owned_records(self, lease: JobLease) -> tuple[TaskRecord, RunRecord]:
         async with self._session_factory() as session:
-            return await LeaseGuard(lease).check(session)
+            task, run = await LeaseGuard(lease).check(session)
+            from evoagent.skills.selection import FormalSkillReader
+
+            await FormalSkillReader().check_run_bindings(session, task=task, run=run)
+            return task, run
 
     async def _persist_run_config(
         self, run_id, snapshot: RunConfigSnapshot, guard: LeaseGuard
