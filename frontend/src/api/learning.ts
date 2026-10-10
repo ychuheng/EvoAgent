@@ -28,9 +28,23 @@ export type ValidationItem = {
 };
 export type FeedbackResult = { id: string; revision: number; learning_revision: number; routing: string; learning_request_id: string | null };
 export type ValidationFixture = { fixture_id: string; files: { path: string; content: string }[] };
+export type ObservationCatalog = {
+  run_id: string;
+  versions: { version_id: string; origin: string; steps: string[] }[];
+  artifacts: { artifact_id: string; content_hash: string; type: string }[];
+  artifacts_truncated: boolean;
+};
+export type HumanSkillObservation = {
+  type: "skill_observation"; schema_version: 1; version_id: string;
+  criterion_id: string; outcome: "verified_success" | "verified_failure";
+  attribution: "skill_related" | "environment" | "user_request" | "uncertain";
+  associated_steps: string[];
+  artifacts: { artifact_id: string; content_hash: string }[];
+};
 
 const post = <T,>(path: string, body: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
 export const learning = {
+  observationEvidence: (runId: string) => request<ObservationCatalog>(`/runs/${runId}/skill-observation-evidence`),
   validationFixtures: () => request<ValidationFixture[]>("/personal-validation-fixtures"),
   policy: (id: string) => request<LearningPolicy>(`/workspaces/${id}/learning-policy`),
   updatePolicy: (id: string, body: unknown) => request<LearningPolicy>(`/workspaces/${id}/learning-policy`, { method: "PUT", body: JSON.stringify(body) }),

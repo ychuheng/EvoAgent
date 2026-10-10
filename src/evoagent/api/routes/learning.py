@@ -83,6 +83,13 @@ async def record_feedback(
     )
 
 
+@router.get("/runs/{run_id}/skill-observation-evidence")
+async def skill_observation_evidence(run_id: UUID, database: DatabaseDependency):
+    from evoagent.skills.observation_catalog import observation_catalog
+
+    return await respond(observation_catalog(database.session_factory, run_id))
+
+
 @router.post(
     "/runs/{run_id}/learning-requests", status_code=202, response_model=LearningRequestView
 )

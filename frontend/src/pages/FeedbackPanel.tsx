@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { learning, learningError, type FeedbackResult, type LearningPolicy } from "../api/learning";
+import { useCallback, useState } from "react";
+import { learning, learningError, type FeedbackResult, type LearningPolicy, type HumanSkillObservation } from "../api/learning";
+import { SkillObservationForm } from "./SkillObservationForm";
 
 export function FeedbackPanel({ runId, workspaceId }: { runId: string; workspaceId: string }) {
   const [open, setOpen] = useState(false);
@@ -13,6 +14,11 @@ export function FeedbackPanel({ runId, workspaceId }: { runId: string; workspace
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<FeedbackResult | null>(null);
+  const [judgeSkill, setJudgeSkill] = useState(false);
+  const [observation, setObservation] = useState<HumanSkillObservation | null>(null);
+  const observationChanged = useCallback((claim: HumanSkillObservation | null) => {
+    setObservation(claim); setKey(crypto.randomUUID()); setResult(null);
+  }, []);
   function changed() { setKey(crypto.randomUUID()); setResult(null); }
   async function expand() {
     setOpen(true);
@@ -23,7 +29,7 @@ export function FeedbackPanel({ runId, workspaceId }: { runId: string; workspace
     if (busy) return;
     setBusy(true); setError("");
     try {
-      setResult(await learning.feedback(runId, { intent, verdict, correction, comment, learn_from_feedback: consent && intent === "method", client_request_id: key }));
+      setResult(await learning.feedback(runId, { intent, verdict, correction, comment, learn_from_feedback: consent && intent === "method", client_request_id: key, ...(judgeSkill && observation ? { evidence_refs: [observation] } : {}) }));
     } catch (reason) { setError(learningError(reason)); }
     finally { setBusy(false); }
   }
@@ -39,7 +45,10 @@ export function FeedbackPanel({ runId, workspaceId }: { runId: string; workspace
       {intent === "fact" && <p>事实或偏好请到 Memory 管理页另行提议和确认；本次只保存反馈。</p>}
       {intent === "mixed" && <p>请先拆分事实和方法；本次不会自动创建学习请求。</p>}
       <p>记成方法会生成待审候选，不会直接启用 Skill。</p>
-      <button type="button" disabled={busy || result !== null} onClick={() => void submit()}>提交任务反馈</button>
+      <label><input type="checkbox" checked={judgeSkill} onChange={event => { setJudgeSkill(event.target.checked); setObservation(null); changed(); }} />记录已核对的 Skill 使用结果</label>
+      {judgeSkill && <SkillObservationForm key={runId} runId={runId} onChange={observationChanged} />}
+      {judgeSkill && !observation && <p>请选择实际版本、判据、关联步骤及产物证据，或取消记录 Skill 使用结果。</p>}
+      <button type="button" disabled={busy || result !== null || (judgeSkill && !observation)} onClick={() => void submit()}>提交任务反馈</button>
       {result && <p role="status">反馈已保存{result.learning_request_id ? `，方法请求已排队：${result.learning_request_id}` : "，没有创建方法请求"}。</p>}
       {result?.routing === "clarify" && <p>已保存反馈，请拆分事实与方法，或明确要修订的 Skill；不会自动猜测目标。</p>}
       {error && <p role="alert" className="error">{error}</p>}
