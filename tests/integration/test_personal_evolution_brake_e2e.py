@@ -190,3 +190,62 @@ async def test_actual_personal_use_feedback_and_three_failures_stop_next_adoptio
             await session.get(SkillVersionRecord, trial.version_id)
         ).definition == original_definition
     assert len(model_requests) == 4 and all(len(item.requests) == 2 for item in model_requests)
+
+    # A safety suspension must not remove the ability to request a traceable
+    # correction; explicit learning consent creates a new immutable revision.
+    from uuid import UUID
+
+    from evoagent.db.models import LearningRequestRecord
+    from tests.integration.test_learning_worker import worker
+
+    correction = {
+        "client_request_id": "actual-use-revision",
+        "intent": "method",
+        "verdict": "needs_fix",
+        "learn_from_feedback": True,
+        "correction": "Treat identifiers as text; do not remove leading zeros.",
+    }
+    response = await client.post(f"/api/v1/runs/{runs[-1]}/feedback", json=correction)
+    assert response.status_code == 201, response.text
+    revision_id = response.json()["learning_request_id"]
+    assert revision_id is not None
+    replay = await client.post(f"/api/v1/runs/{runs[-1]}/feedback", json=correction)
+    assert replay.json() == response.json()
+    offline_learning = worker(db, settings)
+    while await offline_learning.run_once():
+        pass
+    detail = await client.get(f"/api/v1/learning-requests/{revision_id}")
+    assert detail.status_code == 200, detail.text
+    revision = detail.json()
+    assert revision["status"] == "ready_for_review", revision
+    async with db.session_factory() as session:
+        request = await session.get(LearningRequestRecord, UUID(revision_id))
+        candidate = await session.get(SkillVersionRecord, request.candidate_version_id)
+        assert (
+            request.target_skill_id == trial.skill_id
+            and request.base_version_id == trial.version_id
+        )
+        assert (
+            candidate.skill_id == trial.skill_id and candidate.parent_version_id == trial.version_id
+        )
+        assert candidate.content_hash != version.content_hash
+        assert correction["correction"] in candidate.definition["steps"][0]["instruction"]
+        assert (
+            await session.get(SkillVersionRecord, trial.version_id)
+        ).definition == original_definition
+        assert (await session.get(SkillTrialRecord, trial.id)).status == "suspended"
+    reviewed = await client.post(
+        f"/api/v1/learning-requests/{revision_id}/review",
+        json={
+            "expected_lock_version": revision["lock_version"],
+            "action": "acknowledge",
+            "reason": "offline revision evidence reviewed; no activation",
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["status"] == "completed"
+    async with db.session_factory() as session:
+        assert (await session.get(SkillTrialRecord, trial.id)).status == "suspended"
+        assert (
+            await session.get(SkillVersionRecord, trial.version_id)
+        ).definition == original_definition

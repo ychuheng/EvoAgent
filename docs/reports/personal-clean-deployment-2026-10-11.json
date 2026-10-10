@@ -1,0 +1,19 @@
+{
+  "ready": true,
+  "ui_bundle": true,
+  "task_completed": true,
+  "committed_effects": 1,
+  "artifact_count": 1,
+  "candidate_reviewed": true,
+  "offline_validation_report": true,
+  "trial_ready": false,
+  "provider": "mock",
+  "paid_calls": 0,
+  "run_id": "65528a3e-28ac-4250-86ea-aea1b94cb020",
+  "learning_request_id": "46aae03d-b0ff-4c22-a7c9-52cf768aecf3",
+  "validation_request_id": "676f8a2e-c93b-4727-8699-3e2580d2bccd",
+  "git_sha": "a3dd9a2368178d47c29778e9d817723a1b367d8a",
+  "network": "owned internal Docker network; no host ports",
+  "schema": "alembic upgrade head from empty PostgreSQL",
+  "application_image": "evoagent-clean-b69650691c64:app"
+}
