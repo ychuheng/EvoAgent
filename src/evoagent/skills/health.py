@@ -86,3 +86,39 @@ def evaluate_health(observations, *, trial_id, version_id, now, policy):
         tuple(failures[-threshold:]),
         len(failures),
     )
+
+
+def persisted_health_observations(records, *, trial, known_steps):
+    """One record adapter shared by read-side health and locked suspension."""
+    from datetime import UTC
+
+    facts = []
+    for record in records:
+        evidence = record.evidence
+        facts.append(
+            HealthObservation(
+                id=record.id,
+                run_id=record.run_id,
+                trial_id=trial.id,
+                version_id=trial.version_id,
+                feedback_revision=record.feedback_revision,
+                first_finished_at=record.first_finished_at.replace(tzinfo=UTC)
+                if record.first_finished_at.tzinfo is None
+                else record.first_finished_at,
+                observed_at=record.created_at.replace(tzinfo=UTC)
+                if record.created_at.tzinfo is None
+                else record.created_at,
+                input_fingerprint=record.input_fingerprint,
+                outcome=record.outcome,
+                attribution=record.attribution,
+                verification_origin=evidence.get("verification_origin", "unknown"),
+                criterion_id=evidence.get("criterion_id", ""),
+                evidence_refs=tuple(evidence.get("evidence_refs", ())),
+                associated_steps=(
+                    tuple(evidence.get("associated_steps", ()))
+                    if set(evidence.get("associated_steps", ())) <= known_steps
+                    else ()
+                ),
+            )
+        )
+    return tuple(facts)

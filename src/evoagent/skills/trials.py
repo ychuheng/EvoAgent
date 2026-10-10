@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -20,7 +20,7 @@ from evoagent.learning.selection_evidence import adoption_contract_passed
 from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
 from evoagent.skills.canonical import content_hash
-from evoagent.skills.health import HEALTH_POLICY, HealthObservation, evaluate_health
+from evoagent.skills.health import HEALTH_POLICY, evaluate_health, persisted_health_observations
 from evoagent.skills.lifecycle import SkillStatus, SkillVersionStatus
 from evoagent.tasks.lease_guard import database_now
 
@@ -287,7 +287,7 @@ class SkillTrialService:
         """Hard source invalidation bypasses the three-failure health threshold."""
         async with self.factory() as session:
             skill, trial = await self._locked_trial(session, trial_id)
-            if trial.status == "suspended":
+            if trial.status != "active":
                 return False
             unavailable = skill.status is not SkillStatus.ENABLED
             version = await session.get(SkillVersionRecord, trial.version_id)
@@ -384,35 +384,7 @@ class SkillTrialService:
             known_steps = (
                 {item["id"] for item in version.definition.get("steps", ())} if version else set()
             )
-            facts = []
-            for record in records:
-                evidence = record.evidence
-                facts.append(
-                    HealthObservation(
-                        id=record.id,
-                        run_id=record.run_id,
-                        trial_id=trial.id,
-                        version_id=trial.version_id,
-                        feedback_revision=record.feedback_revision,
-                        first_finished_at=record.first_finished_at.replace(tzinfo=UTC)
-                        if record.first_finished_at.tzinfo is None
-                        else record.first_finished_at,
-                        observed_at=record.created_at.replace(tzinfo=UTC)
-                        if record.created_at.tzinfo is None
-                        else record.created_at,
-                        input_fingerprint=record.input_fingerprint,
-                        outcome=record.outcome,
-                        attribution=record.attribution,
-                        verification_origin=evidence.get("verification_origin", "unknown"),
-                        criterion_id=evidence.get("criterion_id", ""),
-                        evidence_refs=tuple(evidence.get("evidence_refs", ())),
-                        associated_steps=(
-                            tuple(evidence.get("associated_steps", ()))
-                            if set(evidence.get("associated_steps", ())) <= known_steps
-                            else ()
-                        ),
-                    )
-                )
+            facts = persisted_health_observations(records, trial=trial, known_steps=known_steps)
             health = evaluate_health(
                 facts,
                 trial_id=trial.id,
