@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.benchmark_runtime_io import FAMILIES, measure, validate_database_url
+from evoagent.core.models import EventType
+from evoagent.skills.canonical import content_hash
+from scripts.benchmark_runtime_io import FAMILIES, STREAM_CHUNKS, measure, validate_database_url
 from scripts.runtime_resource_probe import json_bytes
 
 
@@ -66,3 +68,28 @@ async def test_runtime_matrix_measures_real_task_effects_and_skill_selection(tmp
 
 def test_payload_byte_probe_counts_utf8_content_without_retaining_payload():
     assert json_bytes({"中文": "值"}) == len('{"中文":"值"}'.encode())
+
+
+async def test_explicit_streaming_fixture_reduces_total_io_without_losing_deltas(tmp_path):
+    report = await measure(
+        f"sqlite+aiosqlite:///{tmp_path / 'evoagent_perf_stream.db'}",
+        families=("streaming_progress",),
+        repeats=3,
+        idle_seconds=0,
+    )
+    assert report["complete"] and report["persisted_semantics_equal"]
+    assert len(report["samples"]) == 12 and report["paid_calls"] == 0
+    expected = content_hash("".join(STREAM_CHUNKS))
+    for cache in ("cold_pool", "warm_pool"):
+        off = [s for s in report["samples"] if s["cache"] == cache and not s["optimized"]]
+        on = [s for s in report["samples"] if s["cache"] == cache and s["optimized"]]
+        for row in (*off, *on):
+            assert row["model_delta_text_hash"] == expected
+            assert row["event_types"].count(EventType.MODEL_DELTA) == 128
+            assert row["selected_versions"] == 0 and not row["tool_names"]
+        # A substantial reduction, not an exact fragile implementation count.
+        assert max(s["sql_total"] for s in on) < min(s["sql_total"] for s in off) / 2
+        assert (
+            max(s["transactions_commit"] for s in on)
+            < min(s["transactions_commit"] for s in off) / 2
+        )

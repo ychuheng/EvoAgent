@@ -25,7 +25,16 @@ from sqlalchemy.engine import make_url
 
 from evoagent.config import Settings
 from evoagent.core.context import ContextBuilder
-from evoagent.core.models import FinishReason, Message, MessageRole, ModelResponse, ToolCall
+from evoagent.core.models import (
+    EventType,
+    FinishReason,
+    Message,
+    MessageRole,
+    ModelResponse,
+    ProviderEvent,
+    ProviderEventType,
+    ToolCall,
+)
 from evoagent.core.runtime_metrics import collect_runtime_metrics
 from evoagent.db.base import Base
 from evoagent.db.models import (
@@ -83,6 +92,8 @@ FLAGS = (
     "runtime_scan_cache_enabled",
 )
 FAMILIES = ("plain", "read_edit_recheck", "enabled_skill", "learning_off_history")
+AVAILABLE_FAMILIES = (*FAMILIES, "streaming_progress")
+STREAM_CHUNKS = tuple(f"stream fixture {index:03d}\n" for index in range(128))
 
 
 class BenchmarkFailure(RuntimeError):
@@ -173,6 +184,18 @@ def validate_database_url(url):
 
 
 def responses(family):
+    if family == "streaming_progress":
+        final = ModelResponse(
+            message=Message(role=MessageRole.ASSISTANT, content="".join(STREAM_CHUNKS)),
+            finish_reason=FinishReason.STOP,
+        )
+        return [
+            [
+                ProviderEvent(type=ProviderEventType.TEXT_DELTA, text_delta=text)
+                for text in STREAM_CHUNKS
+            ]
+            + [ProviderEvent(type=ProviderEventType.COMPLETED, response=final)]
+        ]
     calls = (
         []
         if family == "plain"
@@ -343,7 +366,7 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
     if (
         not families
         or len(set(families)) != len(families)
-        or not set(families) <= set(FAMILIES)
+        or not set(families) <= set(AVAILABLE_FAMILIES)
         or not 0 <= idle_seconds <= 600
     ):
         raise ValueError("invalid benchmark scenarios")
@@ -486,7 +509,7 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                     provider="mock",
                     model="fixed-script",
                     run_mode=RunMode.RETRIEVAL if family == "enabled_skill" else RunMode.BASELINE,
-                    project_id=None if family == "plain" else project.id,
+                    project_id=None if family in {"plain", "streaming_progress"} else project.id,
                     family="general",
                 )
                 ack_ms = (time.perf_counter_ns() - started) / 1e6
@@ -561,6 +584,13 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                 if family == "read_edit_recheck":
                     assert file.read_bytes() == EDITED.encode(), "edit did not occur"
                     assert len(provider.requests) == 4, "read/edit/recheck sequence was incomplete"
+                delta_text = "".join(
+                    e.payload.get("text_delta", "")
+                    for e in events
+                    if e.event_type == EventType.MODEL_DELTA
+                )
+                if family == "streaming_progress":
+                    assert delta_text == "".join(STREAM_CHUNKS), "stream content lost or reordered"
                 return task, {
                     "elapsed_ms": elapsed,
                     "queued_event_ack_ms": ack_ms,
@@ -577,6 +607,7 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                     **measured,
                     "selected_versions": len(selected),
                     "event_count": len(events),
+                    "model_delta_text_hash": content_hash(delta_text),
                     "committed_cursor_contiguous": [e.sequence for e in events]
                     == list(range(1, len(events) + 1)),
                     "config_hash": run.config_hash,
@@ -657,6 +688,7 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                         "tool_names",
                         "effect_status_counts",
                         "event_types",
+                        "model_delta_text_hash",
                     )
                 }
                 if reference is None:
@@ -731,7 +763,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repeats", type=int, default=30)
     parser.add_argument("--idle-seconds", type=float, default=60)
-    parser.add_argument("--families", nargs="+", choices=FAMILIES, default=list(FAMILIES))
+    parser.add_argument("--families", nargs="+", choices=AVAILABLE_FAMILIES, default=list(FAMILIES))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--fault-checks",
