@@ -376,17 +376,32 @@ async def run_command(
         timed_out = False
         process_limit_exceeded = False
         watcher_reason: str | None = None
-        drain = asyncio.ensure_future(process.communicate())
+        # Drain both pipes continuously but retain bounded bytes. Truncating only
+        # after communicate() allowed a noisy child to exhaust Worker memory.
+        drain = asyncio.ensure_future(_communicate_bounded(process, output_limit))
         watcher = asyncio.ensure_future(_watch_process_tree(process, max_processes, drain))
         try:
-            stdout, stderr = await asyncio.wait_for(asyncio.shield(drain), timeout=timeout_seconds)
+            stdout, stderr, stdout_limited, stderr_limited = await asyncio.wait_for(
+                asyncio.shield(drain), timeout=timeout_seconds
+            )
         except TimeoutError:
             timed_out = True
-            os.killpg(process.pid, signal.SIGKILL)
+            _kill_session(process)
             try:
-                stdout, stderr = await asyncio.wait_for(drain, timeout=5)
+                stdout, stderr, stdout_limited, stderr_limited = await asyncio.wait_for(
+                    drain, timeout=5
+                )
             except (TimeoutError, ProcessLookupError):  # pragma: no cover - 强杀兜底
                 stdout, stderr = b"", b""
+                stdout_limited = stderr_limited = False
+        except asyncio.CancelledError:
+            _kill_session(process)
+            cleanup = asyncio.create_task(_finish_cancelled_command(process, drain))
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                await cleanup
+            raise
         finally:
             if watcher.done() and not watcher.cancelled():
                 watcher_reason = watcher.result()
@@ -402,8 +417,8 @@ async def run_command(
             raise ToolExecutionError(stderr.decode("utf-8", errors="replace").strip())
     duration = time.perf_counter() - started
 
-    text_out, out_truncated = _decode(stdout, output_limit)
-    text_err, err_truncated = _decode(stderr, output_limit)
+    text_out, out_truncated = _decode(stdout, output_limit, truncated=stdout_limited)
+    text_err, err_truncated = _decode(stderr, output_limit, truncated=stderr_limited)
     return CommandOutcome(
         return_code=process.returncode,
         stdout=text_out,
@@ -427,6 +442,29 @@ async def _read_bounded(stream: asyncio.StreamReader, limit: int) -> tuple[bytes
         if len(chunks) > limit or len(chunk) > remaining:
             truncated = True
     return bytes(chunks[:limit]), truncated
+
+
+async def _communicate_bounded(process, limit):
+    readers = [
+        asyncio.create_task(_read_bounded(pipe, limit)) for pipe in (process.stdout, process.stderr)
+    ]
+    try:
+        (out, out_limited), (err, err_limited) = await asyncio.gather(*readers)
+        await process.wait()
+        return out, err, out_limited, err_limited
+    finally:
+        for reader in readers:
+            reader.cancel()
+        await asyncio.gather(*readers, return_exceptions=True)
+
+
+async def _finish_cancelled_command(process, drain):
+    try:
+        await asyncio.wait_for(asyncio.shield(drain), timeout=5)
+    except (TimeoutError, ProcessLookupError):
+        drain.cancel()
+        await asyncio.gather(drain, return_exceptions=True)
+    await process.wait()
 
 
 async def _kill_windows_tree(pid: int) -> None:
@@ -630,8 +668,8 @@ def _session_process_count(session_id: int) -> int:
     return total
 
 
-def _decode(raw: bytes, limit: int) -> tuple[str, bool]:
-    truncated = len(raw) > limit
+def _decode(raw: bytes, limit: int, *, truncated: bool = False) -> tuple[str, bool]:
+    truncated = truncated or len(raw) > limit
     payload = raw[:limit] if truncated else raw
     text = payload.decode("utf-8", errors="replace")
     if truncated:
