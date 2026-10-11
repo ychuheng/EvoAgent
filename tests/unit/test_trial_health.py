@@ -77,6 +77,26 @@ def test_success_resets_failure_streak_unknown_does_not_fake_success():
     assert health(rows).consecutive_failures == 1
 
 
+def test_insufficient_replay_cannot_erase_verified_failure():
+    rows = [observation(index) for index in range(3)]
+    for replay in (
+        observation(3, input_fingerprint="2", outcome="unknown"),
+        observation(3, input_fingerprint="2", evidence_refs=()),
+        observation(3, input_fingerprint="2", verification_origin="model_assistance"),
+        observation(3, input_fingerprint="2", attribution="uncertain"),
+    ):
+        result = health([*rows, replay])
+        assert result.status == "suspend"
+        assert result.consecutive_failures == 3
+        assert set(result.evidence_ids) == {item.id for item in rows}
+    assert (
+        health(
+            [*rows, observation(3, input_fingerprint="2", outcome="verified_success")]
+        ).consecutive_failures
+        == 0
+    )
+
+
 def test_expired_or_other_binding_evidence_does_not_suspend():
     rows = [observation(index, first_finished_at=NOW - timedelta(days=2)) for index in range(3)]
     assert health(rows).status == "healthy"

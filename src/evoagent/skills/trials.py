@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 
 from evoagent.db.models import (
     EvalExperimentRecord,
+    EvalRunRecord,
     LearningRequestRecord,
     SkillObservationRecord,
     SkillTrialRecord,
@@ -146,7 +147,7 @@ class SkillTrialService:
         for item in items:
             if (
                 not isinstance(item, dict)
-                or item.get("verdict") != "pass"
+                or item.get("verdict") not in {"pass", "fail"}
                 or item.get("judge_origin") not in {"machine", "user"}
                 or not item.get("judge_id")
                 or not item.get("criterion_id")
@@ -155,6 +156,22 @@ class SkillTrialService:
                 or item.get("independent_input") is not True
             ):
                 return TrialReadiness(False, ("verified_independent_criteria_required",))
+            refs = [ref["id"] for ref in item["evidence_refs"] if ref.get("type") == "eval_run"]
+            try:
+                evaluation = (
+                    await session.get(EvalRunRecord, UUID(refs[0])) if len(refs) == 1 else None
+                )
+            except (ValueError, TypeError):
+                evaluation = None
+            if (
+                evaluation is None
+                or evaluation.experiment_id != experiment.id
+                or evaluation.comparable is not True
+                or item.get("comparable") is not True
+                or evaluation.arm != item.get("arm")
+                or evaluation.repeat_index != item.get("repeat")
+            ):
+                return TrialReadiness(False, ("comparable_validation_pairs_required",))
             kinds.add(item.get("case_kind"))
         if not {"positive", "counterexample"} <= kinds:
             return TrialReadiness(False, ("positive_and_counterexample_required",))

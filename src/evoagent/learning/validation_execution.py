@@ -30,6 +30,7 @@ from evoagent.learning.selection_evidence import actual_selection_evidence, adop
 from evoagent.learning.sources import PersonalSourceService
 from evoagent.learning.validation_profiles import real_trial_eligible, require_frozen_profile
 from evoagent.learning.validation_schema import PersonalValidationCase
+from evoagent.learning.validation_verdicts import business_verification, comparison_verification
 from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
 from evoagent.skills.canonical import canonical_json, content_hash
@@ -292,6 +293,7 @@ class PersonalValidationExecution:
                                 case.case_key
                             ],
                             "independent_input": True,
+                            "comparable": row.comparable is True,
                             "independence_origin": "user_review",
                             "business_criterion": criterion.business_criterion,
                             **(
@@ -342,14 +344,8 @@ class PersonalValidationExecution:
 
                 report["cost"] = await validation_cost(session, request)
             report["execution_profile_hash"] = request.policy_snapshot["execution_profile_hash"]
-            business = [item for item in items if item["business_criterion"]]
-            report["business_verification"] = (
-                "failed"
-                if any(item["verdict"] == "fail" for item in business)
-                else "passed"
-                if business and all(item["verdict"] == "pass" for item in business)
-                else "pending"
-            )
+            report["business_verification"] = business_verification(items)
+            report["comparison_verification"] = comparison_verification(items)
             report["trial_eligible"] = real_trial_eligible(report, request.policy_snapshot)
         if len(canonical_json(report).encode()) > 128 * 1024 or detect_sensitive(
             canonical_json(report)

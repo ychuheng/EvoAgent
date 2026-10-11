@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from evoagent.learning.schema import LearningError
+from evoagent.learning.validation_verdicts import business_verification, comparison_verification
 from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.canonical import canonical_json, content_hash
 
@@ -134,12 +135,14 @@ def real_trial_eligible(report, policy):
         and type(cost.get("paid_calls")) is int
         and cost["paid_calls"] > 0
         and report.get("business_verification") == "passed"
+        and business_verification(items) == "passed"
+        and comparison_verification(items) in {"improved", "equivalent"}
         and report.get("adoption_verification") == "passed"
         and 2 <= len(items) <= 100
         and {item.get("case_kind") for item in items} == {"positive", "counterexample"}
         and all(
             isinstance(item, dict)
-            and item.get("verdict") == "pass"
+            and item.get("verdict") in {"pass", "fail"}
             and item.get("judge_origin") in {"machine", "user"}
             and item.get("judge_id")
             and item.get("independent_input") is True

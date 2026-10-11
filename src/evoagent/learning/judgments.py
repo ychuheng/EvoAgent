@@ -20,6 +20,7 @@ from evoagent.learning.repository import LearningRepository
 from evoagent.learning.schema import LearningError
 from evoagent.learning.service import LearningService
 from evoagent.learning.sources import PersonalSourceService
+from evoagent.learning.validation_verdicts import business_verification, comparison_verification
 from evoagent.privacy.redaction import detect_sensitive, redact_value
 from evoagent.skills.access import SkillAccessPolicy
 from evoagent.skills.canonical import canonical_json, content_hash
@@ -222,14 +223,8 @@ class ValidationJudgmentService:
                     judgment_id=str(identifier),
                     judgment_reason=judgment.reason,
                 )
-            business = [item for item in report["items"] if item["business_criterion"]]
-            report["business_verification"] = (
-                "failed"
-                if any(item["verdict"] == "fail" for item in business)
-                else "passed"
-                if business and all(item["verdict"] == "pass" for item in business)
-                else "pending"
-            )
+            report["business_verification"] = business_verification(report["items"])
+            report["comparison_verification"] = comparison_verification(report["items"])
             # Human agreement with Mock runs or unknown costs cannot grant trial.
             from evoagent.learning.validation_profiles import real_trial_eligible
 

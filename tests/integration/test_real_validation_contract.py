@@ -149,7 +149,9 @@ async def test_real_validation_uses_task_bound_learning_ledger_without_double_ch
                         ref["id"] for ref in item["evidence_refs"] if ref["type"] == "eval_run"
                     ),
                     "criterion_id": item["criterion_id"],
-                    "verdict": "pass",
+                    "verdict": "fail"
+                    if item["arm"] == "control" and item["case_kind"] == "positive"
+                    else "pass",
                     "observed": {"fixture": True},
                     "reason": "synthetic user judgment for wiring test",
                 }
@@ -159,6 +161,10 @@ async def test_real_validation_uses_task_bound_learning_ledger_without_double_ch
     )
     assert response.status_code == 201, response.text
     assert response.json()["trial_eligible"]
+    async with db.session_factory() as session:
+        reviewed = await session.get(LearningRequestRecord, request.id)
+        assert reviewed.validation_report["business_verification"] == "passed"
+        assert reviewed.validation_report["comparison_verification"] == "improved"
     version_id = request.candidate_version_id
     ready = await client.get(
         f"/api/v1/skill-versions/{version_id}/trial-readiness",

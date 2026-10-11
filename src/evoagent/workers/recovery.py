@@ -4,8 +4,6 @@ import asyncio
 import time
 from contextlib import suppress
 
-from sqlalchemy.exc import SQLAlchemyError
-
 
 class RecoveryScanner:
     def __init__(self, manager, *, schema_version: int, interval: float = 2, batch_size: int = 50):
@@ -78,7 +76,7 @@ class RecoveryScanner:
                 if backlog:
                     continue
                 delay = self.interval
-            except SQLAlchemyError:
+            except Exception:
                 if on_failure is not None:
                     await on_failure()
                 delay = backoff

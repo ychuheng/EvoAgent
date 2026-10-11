@@ -101,6 +101,12 @@ def test_real_eligibility_needs_known_paid_usage_adoption_and_all_judgments():
         "adoption_verification": "passed",
         "items": [
             {
+                "case_key": kind,
+                "repeat": 0,
+                "criterion_id": "business",
+                "arm": arm,
+                "business_criterion": True,
+                "comparable": True,
                 "case_kind": kind,
                 "verdict": "pass",
                 "judge_origin": "user",
@@ -108,6 +114,7 @@ def test_real_eligibility_needs_known_paid_usage_adoption_and_all_judgments():
                 "independent_input": True,
             }
             for kind in ("positive", "counterexample")
+            for arm in ("control", "treatment")
         ],
     }
     # Synthetic metadata proves the decision contract, not real-model efficacy.
@@ -124,7 +131,7 @@ def test_real_eligibility_needs_known_paid_usage_adoption_and_all_judgments():
         ("independent_input", False),
     ):
         changed = deepcopy(report)
-        changed["items"][0][field] = value
+        changed["items"][1][field] = value
         assert not real_trial_eligible(changed, policy)
     assert not real_trial_eligible(report, {"provider": "mock"})
     broken = deepcopy(policy)

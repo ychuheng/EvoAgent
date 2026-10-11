@@ -122,9 +122,11 @@ async def test_actual_human_judgments_append_replay_conflict_and_never_grant_moc
         expected_lock_version=current.lock_version,
         expected_report_hash=current.validation_report_hash,
         judgments=(
-            claims[0].model_copy(
-                update={"verdict": "fail", "reason": "user found an unmet criterion"}
-            ),
+            next(
+                claim
+                for item, claim in zip(original["items"], claims, strict=True)
+                if item["arm"] == "treatment" and item["business_criterion"]
+            ).model_copy(update={"verdict": "fail", "reason": "user found an unmet criterion"}),
         ),
     )
     corrected = await service.submit(row.id, correction)

@@ -147,9 +147,14 @@ async def test_backlog_rotates_classes_and_yields_between_bounded_batches():
     assert [kind for kind, _ in manager.calls] == ["retry", "expired", "pending"] * scanner.batches
 
 
-async def test_error_backoff_is_bounded_and_can_stop_without_waiting():
+@pytest.mark.parametrize("error", [SQLAlchemyError("offline"), RuntimeError("scan failed")])
+async def test_error_backoff_is_bounded_and_can_stop_without_waiting(error):
     manager = Manager()
-    manager.fail = True
+
+    async def failed_scan(**kwargs):
+        raise error
+
+    manager.recover_expired = failed_scan
     scanner = RecoveryScanner(manager, schema_version=2)
     stopping = asyncio.Event()
     failure_observed = asyncio.Event()

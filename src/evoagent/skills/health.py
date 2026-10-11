@@ -64,18 +64,20 @@ def evaluate_health(observations, *, trial_id, version_id, now, policy):
             latest[item.run_id] = item
     by_input = {}
     for item in sorted(latest.values(), key=lambda row: (row.first_finished_at, row.run_id.hex)):
-        if not item.input_fingerprint:
-            continue  # no replay identity is insufficient evidence
-        by_input[item.input_fingerprint] = item
-    failures = []
-    for item in sorted(by_input.values(), key=lambda row: (row.first_finished_at, row.run_id.hex)):
         if (
-            item.verification_origin not in {"machine", "user"}
+            not item.input_fingerprint
+            or item.outcome not in {"verified_success", "verified_failure"}
+            or (item.outcome == "verified_failure" and item.attribution != "skill_related")
+            or item.verification_origin not in {"machine", "user"}
             or not item.criterion_id
             or not item.evidence_refs
             or not item.associated_steps
         ):
             continue
+        # Insufficient replays must not replace verified evidence for this input.
+        by_input[item.input_fingerprint] = item
+    failures = []
+    for item in sorted(by_input.values(), key=lambda row: (row.first_finished_at, row.run_id.hex)):
         if item.outcome == "verified_success":
             failures.clear()
         elif item.outcome == "verified_failure" and item.attribution == "skill_related":
