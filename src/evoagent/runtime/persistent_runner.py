@@ -313,6 +313,9 @@ class PersistentAgentRunner:
             lease_guard=guard,
             batch_progress=config_snapshot.progress_write_mode == "batched_v1",
             on_background_error=stop_execution,
+            batch_count=self._settings.runtime_event_batch_count,
+            batch_bytes=self._settings.runtime_event_batch_bytes,
+            flush_seconds=self._settings.runtime_event_flush_seconds,
         )
         try:
             return await self._execute_owned(

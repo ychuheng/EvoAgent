@@ -119,6 +119,7 @@ class Database:
             async with cls(settings.database_url.get_secret_value()) as database:
                 database.session_factory.configure(
                     info={
+                        "runtime_settings": settings,
                         **({"event_notifier": notifier} if notifier is not None else {}),
                         **({"wakeup": wakeup} if wakeup is not None else {}),
                     }

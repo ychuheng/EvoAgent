@@ -55,7 +55,7 @@ class PersistentCheckpointStore:
         )
 
     async def save_if_changed(self, state: LoopState) -> None:
-        await self._save(state, skip_unchanged=True)
+        await self.save(state)
 
     async def _save(self, state: LoopState, *, skip_unchanged: bool) -> None:
         body = state.model_dump(

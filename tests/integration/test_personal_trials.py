@@ -48,7 +48,7 @@ async def trial_candidate(learning_api):
     return client, db, run_id, state, version, skill
 
 
-async def seed_binding(context):
+async def seed_binding(context, *, policy=None):
     # Deliberately bypass activate only to test guards on an existing binding.
     # The fixture's P2 report is insufficient for real trial admission.
     _, db, _, state, version, skill = context
@@ -60,8 +60,8 @@ async def seed_binding(context):
         scope_key=TrialScope(skill.workspace_id).key,
         validation_request_id=UUID(state["id"]),
         report_hash=state["validation_report_hash"],
-        health_policy_snapshot=deepcopy(HEALTH_POLICY),
-        health_policy_hash=content_hash(HEALTH_POLICY),
+        health_policy_snapshot=deepcopy(policy or HEALTH_POLICY),
+        health_policy_hash=content_hash(policy or HEALTH_POLICY),
         reviewer="fixture",
         reason="existing binding for safety tests",
     )

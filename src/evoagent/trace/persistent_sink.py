@@ -36,9 +36,23 @@ class PersistentEventSink:
         lease_guard: LeaseGuard | None = None,
         batch_progress: bool = False,
         on_background_error=None,
+        batch_count: int = 32,
+        batch_bytes: int = 65536,
+        flush_seconds: float = 0.1,
     ) -> None:
         if max_string_chars < 1:
             raise ValueError("max_string_chars must be positive")
+        if (
+            not 1 <= batch_count <= 32
+            or not 1024 <= batch_bytes <= 65536
+            or not 0 < flush_seconds <= 0.1
+        ):
+            raise ValueError("invalid progress batch budget")
+        self._batch_count, self._batch_bytes, self._flush_seconds = (
+            batch_count,
+            batch_bytes,
+            flush_seconds,
+        )
         if lease_guard is not None and lease_guard.lease.run_id != run_id:
             raise ValueError("run does not match lease")
         self._lease_guard = lease_guard
@@ -71,9 +85,18 @@ class PersistentEventSink:
         size = len(canonical_json(clean).encode())
         async with self._lock:
             self._raise_background_error()
-            if size > 64 * 1024:
-                raise ValueError("progress payload exceeds batch byte budget")
-            if self._pending_bytes + size > 64 * 1024:
+            if size > self._batch_bytes:
+                # Oversized progress applies synchronous backpressure without
+                # entering the bounded pending buffer or failing the task.
+                await self._flush_locked()
+                self._accepted_watermark += 1
+                await self._flush_locked(
+                    overflow=dict(
+                        event_type=event_type.value, payload=clean, created_at=datetime.now(UTC)
+                    )
+                )
+                return ProgressReceipt(self._accepted_watermark, "committed")
+            if self._pending_bytes + size > self._batch_bytes:
                 await self._flush_locked()
             self._pending.append(
                 dict(event_type=event_type.value, payload=clean, created_at=datetime.now(UTC))
@@ -81,7 +104,7 @@ class PersistentEventSink:
             self._pending_bytes += size
             observe_event_buffer(self._pending_bytes)
             self._accepted_watermark += 1
-            if len(self._pending) >= 32 or self._pending_bytes >= 64 * 1024:
+            if len(self._pending) >= self._batch_count or self._pending_bytes >= self._batch_bytes:
                 await self._flush_locked()
             elif self._timer is None or self._timer.done():
                 self._timer = asyncio.create_task(self._flush_after_delay())
@@ -95,7 +118,7 @@ class PersistentEventSink:
 
     async def _flush_after_delay(self):
         try:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(self._flush_seconds)
             async with self._lock:
                 await self._flush_locked()
         except asyncio.CancelledError:
@@ -106,9 +129,10 @@ class PersistentEventSink:
             if self._on_background_error is not None:
                 self._on_background_error(error)
 
-    async def _flush_locked(self):
-        if not self._pending:
+    async def _flush_locked(self, *, overflow=None):
+        if not self._pending and overflow is None:
             return
+        items = [overflow] if overflow is not None else self._pending
         try:
             async with UnitOfWork(self._session_factory) as unit:
                 if self._lease_guard is not None:
@@ -116,9 +140,9 @@ class PersistentEventSink:
                     try:
                         await check_run_references(unit.session, self._run_id)
                     except MemoryError:
-                        for item in self._pending:
+                        for item in items:
                             item["payload"] = {"context_source_revoked": True}
-                records = await unit.events.append_many(self._run_id, self._pending)
+                records = await unit.events.append_many(self._run_id, items)
                 await unit.commit()
         except BaseException as error:
             # 包括提交结果不确定与 fencing 失败：终止本 sink，绝不自动重放。

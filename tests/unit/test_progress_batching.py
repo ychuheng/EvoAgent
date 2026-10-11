@@ -138,10 +138,11 @@ async def test_count_and_byte_bounds_are_enforced(event_db):
         await sink.append_progress(ProgressEventType.MODEL_DELTA, payload)
         assert len(sink.events) == 33 and len(sink._pending) == 1
         assert sink._pending_bytes < 64 * 1024
-        with pytest.raises(ValueError, match="byte budget"):
-            await sink.append_progress(
-                ProgressEventType.MODEL_DELTA, {str(i): "x" * 2000 for i in range(40)}
-            )
+        oversized = {str(i): "x" * 2000 for i in range(40)}
+        receipt = await sink.append_progress(ProgressEventType.MODEL_DELTA, oversized)
+        assert receipt.durability == "committed"
+        assert sink._pending_bytes == 0 and not sink._pending
+        assert len(sink.events) == 35 and sink.events[-1].payload == oversized
     finally:
         await sink.close()
 

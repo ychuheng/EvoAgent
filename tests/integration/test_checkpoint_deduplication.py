@@ -45,10 +45,46 @@ def test_each_recoverable_field_has_a_valid_mutation():
     assert set(VARIANTS) == set(LoopState.model_fields)
 
 
+@pytest.mark.parametrize("field", ["context_revision_id", "previous_tool_fingerprint"])
+async def test_nullable_snapshot_field_both_directions(persistence, field):
+    db, run_id = persistence
+    store = PersistentCheckpointStore(
+        run_id,
+        db.session_factory,
+        settings=SimpleNamespace(runtime_snapshot_deduplication_enabled=True),
+    )
+    base = sample_state().model_copy(update={field: None})
+    changed = base.model_copy(update={field: VARIANTS[field]})
+    for state in (base, base, changed, changed, base):
+        await store.save_if_changed(state)
+    assert len(await snapshots(db, run_id)) == 3
+
+
+async def test_message_subfield_priority_is_recoverable(persistence):
+    db, run_id = persistence
+    store = PersistentCheckpointStore(
+        run_id,
+        db.session_factory,
+        settings=SimpleNamespace(runtime_snapshot_deduplication_enabled=True),
+    )
+    base = sample_state()
+    changed = base.model_copy(
+        update={"messages": (base.messages[0].model_copy(update={"context_priority": 2}),)}
+    )
+    for state in (base, changed, changed, base):
+        await store.save_if_changed(state)
+    records = await snapshots(db, run_id)
+    assert len(records) == 3 and records[1].state["messages"][0]["context_priority"] == 2
+
+
 @pytest.mark.parametrize("field", tuple(VARIANTS))
 async def test_each_field_change_writes_a_new_recovery_point(persistence, field):
     database, run_id = persistence
-    store = PersistentCheckpointStore(run_id, database.session_factory)
+    store = PersistentCheckpointStore(
+        run_id,
+        database.session_factory,
+        settings=SimpleNamespace(runtime_snapshot_deduplication_enabled=True),
+    )
     state = sample_state().model_copy(update={"previous_tool_fingerprint": "initial"})
     await store.save_if_changed(state)
     await store.save_if_changed(state)
@@ -68,8 +104,8 @@ async def test_off_switch_preserves_one_snapshot_per_call_and_restart_cache_is_e
         settings=SimpleNamespace(runtime_snapshot_deduplication_enabled=False),
     )
     state = sample_state()
-    for _ in range(3):
-        await store.save(state)
+    for method in (store.save, store.save_if_changed, store.save_if_changed):
+        await method(state)
     records = await snapshots(database, run_id)
     assert len(records) == 3
     assert [record.state for record in records] == [state.model_dump(mode="json")] * 3

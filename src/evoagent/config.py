@@ -83,6 +83,15 @@ class Settings(BaseSettings):
     runtime_snapshot_deduplication_enabled: bool = False
     runtime_scan_cache_enabled: bool = False
     runtime_discovery_history_join_enabled: bool = False
+    runtime_event_batch_count: int = Field(default=32, ge=1, le=32)
+    runtime_event_batch_bytes: int = Field(default=65536, ge=1024, le=65536)
+    runtime_event_flush_seconds: float = Field(default=0.1, gt=0, le=0.1)
+    runtime_event_page_size: int = Field(default=200, ge=1, le=200)
+    runtime_event_fallback_seconds: float = Field(default=2, gt=0, le=2)
+    recovery_scan_seconds: float = Field(default=2, gt=0, le=2)
+    recovery_scan_batch_size: int = Field(default=50, ge=1, le=50)
+    maintenance_idle_max_seconds: float = Field(default=8, ge=1, le=8)
+    cleanup_poll_max_seconds: float = Field(default=1, gt=0, le=1)
     learning_enabled: bool = False
     personal_trial_enabled: bool = False
     personal_validation_real_enabled: bool = False

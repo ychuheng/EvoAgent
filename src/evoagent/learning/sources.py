@@ -42,12 +42,17 @@ _MAX_ITEMS = 200
 
 
 class PersonalSourceService:
-    def __init__(self, session_factory, *, max_source_risk="R1", artifact_store=None):
+    def __init__(
+        self, session_factory, *, max_source_risk="R1", artifact_store=None, settings=None
+    ):
         if max_source_risk not in {"R0", "R1", "R2", "R3"}:
             raise LearningError("invalid_source_risk_policy")
         self.factory = session_factory
         self.max_source_risk = max_source_risk
         self.store = artifact_store
+        self.settings = settings or getattr(session_factory, "kw", {}).get("info", {}).get(
+            "runtime_settings"
+        )
 
     @staticmethod
     def evidence_identity_hash(evidence):
@@ -117,7 +122,9 @@ class PersonalSourceService:
             ):
                 raise LearningError("learning_source_changed")
         # Run no transaction across storage or bounded scanning.
-        await ArtifactInjectionGuard(session_factory=self.factory).verify_derived_text(
+        await ArtifactInjectionGuard(
+            session_factory=self.factory, settings=self.settings
+        ).verify_derived_text(
             text=body,
             run_id=run_id,
             source_id=f"learning:{source_revision}",
@@ -230,7 +237,9 @@ class PersonalSourceService:
         # generic artifact_read whitelist. No original artifact re-reading.
         raw = await self.store.read_bounded(uri, max_bytes=128 * 1024)
         try:
-            text = await ArtifactInjectionGuard(session_factory=self.factory).verify_derived_text(
+            text = await ArtifactInjectionGuard(
+                session_factory=self.factory, settings=self.settings
+            ).verify_derived_text(
                 text=raw.decode("utf8"),
                 run_id=run_id,
                 source_id=str(source_id),

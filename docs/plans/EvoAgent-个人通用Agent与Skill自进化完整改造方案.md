@@ -818,6 +818,8 @@ Settings 新增 `runtime_event_batching_enabled`、`runtime_shared_notifications
 
 调度配置初值：`recovery_scan_seconds=2`、`recovery_scan_batch_size=50`、`maintenance_idle_max_seconds=8`、`cleanup_poll_max_seconds=1`；缓存和事件上限沿用 §11.1/11.7。校验范围和内存字节上限；调度改动不得把心跳续期放到退避轮询里。未经验证不增加新的连接池/副本/消息中间件。
 
+实际配置名称以 Settings / .env.personal.example 为准：8 个开关为 runtime_event_batching_enabled、runtime_shared_notifications_enabled、runtime_heartbeat_status_merge_enabled、runtime_recovery_scan_decoupled_enabled、runtime_maintenance_idle_backoff_enabled、runtime_snapshot_deduplication_enabled、runtime_scan_cache_enabled、runtime_discovery_history_join_enabled；前文概念名不作为环境变量别名。部署可调的事件阈值为 runtime_event_batch_count=32、runtime_event_batch_bytes=65536、runtime_event_flush_seconds=0.1、runtime_event_page_size=200、runtime_event_fallback_seconds=2，另有上述四个调度参数。范围只允许收紧已验证上限，不以调参扩大取消、恢复或清理时延承诺；关闭优化仍走既有 reference 路径。它们是宿主调度/写入投影参数，不改变已经冻结的业务判据、Skill 选择或执行输入，旧 Run manifest 不回填。
+
 ### 13.2 装配修改
 
 - `api/app.py::create_app` 注册 learning router、trial service；新个人提炼不在 API 生命周期中持有 extractor Provider。旧 extraction API 的 Provider 兼容保留，标高级入口；待移除旧 API 时再删装配。

@@ -140,6 +140,7 @@ def create_app(
         )
         resolved_database.session_factory.configure(
             info={
+                "runtime_settings": resolved_settings,
                 "wakeup": wakeup,
                 **({"event_notifier": notifier} if notifier is not None else {}),
             }

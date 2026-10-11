@@ -16,9 +16,13 @@ class MaintenanceLane:
         poll_seconds: float,
         idle_backoff: bool = False,
         drain_immediately: bool = False,
+        idle_max_seconds: float = 8,
     ):
         if poll_seconds <= 0:
             raise ValueError("maintenance poll interval must be positive")
+        if not 1 <= idle_max_seconds <= 8:
+            raise ValueError("invalid maintenance idle budget")
+        self.idle_max_seconds = idle_max_seconds
         self.worker = worker
         self.wakeup = wakeup
         self.poll_seconds = poll_seconds
@@ -38,4 +42,4 @@ class MaintenanceLane:
             timeout = delay if self.idle_backoff else self.poll_seconds
             notified = await self.wakeup.wait(stopping, timeout)
             if self.idle_backoff:
-                delay = 1.0 if notified else min(delay * 2, 8)
+                delay = 1.0 if notified else min(delay * 2, self.idle_max_seconds)

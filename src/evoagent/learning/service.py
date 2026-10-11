@@ -202,6 +202,11 @@ class LearningService:
                 learning_revision=row.learning_revision,
                 routing=routing,
                 learning_request_id=request.id if request else None,
+                learning_notice=(
+                    "fact_feedback_saved_only_use_memory_review_to_adopt"
+                    if payload.intent == "fact"
+                    else None
+                ),
             )
             await session.commit()
             return result

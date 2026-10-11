@@ -27,6 +27,8 @@ async def stream_task_events(
         poll_seconds=settings.sse_poll_seconds,
         heartbeat_seconds=settings.sse_heartbeat_seconds,
         notifier=request.app.state.event_notifier,
+        page_size=settings.runtime_event_page_size,
+        fallback_seconds=settings.runtime_event_fallback_seconds,
     )
     async for event in service.stream(aggregate.run.id, after_sequence=last_event_id or 0):
         yield event

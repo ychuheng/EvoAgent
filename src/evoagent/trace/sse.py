@@ -32,11 +32,16 @@ class SseEventService:
         poll_seconds: float,
         heartbeat_seconds: float,
         notifier: RunEventNotifier | None = None,
+        page_size: int = 200,
+        fallback_seconds: float = 2,
     ) -> None:
         self._session_factory = session_factory
         self._poll_seconds = poll_seconds
         self._heartbeat_seconds = heartbeat_seconds
         self._notifier = notifier
+        if not 1 <= page_size <= 200 or not 0 < fallback_seconds <= 2:
+            raise ValueError("invalid SSE replay budget")
+        self._page_size, self._fallback_seconds = page_size, fallback_seconds
 
     async def stream(
         self, run_id: UUID, *, after_sequence: int = 0
@@ -56,7 +61,9 @@ class SseEventService:
             async with UnitOfWork(self._session_factory) as unit:
                 run = await unit.runs.get(run_id)
                 if self._notifier:
-                    records = await unit.events.page_for_run(run_id, after_sequence=cursor)
+                    records = await unit.events.page_for_run(
+                        run_id, after_sequence=cursor, limit=self._page_size
+                    )
                 else:
                     records = await unit.events.list_for_run(run_id, after_sequence=cursor)
             for record in records:
@@ -83,6 +90,8 @@ class SseEventService:
                 remaining = (
                     self._heartbeat_seconds - (datetime.now(UTC) - last_output).total_seconds()
                 )
-                await self._notifier.wait(run_id, generation, min(2, max(0.001, remaining)))
+                await self._notifier.wait(
+                    run_id, generation, min(self._fallback_seconds, max(0.001, remaining))
+                )
             else:
                 await asyncio.sleep(self._poll_seconds)

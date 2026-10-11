@@ -47,6 +47,7 @@ test("事实反馈不会被勾选为方法学习", async () => {
   await screen.findByRole("status");
   expect(submission.intent).toBe("fact");
   expect(submission.learn_from_feedback).toBe(false);
+  expect(screen.getByText(/事实反馈已保存，尚未自动用于学习/)).toBeInTheDocument();
 });
 
 test("候选确认调用学习审查，不调用版本启用；分页保留既有行", async () => {

@@ -472,6 +472,7 @@ async def run_worker() -> None:
         )
         database.session_factory.configure(
             info={
+                "runtime_settings": settings,
                 "wakeup": wakeup,
                 **({"event_notifier": notifier} if notifier is not None else {}),
             }
@@ -487,6 +488,9 @@ async def run_worker() -> None:
             poll_seconds=settings.worker_poll_seconds,
             snapshot_schema_version=settings.snapshot_schema_version,
             recovery_scan_decoupled=settings.runtime_recovery_scan_decoupled_enabled,
+            recovery_scan_seconds=settings.recovery_scan_seconds,
+            recovery_scan_batch_size=settings.recovery_scan_batch_size,
+            cleanup_poll_max_seconds=settings.cleanup_poll_max_seconds,
             maintenance_idle_backoff=settings.runtime_maintenance_idle_backoff_enabled,
             heartbeat_status_merge=settings.runtime_heartbeat_status_merge_enabled,
         )
@@ -529,6 +533,7 @@ async def run_maintenance_worker():
     async with Database(settings.database_url.get_secret_value()) as database:
         database.session_factory.configure(
             info={
+                "runtime_settings": settings,
                 **({"wakeup": wakeup} if settings.runtime_maintenance_idle_backoff_enabled else {}),
                 **({"event_notifier": notifier} if notifier is not None else {}),
             }
@@ -591,7 +596,9 @@ async def run_maintenance_worker():
                         MaintenanceLane(
                             critical,
                             wakeup,
-                            poll_seconds=min(settings.worker_poll_seconds, 1),
+                            poll_seconds=min(
+                                settings.worker_poll_seconds, settings.cleanup_poll_max_seconds
+                            ),
                             drain_immediately=True,
                         ).run(stopping)
                     ),
@@ -601,6 +608,7 @@ async def run_maintenance_worker():
                             wakeup,
                             poll_seconds=1,
                             idle_backoff=settings.runtime_maintenance_idle_backoff_enabled,
+                            idle_max_seconds=settings.maintenance_idle_max_seconds,
                         ).run(stopping)
                     ),
                 ]
@@ -634,6 +642,7 @@ async def run_maintenance_worker():
                                 wakeup,
                                 poll_seconds=1,
                                 idle_backoff=settings.runtime_maintenance_idle_backoff_enabled,
+                                idle_max_seconds=settings.maintenance_idle_max_seconds,
                                 drain_immediately=True,
                             ).run(stopping)
                         )

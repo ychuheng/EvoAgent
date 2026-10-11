@@ -94,6 +94,7 @@ class FeedbackView(BaseModel):
     learning_revision: int
     routing: Literal["method", "fact", "clarify", "none"]
     learning_request_id: UUID | None = None
+    learning_notice: str | None = None
 
 
 class LearningRequestView(BaseModel):

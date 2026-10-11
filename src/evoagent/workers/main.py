@@ -44,6 +44,9 @@ class JobWorker:
         wakeup: Wakeup | None = None,
         presence: WorkerPresence | None = None,
         recovery_scan_decoupled: bool = False,
+        recovery_scan_seconds: float = 2,
+        recovery_scan_batch_size: int = 50,
+        cleanup_poll_max_seconds: float = 1,
         maintenance_idle_backoff: bool = False,
         heartbeat_status_merge: bool = False,
         cancellation_notifier: CancellationNotifier | None = None,
@@ -51,6 +54,7 @@ class JobWorker:
         self._worker_id = f"{worker_id[:95]}:{uuid4().hex}"
         self._maintenance_worker = maintenance_worker
         self._maintenance_idle_backoff = maintenance_idle_backoff
+        self._cleanup_poll_max_seconds = cleanup_poll_max_seconds
         if concurrency < 1:
             raise ValueError("concurrency must be positive")
         self._concurrency = concurrency
@@ -72,7 +76,12 @@ class JobWorker:
         self._poll_seconds = poll_seconds
         self._stopping = asyncio.Event()
         self._recovery = (
-            RecoveryScanner(lease_manager, schema_version=snapshot_schema_version)
+            RecoveryScanner(
+                lease_manager,
+                schema_version=snapshot_schema_version,
+                interval=recovery_scan_seconds,
+                batch_size=recovery_scan_batch_size,
+            )
             if recovery_scan_decoupled
             else None
         )
@@ -130,7 +139,7 @@ class JobWorker:
             await MaintenanceLane(
                 self._maintenance_worker,
                 self._wakeup,
-                poll_seconds=min(self._poll_seconds, 1),
+                poll_seconds=min(self._poll_seconds, self._cleanup_poll_max_seconds),
                 idle_backoff=background,
                 drain_immediately=True,
             ).run(self._stopping)

@@ -27,7 +27,7 @@ export type ValidationItem = {
     selection_hash?: string; selector_version?: string;
   };
 };
-export type FeedbackResult = { id: string; revision: number; learning_revision: number; routing: string; learning_request_id: string | null };
+export type FeedbackResult = { id: string; revision: number; learning_revision: number; routing: string; learning_request_id: string | null; learning_notice?: string | null };
 export type ValidationFixture = { fixture_id: string; files: { path: string; content: string }[] };
 export type ObservationCatalog = {
   run_id: string;

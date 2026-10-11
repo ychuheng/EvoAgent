@@ -228,6 +228,27 @@ class SkillTrialService:
                 or request.project_id != scope.project_id
             ):
                 raise TrialError("trial_validation_scope_mismatch")
+            suspended = await session.scalar(
+                select(SkillTrialRecord)
+                .where(
+                    SkillTrialRecord.version_id == version_id,
+                    SkillTrialRecord.scope_key == scope.key,
+                    SkillTrialRecord.suspended_at.is_not(None),
+                )
+                .order_by(SkillTrialRecord.suspended_at.desc())
+                .limit(1)
+            )
+            if suspended is not None:
+                from datetime import UTC
+
+                created = request.created_at
+                stopped = suspended.suspended_at
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=UTC)
+                if stopped.tzinfo is None:
+                    stopped = stopped.replace(tzinfo=UTC)
+                if request.id == suspended.validation_request_id or created <= stopped:
+                    raise TrialError("trial_reactivation_requires_fresh_validation")
             readiness = await self._assess(session, version_id, request_id)
             if not readiness.ready:
                 raise TrialError("trial_not_ready:" + readiness.reasons[0])
@@ -326,6 +347,10 @@ class SkillTrialService:
             unavailable |= (
                 version is None or version.lifecycle_status is SkillVersionStatus.REJECTED
             )
+            policy_invalid = (
+                trial.health_policy_snapshot != HEALTH_POLICY
+                or trial.health_policy_hash != content_hash(HEALTH_POLICY)
+            )
             try:
                 await SkillAccessPolicy().check(
                     session,
@@ -335,16 +360,22 @@ class SkillTrialService:
                 )
             except SkillAccessError:
                 unavailable = True
-            if not unavailable:
+            if not unavailable and not policy_invalid:
                 return False
             trial.status, trial.lock_version = "suspended", trial.lock_version + 1
             trial.suspended_at = await database_now(session)
-            trial.suspension_reason = "skill_source_or_version_unavailable"
+            trial.suspension_reason = (
+                "trial_health_policy_unsupported"
+                if policy_invalid
+                else "skill_source_or_version_unavailable"
+            )
             skill.lock_version += 1
             await self._event(
                 session,
                 skill.id,
-                "skill.trial_source_suspended",
+                "skill.trial_health_policy_suspended"
+                if policy_invalid
+                else "skill.trial_source_suspended",
                 {
                     "trial_id": str(trial.id),
                     "version_id": str(trial.version_id),
