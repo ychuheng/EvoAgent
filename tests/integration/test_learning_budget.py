@@ -233,6 +233,8 @@ async def test_stalled_learning_call_cannot_hold_workspace_reserved_forever(rese
     provider = LearningBudgetedProvider(
         StalledProvider(), budget, request_id, guard, check=check, provider_name="offline-test"
     )
+    # A host setting mutation cannot change an already assembled invocation.
+    budget.settings.model_timeout_seconds = 60
     request = ModelRequest(
         model="test",
         max_output_tokens=1,

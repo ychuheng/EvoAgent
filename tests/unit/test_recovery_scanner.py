@@ -169,3 +169,42 @@ async def test_error_backoff_is_bounded_and_can_stop_without_waiting(error):
     assert scanner.failures == 1  # 未因异常变成热循环。
     stopping.set()
     await asyncio.wait_for(running, timeout=0.2)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_inline_scan_failure_does_not_claim_or_kill_worker(enabled):
+    manager = Manager()
+    runtime = worker(manager, enabled=enabled)
+
+    async def broken(**kwargs):
+        raise RuntimeError("recovery failure")
+
+    original = manager.recover_expired
+    manager.recover_expired = broken
+    assert not await runtime.run_once()
+    assert runtime._recovery_failures == 1 and manager.claims == 0
+    assert not runtime._inline_recovery_ready.is_set()
+    calls = list(manager.calls)
+    assert not await runtime.run_once()
+    assert manager.calls == calls and runtime._recovery_failures == 1
+    manager.recover_expired = original
+    runtime._recovery_retry_at = 0
+    assert not await runtime.run_once()
+    assert manager.claims == 1 and runtime._recovery_backoff == 1
+    assert runtime._inline_recovery_ready.is_set()
+
+
+async def test_default_scan_failure_keeps_all_lanes_alive_and_stop_prompt():
+    manager = Manager()
+    runtime = worker(manager, enabled=False)
+
+    async def broken(**kwargs):
+        raise RuntimeError("recovery failure")
+
+    manager.recover_expired = broken
+    running = asyncio.create_task(runtime.run_forever())
+    await asyncio.sleep(0.04)
+    assert not running.done() and manager.claims == 0
+    assert runtime._recovery_failures == 1
+    runtime.stop()
+    await asyncio.wait_for(running, timeout=0.5)

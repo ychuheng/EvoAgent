@@ -51,7 +51,7 @@ export function FeedbackPanel({ runId, workspaceId }: { runId: string; workspace
       <button type="button" disabled={busy || result !== null || (judgeSkill && !observation)} onClick={() => void submit()}>提交任务反馈</button>
       {result && <p role="status">反馈已保存{result.learning_request_id ? `，方法请求已排队：${result.learning_request_id}` : "，没有创建方法请求"}。</p>}
       {result?.routing === "clarify" && <p>已保存反馈，请拆分事实与方法，或明确要修订的 Skill；不会自动猜测目标。</p>}
-      {result && intent === "fact" && <p>事实反馈已保存，尚未自动用于学习。请到记忆页创建并审查事实候选后采用。</p>}
+      {result?.learning_notice === "fact_feedback_saved_only_use_memory_review_to_adopt" && <p>事实反馈已保存，尚未自动用于学习。请到记忆页创建并审查事实候选后采用。</p>}
       {error && <p role="alert" className="error">{error}</p>}
     </>}
   </section>;

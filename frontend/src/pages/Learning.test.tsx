@@ -32,12 +32,12 @@ test("反馈需要显式方法授权；网络重试沿用同一提交身份", as
   expect(submissions[0].client_request_id).toBe(submissions[1].client_request_id);
 });
 
-test("事实反馈不会被勾选为方法学习", async () => {
+test.each([true, false])("事实反馈通知遵循服务端标记 %s，不会被勾选为方法学习", async (hasNotice) => {
   let submission: Record<string, unknown> = {};
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("learning-policy")) return json(policy);
     submission = JSON.parse(String(init?.body));
-    return json({ id: "feedback", routing: "none", learning_request_id: null });
+    return json({ id: "feedback", routing: "none", learning_request_id: null, ...(hasNotice ? { learning_notice: "fact_feedback_saved_only_use_memory_review_to_adopt" } : {}) });
   }));
   render(<FeedbackPanel runId="run" workspaceId="workspace" />);
   fireEvent.click(screen.getByRole("button", { name: "反馈与记成方法" }));
@@ -47,7 +47,8 @@ test("事实反馈不会被勾选为方法学习", async () => {
   await screen.findByRole("status");
   expect(submission.intent).toBe("fact");
   expect(submission.learn_from_feedback).toBe(false);
-  expect(screen.getByText(/事实反馈已保存，尚未自动用于学习/)).toBeInTheDocument();
+  if (hasNotice) expect(screen.getByText(/事实反馈已保存，尚未自动用于学习/)).toBeInTheDocument();
+  else expect(screen.queryByText(/事实反馈已保存，尚未自动用于学习/)).not.toBeInTheDocument();
 });
 
 test("候选确认调用学习审查，不调用版本启用；分页保留既有行", async () => {

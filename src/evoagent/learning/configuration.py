@@ -14,6 +14,7 @@ def candidate_configuration(settings):
         "model": settings.skill_extractor_model
         or ("mock" if settings.provider.value == "mock" else None),
         "max_output_tokens": min(settings.model_request_max_output_tokens or 4096, 4096),
+        "model_timeout_seconds": settings.model_timeout_seconds,
         "schema_version": 2,
         "max_steps": settings.skill_max_steps,
         "max_risk": settings.skill_max_effective_risk.value,

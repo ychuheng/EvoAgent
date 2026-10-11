@@ -15,6 +15,7 @@ class LearningBudgetedProvider:
         self.provider, self.budget = provider, budget
         self.request_id, self.guard = request_id, guard
         self.check, self.provider_name = check, provider_name
+        self._model_timeout_seconds = float(budget.settings.model_timeout_seconds)
 
     async def stream(self, request):
         if request.max_output_tokens is None:
@@ -53,7 +54,7 @@ class LearningBudgetedProvider:
             await self.budget.mark_dispatched(identity, guard=self.guard)
             sent = True
             await self.check()  # cancellation after send intent is conservative unknown
-            async with asyncio.timeout(self.budget.settings.model_timeout_seconds):
+            async with asyncio.timeout(self._model_timeout_seconds):
                 async for event in self.provider.stream(request):
                     observed = event.usage if event.type is ProviderEventType.USAGE else None
                     if event.type is ProviderEventType.COMPLETED and event.response:

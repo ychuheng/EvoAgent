@@ -147,6 +147,47 @@ async def test_count_and_byte_bounds_are_enforced(event_db):
         await sink.close()
 
 
+@pytest.mark.parametrize("batched", [False, True])
+async def test_progress_hard_cap_is_explicit_and_does_not_fail_run(event_db, batched):
+    db, run_id = event_db
+    sink = PersistentEventSink(run_id, db.session_factory, batch_progress=batched)
+    payload = {str(i): "中" * 2000 for i in range(150)}
+    try:
+        await sink.append_progress(ProgressEventType.MODEL_DELTA, payload)
+        await sink.flush()
+        event = (await rows(db, run_id))[0]
+        assert event.payload["event_payload_truncated"] is True
+        assert event.payload["sanitized_payload_bytes"] > 256 * 1024
+        assert len(canonical_json(event.payload).encode()) < 256 * 1024
+        await sink.emit(EventType.MODEL_COMPLETED, {"iteration": 1})
+        assert len(await rows(db, run_id)) == 2
+        # Critical recovery evidence is not truncated by the progress budget.
+        await sink.emit(EventType.RUN_COMPLETED, payload)
+        assert len(await rows(db, run_id)) == 3
+    finally:
+        await sink.close()
+
+
+async def test_diagnostic_cache_is_bounded_but_database_keeps_full_trace(event_db):
+    db, run_id = event_db
+    sink = PersistentEventSink(run_id, db.session_factory, batch_progress=True)
+    try:
+        for i in range(270):
+            await sink.append_progress(ProgressEventType.MODEL_DELTA, {"index": i})
+        await sink.flush()
+        assert len(sink.events) == 256 and sink.events[0].payload["index"] == 14
+        for _ in range(10):
+            await sink.append_progress(
+                ProgressEventType.MODEL_DELTA, {str(j): "x" * 2000 for j in range(100)}
+            )
+        await sink.flush()
+        assert sink._diagnostic_bytes <= 1024 * 1024 and len(sink.events) < 256
+        assert sum(sink._event_sizes) == sink._diagnostic_bytes
+        assert len(await rows(db, run_id)) == 280
+    finally:
+        await sink.close()
+
+
 async def test_progress_api_rejects_critical_types_and_close_rejects_late_writes(event_db):
     db, run_id = event_db
     sink = PersistentEventSink(run_id, db.session_factory, batch_progress=True)

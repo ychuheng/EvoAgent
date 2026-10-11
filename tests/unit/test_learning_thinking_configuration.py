@@ -61,3 +61,13 @@ def test_none_preserves_legacy_hash_and_disabled_changes_frozen_identities():
     assert candidate_configuration(changed)["provider_thinking_mode"] == "disabled"
     assert content_hash(candidate_configuration(changed)) != content_hash(old_generation)
     assert real_profile(changed).identity()["profile_hash"] != old_profile["profile_hash"]
+
+
+def test_learning_stream_deadline_is_part_of_frozen_generation_identity():
+    settings = host(None)
+    original = candidate_configuration(settings)
+    assert original["model_timeout_seconds"] == settings.model_timeout_seconds
+    changed = settings.model_copy(
+        update={"model_timeout_seconds": settings.model_timeout_seconds + 1}
+    )
+    assert content_hash(candidate_configuration(changed)) != content_hash(original)

@@ -52,7 +52,18 @@ async def respond(operation):
             raise HTTPException(
                 422, detail={"code": "trial_not_ready", "reason": code.split(":", 1)[1]}
             ) from None
-        status = 404 if code.endswith("missing") else 409 if "conflict" in code else 422
+        status = (
+            404
+            if code.endswith("missing")
+            else 409
+            if "conflict" in code
+            or code
+            in {
+                "trial_reactivation_requires_fresh_validation",
+                "trial_rollback_requires_fresh_validation",
+            }
+            else 422
+        )
         raise HTTPException(status, detail={"code": code}) from None
 
 

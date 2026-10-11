@@ -21,7 +21,12 @@ from evoagent.learning.selection_evidence import adoption_contract_passed
 from evoagent.privacy.redaction import detect_sensitive
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
 from evoagent.skills.canonical import content_hash
-from evoagent.skills.health import HEALTH_POLICY, evaluate_health, persisted_health_observations
+from evoagent.skills.health import (
+    HEALTH_POLICY,
+    evaluate_health,
+    health_policy_supported,
+    persisted_health_observations,
+)
 from evoagent.skills.lifecycle import SkillStatus, SkillVersionStatus
 from evoagent.tasks.lease_guard import database_now
 
@@ -347,10 +352,9 @@ class SkillTrialService:
             unavailable |= (
                 version is None or version.lifecycle_status is SkillVersionStatus.REJECTED
             )
-            policy_invalid = (
-                trial.health_policy_snapshot != HEALTH_POLICY
-                or trial.health_policy_hash != content_hash(HEALTH_POLICY)
-            )
+            policy_invalid = not health_policy_supported(
+                trial.health_policy_snapshot
+            ) or trial.health_policy_hash != content_hash(trial.health_policy_snapshot)
             try:
                 await SkillAccessPolicy().check(
                     session,
@@ -380,6 +384,8 @@ class SkillTrialService:
                     "trial_id": str(trial.id),
                     "version_id": str(trial.version_id),
                     "reason": trial.suspension_reason,
+                    "frozen_policy_hash": trial.health_policy_hash,
+                    "current_policy_hash": content_hash(HEALTH_POLICY),
                 },
             )
             await session.commit()

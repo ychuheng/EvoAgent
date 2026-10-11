@@ -1,10 +1,11 @@
 """Deterministic trial health, using independent verified observations only."""
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
 
-HEALTH_POLICY = {
+HEALTH_POLICY_V1 = {
     "version": 1,
     "window_hours": 24,
     "consecutive_failures": 3,
@@ -12,6 +13,15 @@ HEALTH_POLICY = {
     "dedupe": "latest_feedback_per_run_then_latest_run_per_input",
     "ordering": "first_finished_at_then_run_id",
 }
+HEALTH_POLICY = deepcopy(HEALTH_POLICY_V1)
+
+# Activation uses the current policy; evaluation retains explicitly supported
+# frozen versions. A deployment upgrade must not reinterpret old trial rules.
+SUPPORTED_HEALTH_POLICIES = (deepcopy(HEALTH_POLICY_V1),)
+
+
+def health_policy_supported(policy):
+    return any(policy == supported for supported in SUPPORTED_HEALTH_POLICIES)
 
 
 @dataclass(frozen=True)
@@ -40,7 +50,7 @@ class TrialHealth:
 
 
 def evaluate_health(observations, *, trial_id, version_id, now, policy):
-    if policy != HEALTH_POLICY or now.tzinfo is None:
+    if not health_policy_supported(policy) or now.tzinfo is None:
         return TrialHealth("health_pending")
     cutoff = now - timedelta(hours=policy["window_hours"])
     relevant = []

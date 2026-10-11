@@ -35,6 +35,8 @@ async def test_unsupported_frozen_policy_is_audited_and_suspended_once(trial_can
             )
         )
         assert len(events) == 1
+        assert events[0].payload["frozen_policy_hash"] == trial.health_policy_hash
+        assert "current_policy_hash" in events[0].payload
 
 
 async def test_suspended_trial_cannot_reuse_old_report(trial_candidate):
@@ -53,6 +55,21 @@ async def test_suspended_trial_cannot_reuse_old_report(trial_candidate):
             "local-user",
             "retry old report",
         )
+
+
+async def test_current_policy_upgrade_does_not_suspend_supported_frozen_trial(
+    trial_candidate, monkeypatch
+):
+    import evoagent.skills.trials as trials
+
+    trial = await seed_binding(trial_candidate)
+    _, db, _, _, _, _ = trial_candidate
+    monkeypatch.setattr(trials, "HEALTH_POLICY", {**trials.HEALTH_POLICY, "version": 2})
+    service = SkillTrialService(db.session_factory, trial_enabled=True)
+    assert not await service.suspend_unavailable(trial.id)
+    assert (
+        await SkillUsageService(db.session_factory).evaluate_trial_health(trial.id)
+    ).status == "healthy"
 
 
 async def test_health_service_suspends_and_restart_is_idempotent(trial_candidate):

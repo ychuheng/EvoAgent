@@ -1,6 +1,7 @@
 """把 RuntimeEvent 追加到数据库的 EventSink 实现。"""
 
 import asyncio
+from collections import deque
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -19,13 +20,13 @@ from evoagent.core.runtime_metrics import observe_event_buffer
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.repository import check_run_references
 from evoagent.memory.schema import MemoryError
-from evoagent.skills.canonical import canonical_json
+from evoagent.skills.canonical import canonical_json, content_hash
 from evoagent.skills.selection import FormalSkillReader
 from evoagent.tasks.lease_guard import LeaseGuard
 
 
 class PersistentEventSink:
-    """每次 emit 使用短事务持久化事件，并保留本进程事件快照。"""
+    """短事务持久化事件；events 仅为最多 256 条 / 1 MiB 的诊断尾部。"""
 
     def __init__(
         self,
@@ -59,7 +60,9 @@ class PersistentEventSink:
         self._run_id = run_id
         self._session_factory = session_factory
         self._max_string_chars = max_string_chars
-        self._events: list[RuntimeEvent] = []
+        self._events: deque[RuntimeEvent] = deque()
+        self._event_sizes: deque[int] = deque()
+        self._diagnostic_bytes = 0
         self._lock = asyncio.Lock()
         self._batch_progress = batch_progress
         self._pending: list[dict] = []
@@ -79,7 +82,7 @@ class PersistentEventSink:
             self._accepted_watermark += 1
             self._flushed_watermark = self._accepted_watermark
             return ProgressReceipt(self._accepted_watermark, "committed")
-        clean = sanitize_payload(payload or {}, max_string_chars=self._max_string_chars)
+        clean = self._clean_payload(EventType.MODEL_DELTA, payload)
         if not isinstance(clean, dict):
             raise TypeError("event payload root must be a mapping")
         size = len(canonical_json(clean).encode())
@@ -151,7 +154,7 @@ class PersistentEventSink:
             self._pending_bytes = 0
             raise
         for record in records:
-            self._events.append(
+            self._remember(
                 RuntimeEvent(
                     run_id=self._run_id,
                     sequence=record.sequence,
@@ -203,10 +206,41 @@ class PersistentEventSink:
     def events(self) -> tuple[RuntimeEvent, ...]:
         return tuple(self._events)
 
+    def _remember(self, event: RuntimeEvent) -> None:
+        size = len(canonical_json(event.model_dump(mode="json")).encode())
+        if size > 1024 * 1024:
+            return
+        while self._events and (
+            len(self._events) >= 256 or self._diagnostic_bytes + size > 1024 * 1024
+        ):
+            self._events.popleft()
+            self._diagnostic_bytes -= self._event_sizes.popleft()
+        self._events.append(event)
+        self._event_sizes.append(size)
+        self._diagnostic_bytes += size
+
+    def _clean_payload(self, event_type, payload):
+        clean = sanitize_payload(payload or {}, max_string_chars=self._max_string_chars)
+        if not isinstance(clean, dict):
+            raise TypeError("event payload root must be a mapping")
+        if event_type is not EventType.MODEL_DELTA:
+            return clean
+        encoded = canonical_json(clean).encode()
+        if len(encoded) > 256 * 1024:
+            # Progress is diagnostic, never recovery evidence. Preserve a safe
+            # bounded preview and explicit truncation provenance, not raw text.
+            return {
+                "event_payload_truncated": True,
+                "sanitized_payload_bytes": len(encoded),
+                "sanitized_payload_hash": content_hash(clean),
+                "preview": encoded[:8192].decode("utf-8", errors="ignore"),
+            }
+        return clean
+
     async def emit(
         self, event_type: EventType, payload: Mapping[str, Any] | None = None
     ) -> RuntimeEvent:
-        clean_payload = sanitize_payload(payload or {}, max_string_chars=self._max_string_chars)
+        clean_payload = self._clean_payload(event_type, payload)
         if not isinstance(clean_payload, dict):
             raise TypeError("event payload root must be a mapping")
 
@@ -240,5 +274,5 @@ class PersistentEventSink:
                 timestamp=timestamp,
                 payload=clean_payload,
             )
-            self._events.append(event)
+            self._remember(event)
             return event

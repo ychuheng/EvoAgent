@@ -8,6 +8,18 @@ NOW = datetime(2026, 10, 9, 12, tzinfo=UTC)
 TRIAL, VERSION = uuid4(), uuid4()
 
 
+def test_supported_frozen_policy_survives_current_policy_upgrade(monkeypatch):
+    from copy import deepcopy
+
+    import evoagent.skills.health as policies
+
+    frozen = deepcopy(HEALTH_POLICY)
+    monkeypatch.setattr(policies, "HEALTH_POLICY", {**frozen, "version": 2})
+    assert policies.health_policy_supported(frozen)
+    assert health([observation(i) for i in range(3)], policy=frozen).status == "suspend"
+    assert health([], policy={**frozen, "version": 999}).status == "health_pending"
+
+
 def observation(index, **changes):
     return replace(
         HealthObservation(

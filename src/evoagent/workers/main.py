@@ -1,6 +1,7 @@
 """一次只处理一个租约任务的后台 Worker。"""
 
 import asyncio
+import time
 from contextlib import suppress
 from typing import Protocol
 from uuid import uuid4
@@ -86,6 +87,10 @@ class JobWorker:
             else None
         )
         self._background_recovery = False
+        self._recovery_failures = 0
+        self._recovery_retry_at = 0.0
+        self._recovery_backoff = 1.0
+        self._inline_recovery_ready = asyncio.Event()
 
     def stop(self) -> None:
         """请求 Worker 在当前短步骤结束后优雅停止。"""
@@ -115,7 +120,9 @@ class JobWorker:
                     self._presence.run(
                         self._worker_id,
                         self._stopping,
-                        ready=self._recovery.ready if self._recovery else None,
+                        ready=self._recovery.ready
+                        if self._recovery
+                        else self._inline_recovery_ready,
                     )
                 )
             )
@@ -160,6 +167,27 @@ class JobWorker:
                 await self._wakeup.wait(self._stopping, self._poll_seconds)
 
     async def run_once(self) -> bool:
+        if time.monotonic() < self._recovery_retry_at:
+            return False
+        try:
+            if not await self._scan_before_claim():
+                return False
+        except Exception:
+            # Only recovery failures are contained here; task handler failures
+            # retain their existing execution/fencing semantics.
+            self._recovery_failures += 1
+            self._inline_recovery_ready.clear()
+            self._recovery_retry_at = time.monotonic() + self._recovery_backoff
+            self._recovery_backoff = min(self._recovery_backoff * 2, 8)
+            if self._presence is not None:
+                with suppress(Exception):
+                    await self._presence.remove(self._worker_id)
+            return False
+        self._recovery_backoff = 1.0
+        self._inline_recovery_ready.set()
+        return await self._claim_and_execute()
+
+    async def _scan_before_claim(self) -> bool:
         if self._recovery is not None:
             if self._background_recovery:
                 if not await self._recovery.wait_ready(self._stopping):
@@ -170,6 +198,9 @@ class JobWorker:
             await self._lease_manager.promote_due_retries()
             await self._lease_manager.recover_expired()
             await self._lease_manager.recover_pending(schema_version=self._snapshot_schema_version)
+        return True
+
+    async def _claim_and_execute(self) -> bool:
         lease = await self._lease_manager.claim_next(self._worker_id)
         if lease is None:
             return False
