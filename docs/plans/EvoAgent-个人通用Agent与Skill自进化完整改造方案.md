@@ -682,7 +682,7 @@ L1 是第一批性能交付，L2 在数据表/新学习链路稳定后按热点�
 | O6 / L2 | LeaseGuard、UnitOfWork、PersistentToolMiddleware、ContextStore | 新增事务内 `UnitOfWork.ensure_lease(guard)`，同一 UoW 内复用 Task→Run 锁定结果，提交前复验 DB 时间/epoch/状态；复用只在同一短事务有效。独立事务各自校验，跨模型/工具 IO 后必须重新检查。先列重复访问清单，再合并具备相同业务原子边界的事件/状态写入，禁止机械合并所有事务 |
 | O7 / L2 | ContextResolver、SkillContextRenderer、SkillSelector | 复用已冻结 RunConfig、工具契约与不可变 Skill 渲染；增加有界 `SkillContextRenderer.render_cached(version,policy)`。缓存键包含 workspace/version_id/content_hash/schema/renderer/redaction policy；scope、active/trial、撤销和 trial 健康仍核验，通知只是加速失效提示 |
 | O8 / L2 | privacy.redaction、ArtifactInjectionGuard | 每个策略版本复用编译检测器，复用同 hash/同版本的已通过扫描结论；非 artifact 来源按 §2.1 当前约定复查，不偷偷新增“不检查”的 TTL。读取仍验证实际 bytes/hash、授权/撤销和 quarantine，安全扫描缓存不能授予访问权 |
-| O9 / L2 | PersistentCheckpointStore.save/load_latest、AgentLoop._save_checkpoint | `save_if_changed(state) -> bool`，同一 Run/epoch 完整规范状态摘要与最近**成功提交**的 checkpoint 相同才跳过冗余保存；仍执行必要 fencing/来源复验。不删已有恢复边界；状态含 usage/iteration/config/source 等，不只比较 messages。提交不确定、重启或切 epoch 清空本地比较值 |
+| O9 / L2 | PersistentCheckpointStore.save/load_latest、AgentLoop._save_checkpoint | 生产调用 `save(state) -> None`，由开关控制去重；`save_if_changed(state) -> None` 仅保留兼容委托。同一 Run/epoch 完整规范状态摘要与最近**成功提交**的 checkpoint 相同才跳过冗余保存；仍执行必要 fencing/来源复验。不删已有恢复边界；状态含 usage/iteration/config/source 等，不只比较 messages。提交不确定、重启或切 epoch 清空本地比较值 |
 | O10 / L2 | Retrieval/Trace API、RunEventRepository、维护查询 | 列表投影只查所需列，limit/cursor 分页；避免每行再查一次版本/来源的 N+1，必要引用批量加载但仍逐项校验。大 definition/完整 Trace 只在详情/导出取；导出有界分块，不把全库搬到内存 |
 | O11 / L2 | db/repositories、Alembic 后续性能迁移 | 先 EXPLAIN 固定查询，再核对任务状态/到期、job kind/status/next_attempt_at、Run 事件游标、学习 scope/status 的现有索引，补缺失复合/部分索引；不重复建已有索引、不猜效果。查询条件先过滤并限制批次，避免每轮全库扫描 |
 | O12 / L2 | LearningService、PersonalValidationService、EvalCoordinator/评测 CLI | 个人执行只加载必需的 Skill 选择/访问能力；提炼与验证后台按需装配，正式 Dataset/holdout/统计报告仅在正式入口加载。保留正式功能与测试，不启动无请求的评测扫描/向量重建，不因“隔离”再造一套 Worker/预算/队列 |
@@ -703,7 +703,7 @@ Worker 观察到持久化取消标志后，先置当前执行者的 stop 标志�
 ### 11.7 有界缓存、唤醒与部署的初始参数
 
 - Worker 每进程不可变渲染缓存：最多 128 项或 16 MiB，先到上限先淘汰；使用标准有界 LRU 实现，禁止缓存原始密钥、授权判定或擦除后的正文。撤销/擦除更新先禁用权威状态，再通知驱逐；通知丢失也不得靠缓存正文绕开状态校验。
-- 持久化 sink 诊断缓存后续最多 256 条或 1 MiB，消费者需要完整 Trace 时显式查库；当前 events 消费者迁移前保持兼容，不能直接截断离线评测结果。队列上限与批次值以 §11.1/§2.5 为准，不无限堆内存换吞吐。
+- 持久化 sink 诊断缓存最多 256 条且规范序列化总量不超过 1 MiB，超限淘汰最旧诊断，完整 Trace 查库；InMemoryEventSink 与离线 runner 保留完整 events。MODEL_DELTA 单条脱敏后规范正文上限 256 KiB；超限保存截断标记、安全摘要 hash、原安全字节数和最多 8192 bytes 的安全预览。批量预算仍为最多 64 KiB，大于批量预算但未超过单条上限时同步提交背压。关键恢复事件不套用进度截断规则。该预算不声称限制 Python 对象总内存或调用方构造输入的瞬时内存。
 - 运行心跳维持 10 秒，lease 维持现有配置关系；lease 到期后恢复发现新增延迟目标 P95≤3 秒（无恢复积压的固定测试环境），不是宣称崩溃后三秒接管。发现+领取+模型/工具重建的完整延迟分别记录。
 
   O4 同时必须测固定积压 N=100/500/1000，以及单/双 Worker、持续新增可恢复记录、锁竞争和三类扫描混合负载。每类轮流扫描、每批≤50，积压续批仍让出事件循环；查询排序固定为到期时间＋ID（pending 类型使用稳定创建时间＋ID），不能反复选同一未推进记录而饿死老项。暂时无法取得锁的记录单列，不从分母静默删除。
