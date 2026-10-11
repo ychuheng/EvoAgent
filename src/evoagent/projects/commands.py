@@ -28,6 +28,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from evoagent.projects.cgroup_pids import command_pids
 from evoagent.projects.schema import resolve_inside_root
 from evoagent.tools.base import ToolExecutionError, ToolPermissionError
 
@@ -296,11 +297,13 @@ async def run_command(
     memory_limit_bytes: int = 1_073_741_824,
     max_processes: int = DEFAULT_MAX_PROCESSES,
     trusted_host_mode: bool = False,
+    cgroup_root: Path | None = None,
+    require_hard_pids: bool = False,
 ) -> CommandOutcome:
     """执行一次结构化命令并返回结构化结果；超时或越界都以异常或字段如实表达。
 
-    进程数上限是**父进程按会话实施的进程树配额**（见 `_watch_process_tree`）：超限即
-    杀掉整条命令的进程组，`process_limit_exceeded` 如实置位。这里**没有**用内核的
+    默认进程数上限是父进程按会话实施的软限制；配置 cgroup_root 后在用户 argv
+    前加入独立的 pids v2 硬配额（含线程），并回收遗留后代。这里没有用内核的
     `RLIMIT_NPROC`，因为它的计数是全 user namespace 共享的（同机同 UID 的其它容器
     也算在内），做不了 per-command 配额；原委记在 `_watch_process_tree` 的文档里。
     """
@@ -345,76 +348,80 @@ async def run_command(
 
     environment = build_environment(allow_network=spec.allow_network, extra=environment_extra)
     started = time.perf_counter()
-    with tempfile.TemporaryDirectory(prefix="evoagent-command-") as scratch:
-        environment["TMPDIR"] = scratch
-        environment["TEMP"] = scratch
-        environment["TMP"] = scratch
-        runner_argv = (
-            sys.executable,
-            "-m",
-            "evoagent.projects.command_runner",
-            str(root.resolve()),
-            scratch,
-            str(max(1, int(timeout_seconds) + 1)),
-            str(memory_limit_bytes),
-            "online" if spec.allow_network else "offline",
-            "--",
-            *argv,
-        )
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *runner_argv,
-                cwd=str(cwd),
-                env=environment,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                start_new_session=True,
+    async with command_pids(cgroup_root, max_processes, required=require_hard_pids) as quota:
+        with tempfile.TemporaryDirectory(prefix="evoagent-command-") as scratch:
+            environment["TMPDIR"] = scratch
+            environment["TEMP"] = scratch
+            environment["TMP"] = scratch
+            runner_argv = (
+                sys.executable,
+                "-m",
+                "evoagent.projects.command_runner",
+                str(root.resolve()),
+                scratch,
+                str(max(1, int(timeout_seconds) + 1)),
+                str(memory_limit_bytes),
+                "online" if spec.allow_network else "offline",
+                *((str(quota.path),) if quota else ()),
+                "--",
+                *argv,
             )
-        except (OSError, ValueError) as error:
-            raise ToolExecutionError(f"命令无法启动：{error}") from error
-        timed_out = False
-        process_limit_exceeded = False
-        watcher_reason: str | None = None
-        # Drain both pipes continuously but retain bounded bytes. Truncating only
-        # after communicate() allowed a noisy child to exhaust Worker memory.
-        drain = asyncio.ensure_future(_communicate_bounded(process, output_limit))
-        watcher = asyncio.ensure_future(_watch_process_tree(process, max_processes, drain))
-        try:
-            stdout, stderr, stdout_limited, stderr_limited = await asyncio.wait_for(
-                asyncio.shield(drain), timeout=timeout_seconds
-            )
-        except TimeoutError:
-            timed_out = True
-            _kill_session(process)
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *runner_argv,
+                    cwd=str(cwd),
+                    env=environment,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
+                )
+            except (OSError, ValueError) as error:
+                raise ToolExecutionError(f"命令无法启动：{error}") from error
+            timed_out = False
+            process_limit_exceeded = False
+            watcher_reason: str | None = None
+            # Drain both pipes continuously but retain bounded bytes. Truncating only
+            # after communicate() allowed a noisy child to exhaust Worker memory.
+            drain = asyncio.ensure_future(_communicate_bounded(process, output_limit))
+            watcher = asyncio.ensure_future(_watch_process_tree(process, max_processes, drain))
             try:
                 stdout, stderr, stdout_limited, stderr_limited = await asyncio.wait_for(
-                    drain, timeout=5
+                    asyncio.shield(drain), timeout=timeout_seconds
                 )
-            except (TimeoutError, ProcessLookupError):  # pragma: no cover - 强杀兜底
-                stdout, stderr = b"", b""
-                stdout_limited = stderr_limited = False
-        except asyncio.CancelledError:
-            _kill_session(process)
-            cleanup = asyncio.create_task(_finish_cancelled_command(process, drain))
-            try:
-                await asyncio.shield(cleanup)
+            except TimeoutError:
+                timed_out = True
+                _kill_session(process)
+                try:
+                    stdout, stderr, stdout_limited, stderr_limited = await asyncio.wait_for(
+                        drain, timeout=5
+                    )
+                except (TimeoutError, ProcessLookupError):  # pragma: no cover - 强杀兜底
+                    stdout, stderr = b"", b""
+                    stdout_limited = stderr_limited = False
             except asyncio.CancelledError:
-                await cleanup
-            raise
-        finally:
-            if watcher.done() and not watcher.cancelled():
-                watcher_reason = watcher.result()
-            watcher.cancel()
-            with suppress(asyncio.CancelledError):
-                await watcher
-        process_limit_exceeded = watcher_reason == "process_limit"
-        if watcher_reason == "unobservable":
-            # 监控期间失去可观测性：进程组已被终止，这里如实报不可观测，
-            # 不把"看不见"当成"没超限"。
-            raise CommandUnobservableError("运行期间失去进程树可观测性，已终止该命令的进程组")
-        if process.returncode == 125 and b"EVOAGENT_COMMAND_SETUP_FAILED:" in stderr:
-            raise ToolExecutionError(stderr.decode("utf-8", errors="replace").strip())
+                _kill_session(process)
+                cleanup = asyncio.create_task(_finish_cancelled_command(process, drain))
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    await cleanup
+                raise
+            finally:
+                if watcher.done() and not watcher.cancelled():
+                    watcher_reason = watcher.result()
+                watcher.cancel()
+                with suppress(asyncio.CancelledError):
+                    await watcher
+            process_limit_exceeded = watcher_reason == "process_limit"
+            if watcher_reason == "unobservable":
+                # 监控期间失去可观测性：进程组已被终止，这里如实报不可观测，
+                # 不把"看不见"当成"没超限"。
+                raise CommandUnobservableError("运行期间失去进程树可观测性，已终止该命令的进程组")
+            if process.returncode == 125 and b"EVOAGENT_COMMAND_SETUP_FAILED:" in stderr:
+                raise ToolExecutionError(stderr.decode("utf-8", errors="replace").strip())
+            if quota:
+                process_limit_exceeded = process_limit_exceeded or quota.exceeded()
     duration = time.perf_counter() - started
 
     text_out, out_truncated = _decode(stdout, output_limit, truncated=stdout_limited)

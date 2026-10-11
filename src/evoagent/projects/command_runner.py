@@ -196,8 +196,12 @@ def main() -> int:
         memory_bytes = int(sys.argv[4])
         offline = sys.argv[5] == "offline"
         command = sys.argv[separator + 1 :]
-        if not command or separator != 6 or not sys.platform.startswith("linux"):
+        if not command or separator not in (6, 7) or not sys.platform.startswith("linux"):
             raise RuntimeError("invalid command runner invocation")
+        if separator == 7:
+            from evoagent.projects.cgroup_pids import join_command_group
+
+            join_command_group(sys.argv[6])
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
         resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
         _landlock(project, scratch)

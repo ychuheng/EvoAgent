@@ -8,7 +8,11 @@ from dotenv import dotenv_values
 from pydantic import ValidationError
 
 from evoagent.config import Settings
-from evoagent.projects.readiness import REASON_UNOBSERVABLE, ProjectCommandReadinessProbe
+from evoagent.projects.readiness import (
+    REASON_HARD_PIDS,
+    REASON_UNOBSERVABLE,
+    ProjectCommandReadinessProbe,
+)
 
 REQUIRED = (
     "EVOAGENT_API_KEY",
@@ -113,6 +117,11 @@ def main() -> int:
     # UID 与命名空间里的预检；两者共用同一个 probe，结论不互为证明。
     result = ProjectCommandReadinessProbe().check(settings)
     print(f"host command readiness: {result.reason} — {result.detail}")
+    if result.reason == REASON_HARD_PIDS:
+        print(
+            "host check failed: delegated per-command cgroup v2 quota unavailable; command disabled"
+        )
+        return 2
     if result.reason == REASON_UNOBSERVABLE:
         print(
             "host check failed: 该宿主上无法观测会话进程数，项目命令不会在 Worker 中注册；"

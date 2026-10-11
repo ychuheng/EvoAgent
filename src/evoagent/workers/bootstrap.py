@@ -22,7 +22,7 @@ from evoagent.db.session import Database
 from evoagent.memory.maintenance import MaintenanceWorker
 from evoagent.memory.schema import MemoryError as ContextAuthorizationError
 from evoagent.projects.inputs import InputChangedError
-from evoagent.projects.readiness import REASON_UNOBSERVABLE, ProjectCommandReadinessProbe
+from evoagent.projects.readiness import ProjectCommandReadinessProbe
 from evoagent.projects.schema import ProjectAuthorizationRevoked
 from evoagent.providers.base import ModelProvider, ProviderError
 from evoagent.providers.mock import MockProvider
@@ -387,7 +387,7 @@ class ConfiguredTaskHandler:
         readiness = ProjectCommandReadinessProbe().check(self._settings)
         command_tools = (
             []
-            if readiness.reason == REASON_UNOBSERVABLE
+            if not readiness.ready
             else project_command_tools(
                 root,
                 authorization=project.authorization,
@@ -398,6 +398,8 @@ class ConfiguredTaskHandler:
                 max_processes=self._settings.project_command_max_processes,
                 environment=self._settings.project_command_environment,
                 trusted_host_mode=self._settings.trusted_host_mode,
+                cgroup_root=self._settings.project_command_cgroup_root,
+                require_hard_pids=self._settings.project_command_require_hard_pids,
             )
         )
         return [

@@ -124,8 +124,11 @@ class Settings(BaseSettings):
     project_command_memory_bytes: int = Field(
         default=1_073_741_824, ge=134_217_728, le=4_294_967_296
     )
-    # 一条命令的进程树规模上限（含它自己）：内核 RLIMIT_NPROC 与父进程的会话计数两层都用它。
+    # Per-command kernel pids quota needs a separately delegated cgroup v2 root.
+    # The existing /proc monitor alone is a soft limit, never RLIMIT_NPROC.
     project_command_max_processes: int = Field(default=256, ge=8, le=4_096)
+    project_command_cgroup_root: Path | None = None
+    project_command_require_hard_pids: bool = False
     # 命令契约允许显式设置的环境变量（例如 PYTHONPATH=src）；
     # 这是"部署者预先声明"的集合，模型不能自行指定环境变量。
     project_command_environment: dict[str, str] = Field(default_factory=dict)
@@ -237,6 +240,11 @@ class Settings(BaseSettings):
         """仅在使用真实模型服务时要求提供连接信息。"""
 
         if self.trusted_host_mode:
+            if (
+                self.project_command_cgroup_root is not None
+                or self.project_command_require_hard_pids
+            ):
+                raise ValueError("trusted host mode cannot provide Linux hard pids quotas")
             if os.name != "nt":
                 raise ValueError("trusted host mode requires a Windows process")
             if self.api_host not in {"127.0.0.1", "localhost", "::1"}:

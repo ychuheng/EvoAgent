@@ -73,6 +73,8 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
         max_processes: int = DEFAULT_MAX_PROCESSES,
         environment: dict[str, str] | None = None,
         trusted_host_mode: bool = False,
+        cgroup_root: Path | None = None,
+        require_hard_pids: bool = False,
     ) -> None:
         self._root = root
         self._allowlist = allowlist
@@ -82,6 +84,7 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
         self._max_processes = max_processes
         self._environment = dict(environment or {})
         self._trusted_host_mode = trusted_host_mode
+        self._cgroup_root, self._require_hard_pids = cgroup_root, require_hard_pids
         if trusted_host_mode:
             self.description = (
                 "Run an allowlisted program on the Windows host in the authorized directory. "
@@ -126,6 +129,8 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             max_processes=self._max_processes,
             environment_extra=self._environment,
             trusted_host_mode=self._trusted_host_mode,
+            cgroup_root=self._cgroup_root,
+            require_hard_pids=self._require_hard_pids,
         )
         payload = {
             "program": outcome.program,
@@ -142,6 +147,13 @@ class ProjectCommandTool(BaseTool[RunCommandArguments]):
             "return_code": outcome.return_code,
             "timed_out": outcome.timed_out,
             "process_limit_exceeded": outcome.process_limit_exceeded,
+            "process_quota": (
+                "trusted_host"
+                if self._trusted_host_mode
+                else "cgroup_v2_hard"
+                if self._cgroup_root
+                else "session_soft"
+            ),
             "duration_seconds": outcome.duration_seconds,
             "stdout": outcome.stdout,
             "stderr": outcome.stderr,
@@ -164,6 +176,8 @@ def project_command_tools(
     max_processes: int = DEFAULT_MAX_PROCESSES,
     environment: dict[str, str] | None = None,
     trusted_host_mode: bool = False,
+    cgroup_root: Path | None = None,
+    require_hard_pids: bool = False,
 ) -> list[BaseTool]:
     """装配命令工具；只读授权或空白名单时返回空列表。"""
 
@@ -179,5 +193,7 @@ def project_command_tools(
             max_processes=max_processes,
             environment=environment,
             trusted_host_mode=trusted_host_mode,
+            cgroup_root=cgroup_root,
+            require_hard_pids=require_hard_pids,
         )
     ]
