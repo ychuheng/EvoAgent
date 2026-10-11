@@ -15,3 +15,7 @@ tmp
 workspace
 tests
 docs
+
+# 私有简历不进入构建上下文
+personal
+个人简历-*.pdf

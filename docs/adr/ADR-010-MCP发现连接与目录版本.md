@@ -2,7 +2,7 @@
 
 - 日期：2026-09-21
 - 状态：模块 8 已实现，本地 stdio/HTTP fixture 已验收
-- 关联：[阶段四指南](../archive/阶段四-记忆检索与协议扩展架构与实现指南.md)、[模块 8 运行说明](../archive/阶段四-模块8验收与运行说明.md)
+- 关联：[阶段四指南](../archive/阶段四-记忆检索与协议扩展架构与实现指南.md)、[模块 8 运行说明](https://github.com/ychuheng/EvoAgent/blob/d6aa1cfd449717b10141a36566610a00ce52c7eb/docs/archive/%E9%98%B6%E6%AE%B5%E5%9B%9B-%E6%A8%A1%E5%9D%978%E9%AA%8C%E6%94%B6%E4%B8%8E%E8%BF%90%E8%A1%8C%E8%AF%B4%E6%98%8E.md)
 
 ## 背景与边界
 

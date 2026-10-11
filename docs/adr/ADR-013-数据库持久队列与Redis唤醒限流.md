@@ -30,6 +30,6 @@ Redis Pub/Sub 只发送 `scan`。QueueSession 完成数据库 commit 后才 best
 
 ## 验证
 
-真实 PostgreSQL 的两个 Worker 进程使用相同标签完成任务；Redis 两个连接争抢同一配额；回滚不发布；限流 checkpoint 恢复；相同 Eval owner 接管后拒绝旧 epoch。命令和证据见[运行说明](../archive/阶段四-模块11至12验收与运行说明.md)。
+真实 PostgreSQL 的两个 Worker 进程使用相同标签完成任务；Redis 两个连接争抢同一配额；回滚不发布；限流 checkpoint 恢复；相同 Eval owner 接管后拒绝旧 epoch。命令和证据见[运行说明](https://github.com/ychuheng/EvoAgent/blob/d6aa1cfd449717b10141a36566610a00ce52c7eb/docs/archive/%E9%98%B6%E6%AE%B5%E5%9B%9B-%E6%A8%A1%E5%9D%9711%E8%87%B312%E9%AA%8C%E6%94%B6%E4%B8%8E%E8%BF%90%E8%A1%8C%E8%AF%B4%E6%98%8E.md)。
 
 参考：[Redis Pub/Sub](https://redis.io/docs/latest/develop/pubsub/)、[Redis Lua 脚本执行](https://redis.io/docs/latest/develop/programmability/eval-intro/)。

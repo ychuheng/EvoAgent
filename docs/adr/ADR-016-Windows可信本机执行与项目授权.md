@@ -24,4 +24,4 @@ Docker 个人模式把宿主项目映射到 `/app/projects`，可以在 Linux Wo
 
 - [本机启动入口](../../scripts/host_mode.py)、[配置校验](../../src/evoagent/config.py)、[任务授权覆盖](../../src/evoagent/tasks/service.py)
 - [本机命令执行](../../src/evoagent/projects/commands.py)、[命令工具风险](../../src/evoagent/tools/builtin/project_command.py)
-- [开发验证](../evaluations/Windows可信本机模式开发验证-2026-09-28.md)、[操作说明](../可信本机模式.md)、[安全边界](../安全边界说明.md)
+- [开发验证](../evaluations/Windows可信本机模式开发验证-2026-09-28.md)、[操作说明](../guides/可信本机模式.md)、[安全边界](../guides/安全边界说明.md)

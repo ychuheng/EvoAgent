@@ -32,3 +32,7 @@ tmp/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 本地运行产物与私有简历资料
+output/
+personal/
