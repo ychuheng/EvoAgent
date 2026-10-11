@@ -1,0 +1,75 @@
+{
+  "returncode": 0,
+  "elapsed_seconds": 110.12426099998993,
+  "cases": [
+    {
+      "name": "test_api_task_survives_killed_worker[False-readonly]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_api_task_survives_killed_worker[False-committed]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_api_task_survives_killed_worker[False-unknown]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_api_task_survives_killed_worker[True-readonly]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_api_task_survives_killed_worker[True-committed]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_api_task_survives_killed_worker[True-unknown]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_two_real_worker_processes_same_label[False]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_two_real_worker_processes_same_label[True]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_demo_real_redis_outage_keeps_db_task",
+      "status": "passed",
+      "evidence": {
+        "database_task_claimed": true,
+        "notification_failure_tolerated": true,
+        "external_dispatches": 0,
+        "fault": "real loopback connection refused",
+        "terminal": "failed"
+      }
+    },
+    {
+      "name": "test_cleanup_lane_is_not_blocked_by_candidate_generation[sqlite]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_cleanup_lane_is_not_blocked_by_candidate_generation[postgres]",
+      "status": "passed",
+      "evidence": {}
+    },
+    {
+      "name": "test_two_scanners_do_not_duplicate_decisions[postgres]",
+      "status": "passed",
+      "evidence": {}
+    }
+  ],
+  "complete": true,
+  "measurement_kind": "separate fault contract tests, not latency percentiles",
+  "paid_calls": 0
+}
