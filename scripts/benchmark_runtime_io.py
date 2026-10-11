@@ -26,6 +26,7 @@ from sqlalchemy.engine import make_url
 from evoagent.config import Settings
 from evoagent.core.context import ContextBuilder
 from evoagent.core.models import FinishReason, Message, MessageRole, ModelResponse, ToolCall
+from evoagent.core.runtime_metrics import collect_runtime_metrics
 from evoagent.db.base import Base
 from evoagent.db.models import (
     ArtifactRecord,
@@ -489,8 +490,9 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                     family="general",
                 )
                 ack_ms = (time.perf_counter_ns() - started) / 1e6
-                async with RuntimeResourceProbe() as resources:
-                    assert await worker.run_once(), "benchmark task was not claimed"
+                with collect_runtime_metrics() as runtime_metrics:
+                    async with RuntimeResourceProbe() as resources:
+                        assert await worker.run_once(), "benchmark task was not claimed"
                 elapsed = (time.perf_counter_ns() - started) / 1e6
                 measured = dict(sql)
                 async with db.session_factory() as session:
@@ -570,7 +572,7 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                     "artifact_content_bytes": artifact_bytes,
                     "server_lock_wait_ms": None,
                     "query_result_wire_bytes": None,
-                    "event_buffer_peak_bytes": None,
+                    **runtime_metrics.report(),
                     "sql_wait_ms": measured.pop("sql_wait_ns", 0) / 1e6,
                     **measured,
                     "selected_versions": len(selected),
@@ -716,7 +718,9 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                 "RSS is 10ms sampled parent-process memory, not an exact peak or child total.",
                 "JSON bytes are canonical content; artifact bytes use persisted size metadata.",
                 "SELECT rows use driver rowcount; unavailable counts are explicitly recorded.",
-                "Server lock wait, result wire bytes and event buffer peak are unmeasured nulls.",
+                "Server lock wait and result wire bytes are unmeasured nulls. Event buffer "
+                "peak counts sanitized canonical payload bytes, not Python heap. Cache "
+                "counters cover exact scanner lookups only, not all runtime caches.",
             ],
         }
     finally:

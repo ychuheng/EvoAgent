@@ -15,6 +15,7 @@ from evoagent.core.events import (
     sanitize_payload,
 )
 from evoagent.core.models import EventType, RuntimeEvent
+from evoagent.core.runtime_metrics import observe_event_buffer
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.repository import check_run_references
 from evoagent.memory.schema import MemoryError
@@ -78,6 +79,7 @@ class PersistentEventSink:
                 dict(event_type=event_type.value, payload=clean, created_at=datetime.now(UTC))
             )
             self._pending_bytes += size
+            observe_event_buffer(self._pending_bytes)
             self._accepted_watermark += 1
             if len(self._pending) >= 32 or self._pending_bytes >= 64 * 1024:
                 await self._flush_locked()

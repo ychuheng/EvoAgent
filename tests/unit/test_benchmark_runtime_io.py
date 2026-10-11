@@ -51,6 +51,13 @@ async def test_runtime_matrix_measures_real_task_effects_and_skill_selection(tmp
         assert row["event_loop_lag_max_ms"] >= 0
         assert row["server_lock_wait_ms"] is None
         assert row["query_result_wire_bytes"] is None
+        assert 0 <= row["event_buffer_peak_bytes"] <= 64 * 1024
+        assert row["scan_cache_hits"] >= 0
+        assert row["scan_cache_misses"] >= 0
+        assert row["scan_cache_evictions"] >= 0
+        if not row["optimized"]:
+            assert row["event_buffer_peak_bytes"] == 0
+            assert row["scan_cache_hits"] == row["scan_cache_misses"] == 0
         assert row["selected_versions"] == (1 if row["family"] == "enabled_skill" else 0)
         if row["family"] == "read_edit_recheck":
             assert row["tool_names"] == ["edit_file", "file_read", "file_read"]

@@ -14,6 +14,7 @@ from pathlib import Path
 from time import monotonic
 from weakref import WeakKeyDictionary
 
+from evoagent.core.runtime_metrics import observe_scan_cache
 from evoagent.privacy.redaction import POLICY_VERSION, SENSITIVE_CATEGORIES, RedactionResult
 
 
@@ -76,8 +77,10 @@ class BoundedScanner:
         if deadline is not None and monotonic() >= deadline:
             raise ScanUnavailable("scan_timeout")
         if key in self._safe_results:
+            observe_scan_cache(hit=True)
             self._safe_results.move_to_end(key)
             return self._safe_results[key]
+        observe_scan_cache(miss=True)
         result = await self.scan(text, limits, deadline=deadline)
         if not result.categories and result.policy_version == POLICY_VERSION:
             self._safe_results[key] = RedactionResult(
@@ -86,6 +89,7 @@ class BoundedScanner:
             self._safe_results.move_to_end(key)
             while len(self._safe_results) > 256:
                 self._safe_results.popitem(last=False)
+                observe_scan_cache(eviction=True)
         return result
 
     def command(self, limits):

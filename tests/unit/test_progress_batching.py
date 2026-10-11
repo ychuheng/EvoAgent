@@ -9,12 +9,14 @@ from sqlalchemy import select
 
 from evoagent.core.events import InvalidProgressEvent, ProgressEventType
 from evoagent.core.models import EventType
+from evoagent.core.runtime_metrics import collect_runtime_metrics
 from evoagent.db.base import Base
 from evoagent.db.models import RunRecord, SessionRecord, TaskRecord
 from evoagent.db.repositories.events import RunEventRepository
 from evoagent.db.session import Database
 from evoagent.db.unit_of_work import UnitOfWork
 from evoagent.memory.schema import MemoryError
+from evoagent.skills.canonical import canonical_json
 from evoagent.tasks.lease_guard import LeaseLostError
 from evoagent.trace.persistent_sink import PersistentEventSink
 
@@ -53,6 +55,22 @@ async def event_db(tmp_path, request):
 async def rows(db, run_id):
     async with db.session_factory() as session:
         return await RunEventRepository(session).list_for_run(run_id)
+
+
+async def test_buffer_peak_survives_immediate_threshold_flush(event_db):
+    db, run_id = event_db
+    sink = PersistentEventSink(run_id, db.session_factory, batch_progress=True)
+    try:
+        with collect_runtime_metrics() as metrics:
+            for _ in range(32):
+                await sink.append_progress(ProgressEventType.MODEL_DELTA, {"text": "中文"})
+            assert sink._pending_bytes == 0
+            assert metrics.event_buffer_peak_bytes == 32 * len(
+                canonical_json({"text": "中文"}).encode()
+            )
+            assert len(await rows(db, run_id)) == 32
+    finally:
+        await sink.close()
 
 
 async def test_off_matches_legacy_emit_byte_for_byte(event_db):
