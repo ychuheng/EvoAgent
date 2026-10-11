@@ -144,6 +144,22 @@ async def test_three_frozen_sources_generate_one_draft_and_retain_all_revocation
             await SkillAccessPolicy().check(
                 session, candidate.id, workspace_id=trial_candidate[-1].workspace_id
             )
+    from scripts.personal_skill_evolution_dev import emit_evidence
+
+    emit_evidence(
+        "repeat-failure-aggregation",
+        {
+            "request_id": request.id,
+            "base_version_id": version.id,
+            "candidate_version_id": candidate.id,
+            "candidate_content_hash": candidate.content_hash,
+            "sources": request.policy_snapshot["revision_aggregation"]["sources"],
+            "generator_source_count": len(generator.seen),
+            "candidate_status": "draft",
+            "trial_eligible": False,
+            "revoked_source_blocks_access": True,
+        },
+    )
 
 
 @pytest.mark.parametrize("consent,independent", [(False, True), (True, False)])

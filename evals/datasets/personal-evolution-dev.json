@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "data_role": "dev",
+  "scenarios": ["reuse-revision-brake", "repeat-failure-aggregation"]
+}

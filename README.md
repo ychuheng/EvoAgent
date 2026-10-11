@@ -6,6 +6,10 @@ EvoAgent 是一个通过本地网页使用的个人 Agent。你用自然语言�
 
 它还提供 Skill 的提炼、评测、人工发布和回滚流程，让可复用的任务做法能够受控地沉淀下来。**这套机制已经实现，但 Skill 能否稳定提高真实任务的完成质量尚未得到正式验证。**
 
+个人学习入口支持从授权经验和明确反馈生成候选、以新输入验证、限定试用、实际使用判据、重复技能失败自动挂起，再从纠正反馈生成新修订。重复问题的自动提炼须开启 `suggest` 策略，并满足来源冻结、逐条同意学习、独立输入、配额和冷却条件；候选不会自动启用。离线机制证据与真实模型效果分开，见[当前状态](docs/当前状态.md)和[个人学习操作说明](docs/个人模式操作手册.md)。
+
+开发者可显式运行 `python scripts/personal_skill_evolution_dev.py --fixture evals/datasets/personal-evolution-dev.json --output output/personal-evolution-dev.json`，在测试临时数据库中复现复用、纠正修订、挂起及多 Run 聚合。脚本导出实际对象 ID/hash，Provider 与人工判据均为合成 fixture，付费调用为 0；它不是收益评测。
+
 ## 从哪里使用
 
 项目提供两个网页运行方式，界面和任务流程相近，操作文件与命令的位置不同：

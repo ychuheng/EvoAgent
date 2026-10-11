@@ -273,3 +273,40 @@ async def test_actual_personal_use_feedback_and_three_failures_stop_next_adoptio
         assert (
             await session.get(SkillVersionRecord, trial.version_id)
         ).definition == original_definition
+    from scripts.personal_skill_evolution_dev import emit_evidence
+
+    async with db.session_factory() as session:
+        stages = list(await session.scalars(select(LearningRequestRecord)))
+        used_runs = list(await session.scalars(select(RunRecord).where(RunRecord.id.in_(runs))))
+    emit_evidence(
+        "reuse-revision-brake",
+        {
+            "run_ids": runs,
+            "input_fingerprints": [item.input_fingerprint for item in observed],
+            "trial_id": trial.id,
+            "base_version_id": trial.version_id,
+            "base_content_hash": version.content_hash,
+            "revision_request_id": revision_id,
+            "learning_stages": [
+                {
+                    "request_id": item.id,
+                    "kind": item.request_kind,
+                    "status": item.status,
+                    "candidate_version_id": item.candidate_version_id,
+                    "validation_experiment_id": item.validation_experiment_id,
+                    "request_body_hash": item.request_body_hash,
+                    "policy_hash": item.policy_hash,
+                }
+                for item in stages
+            ],
+            "run_config_hashes": {str(item.id): item.config_hash for item in used_runs},
+            "revision_version_id": candidate.id,
+            "revision_content_hash": candidate.content_hash,
+            "ordinary_tool": "file_write",
+            "ordinary_dispatch_count": len(model_requests),
+            "verified_independent_failures": len(observed),
+            "trial_status": "suspended",
+            "review_status": reviewed.json()["status"],
+            "new_revision_automatically_activated": False,
+        },
+    )
