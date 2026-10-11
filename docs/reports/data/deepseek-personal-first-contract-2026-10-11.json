@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "git_sha": "f06b6d1eeb8e95e22ae502df23a80901c4c09dad",
+  "authorized_limit_micros": 10000000,
+  "dispatch_envelope_micros": 8000000,
+  "reserve_per_call_micros": 500000,
+  "model": "deepseek-flash",
+  "input_price_upper_micros": 2000000,
+  "output_price_upper_micros": 8000000,
+  "calls": [
+    {
+      "index": 1,
+      "input_json_bytes": 15186,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": false
+    },
+    {
+      "index": 2,
+      "input_json_bytes": 9874,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": false
+    },
+    {
+      "index": 3,
+      "input_json_bytes": 15186,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4213,
+      "output_tokens": 51,
+      "cost_upper_micros": 8834
+    },
+    {
+      "index": 4,
+      "input_json_bytes": 15989,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4417,
+      "output_tokens": 196,
+      "cost_upper_micros": 10402
+    },
+    {
+      "index": 5,
+      "input_json_bytes": 17391,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4861,
+      "output_tokens": 50,
+      "cost_upper_micros": 10122
+    },
+    {
+      "index": 6,
+      "input_json_bytes": 15186,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4209,
+      "output_tokens": 74,
+      "cost_upper_micros": 9010
+    },
+    {
+      "index": 7,
+      "input_json_bytes": 16795,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4612,
+      "output_tokens": 39,
+      "cost_upper_micros": 9536
+    },
+    {
+      "index": 8,
+      "input_json_bytes": 17526,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4804,
+      "output_tokens": 178,
+      "cost_upper_micros": 11032
+    },
+    {
+      "index": 9,
+      "input_json_bytes": 18856,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 5230,
+      "output_tokens": 48,
+      "cost_upper_micros": 10844
+    },
+    {
+      "index": 10,
+      "input_json_bytes": 9874,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 2726,
+      "output_tokens": 47,
+      "cost_upper_micros": 5828
+    },
+    {
+      "index": 11,
+      "input_json_bytes": 10636,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 2947,
+      "output_tokens": 67,
+      "cost_upper_micros": 6430
+    },
+    {
+      "index": 12,
+      "input_json_bytes": 11135,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 3065,
+      "output_tokens": 23,
+      "cost_upper_micros": 6314
+    },
+    {
+      "index": 13,
+      "input_json_bytes": 23051,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 6251,
+      "output_tokens": 2048,
+      "cost_upper_micros": 28886
+    },
+    {
+      "index": 14,
+      "input_json_bytes": 10055,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 2770,
+      "output_tokens": 55,
+      "cost_upper_micros": 5980
+    },
+    {
+      "index": 15,
+      "input_json_bytes": 10832,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 2972,
+      "output_tokens": 99,
+      "cost_upper_micros": 6736
+    },
+    {
+      "index": 16,
+      "input_json_bytes": 11518,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 3142,
+      "output_tokens": 73,
+      "cost_upper_micros": 6868
+    },
+    {
+      "index": 17,
+      "input_json_bytes": 14204,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 3838,
+      "output_tokens": 359,
+      "cost_upper_micros": 10548
+    }
+  ],
+  "cases": [
+    {
+      "family": "coding",
+      "task_id": "80fd8497-bd54-4a10-a3ce-db70eb3f1dfc",
+      "run_id": "c23ebf60-ee29-4ba6-b1a1-8c5d527eab32",
+      "independent_fixture_hash": "a53445baaa81d87ddc3ed28d2998b481ec26abdaa28d543a643dc596925491d7",
+      "status": "failed",
+      "error_code": "input_changed",
+      "config_hash": "sha256:5b2e75ad4f2a18818e6a256168f7a85fc1676fda4c5f8089097d19f1eee47c5a",
+      "final_answer": "",
+      "mechanical_passed": false,
+      "human_review": "not_substituted_by_script"
+    },
+    {
+      "family": "data",
+      "task_id": "9739f6bd-6995-48f6-bd23-f6ad2f5ebd79",
+      "run_id": "ca31a5cc-e859-4042-8d14-def8f5506a12",
+      "independent_fixture_hash": "f381389cd6b856c6db200c160e8e17e5c24ae8d4309b358eae1a1c98d7dd8fb4",
+      "status": "completed",
+      "error_code": null,
+      "config_hash": "sha256:bf463522334d87afd1a3acc33c3c4172a59336c11ccf461a90ffd1417ed77784",
+      "final_answer": "```json\n{\"ids\": [\"0007\", \"0103\"], \"total\": \"5.00\"}\n```",
+      "mechanical_passed": true,
+      "human_review": "not_substituted_by_script",
+      "learning_request_id": "f4662da9-77c4-4f9b-9726-9667485eab2d",
+      "candidate_status": "failed",
+      "candidate_error": "learning_CandidateGenerationError",
+      "candidate_version_id": null
+    },
+    {
+      "family": "research",
+      "task_id": "f3b9f902-c8dd-48d3-b9f4-34c853f0d99f",
+      "run_id": "b3117c7e-19e7-4b58-a0a0-c858cd8b0b43",
+      "independent_fixture_hash": "af3f7686b7800201a4f397dcbab26c1fbe50a40a0a6b32e58f04f26113b57bb5",
+      "status": "completed",
+      "error_code": null,
+      "config_hash": "sha256:bf463522334d87afd1a3acc33c3c4172a59336c11ccf461a90ffd1417ed77784",
+      "final_answer": "I successfully read the full pricing table. For **deepseek-flash** (first column), the cache-miss input and output prices are:\n\n- **Cache-miss input**: 空闲 (off-peak) 1元 / 高峰 (peak) 2元 per million tokens\n- **Output**: 空闲 (off-peak) 4元 / 高峰 (peak) 8元 per million tokens\n\n(Note: I'm using the \"缓存未命中\" row, not the \"缓存命中\" row.)\n\n```json\n{\n  \"peak_input\": 2,\n  \"peak_output\": 8,\n  \"offpeak_input\": 1,\n  \"offpeak_output\": 4,\n  \"source\": \"https://api-docs.deepseek.com/zh-cn/quick_start/pricing/\"\n}\n```\n\n**核对说明：**\n- 来源：[DeepSeek 官方 API 文档 - 模型 & 价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)（已实际读取正文，非搜索摘要）。\n- 数据取自页面价格表中 `deepseek-flash` 列：\n  - 百万tokens输入（**缓存未命中**）：高峰 2元、空闲 1元\n  - 百万tokens输出：高峰 8元、空闲 4元\n- 按你的要求，未使用「缓存命中」价格（该行 flash 为高峰 0.04元 / 空闲 0.02元），未写文件。\n- 页面注明空闲时段价格为高峰时段价格的一半；高峰时段为北京时间周一至周五 9:00–12:00、14:00–18:00（不含法定节假日）。",
+      "mechanical_error": "output_contract_failed",
+      "mechanical_passed": false,
+      "human_review": "pending"
+    }
+  ],
+  "real_model_efficacy_verified": false,
+  "trial_enabled": false,
+  "lab_directory": "D:\\EvoAgent\\output\\evoagent-real-faf757bb7f73",
+  "production_services_modified": false,
+  "previous_attempt": "real-personal-probe-attempt-1.json",
+  "fixture_hash": "sha256:25ee477547acfcdb87c6a2748db214ebda2019a70dbbd19c38c959d8f58aafef",
+  "ordinary_ledger_upper_micros": 118012,
+  "learning_reservations": [
+    {
+      "status": "settled",
+      "reserved_micros": 64728
+    }
+  ],
+  "complete": false,
+  "git_sha_end": "f06b6d1eeb8e95e22ae502df23a80901c4c09dad",
+  "paid_dispatches": 17,
+  "conservative_reserved_total_micros": 1147370,
+  "known_cost_upper_micros": 147370
+}

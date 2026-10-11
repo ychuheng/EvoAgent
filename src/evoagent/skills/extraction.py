@@ -92,9 +92,13 @@ class ModelCandidateGenerator:
                         "只返回一个符合下方 JSON Schema 的 JSON 对象；"
                         "不要返回代码、Markdown 或解释。根据训练来源与可用工具约束选择工具，"
                         "不要把示例的 calculator 当作唯一可用工具；总结可复用方法，不编造固定答案。"
+                        "严格区分步骤形态：action=tool 只能使用 id/action/tool/depends_on/"
+                        "foreach/args；expected_output 只属于 action=model，不能放进 tool 步骤。"
                         + (
                             "本次为个人方法候选，输出 schema_version=2。"
                             "必须有 applicability 与 rationale。"
+                            "applicability.file_types 只能填无点号的小写扩展名（如 py/csv），"
+                            "不能填 .py、路径或通配符；事实键与操作必须使用 Schema 中的枚举。"
                             "反例 origin 明确 hypothetical 或有 evidence_refs 的 observed。"
                             "修订 name 必须等于宿主 candidate_context.required_name。"
                             if context is not None
@@ -107,11 +111,31 @@ class ModelCandidateGenerator:
                     content=json.dumps(
                         {
                             "skill_definition_json_schema": SkillDefinition.model_json_schema(),
+                            "step_shape_examples": [
+                                {
+                                    "id": "calculate",
+                                    "action": "tool",
+                                    "tool": "calculator",
+                                    "args": {"expression": "1+1"},
+                                },
+                                {
+                                    "id": "verify",
+                                    "action": "model",
+                                    "depends_on": ["calculate"],
+                                    "instruction": "核对工具结果，不编造工具返回值。",
+                                    "expected_output": "依据可观察结果说明核验结论。",
+                                },
+                            ],
                             "minimal_example": {
                                 "schema_version": 2 if context is not None else 1,
                                 **(
                                     {
-                                        "applicability": {"task_families": ["general"]},
+                                        "applicability": {
+                                            "task_families": ["general"],
+                                            "file_types": [],
+                                            "required_facts": [],
+                                            "excluded_conditions": [],
+                                        },
                                         "rationale": "根据开发轨迹提议方法，效果尚待验证。",
                                     }
                                     if context is not None

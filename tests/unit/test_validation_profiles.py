@@ -56,6 +56,7 @@ def test_profile_is_host_selected_and_never_serializes_credentials():
         ("model_request_max_output_tokens", 128),
         ("budget_input_price_micros_per_million", 101),
         ("budget_total_limit_micros", 200000),
+        ("provider_thinking_mode", "disabled"),
     ],
 )
 def test_frozen_profile_rejects_host_configuration_drift(key, value):

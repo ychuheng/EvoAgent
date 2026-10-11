@@ -73,6 +73,7 @@ def create_app(
             api_key=resolved_settings.api_key,
             base_url=str(resolved_settings.base_url),
             timeout_seconds=10,
+            thinking_mode=resolved_settings.provider_thinking_mode,
         )
         memory_generator = ModelMemoryExtractor(
             BudgetedProvider(
@@ -98,6 +99,7 @@ def create_app(
             api_key=resolved_settings.api_key,
             base_url=str(resolved_settings.base_url),
             timeout_seconds=resolved_settings.model_timeout_seconds,
+            thinking_mode=resolved_settings.provider_thinking_mode,
         )
         resolved_candidate_generator = ModelCandidateGenerator(
             BudgetedProvider(

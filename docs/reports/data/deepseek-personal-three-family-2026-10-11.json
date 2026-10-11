@@ -1,0 +1,933 @@
+{
+  "schema_version": 1,
+  "git_sha": "f06b6d1eeb8e95e22ae502df23a80901c4c09dad",
+  "authorized_limit_micros": 10000000,
+  "dispatch_envelope_micros": 8000000,
+  "reserve_per_call_micros": 500000,
+  "model": "deepseek-flash",
+  "input_price_upper_micros": 2000000,
+  "output_price_upper_micros": 8000000,
+  "calls": [
+    {
+      "index": 1,
+      "input_json_bytes": 15186,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": false
+    },
+    {
+      "index": 2,
+      "input_json_bytes": 9874,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": false
+    },
+    {
+      "index": 3,
+      "input_json_bytes": 15186,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4213,
+      "output_tokens": 51,
+      "cost_upper_micros": 8834
+    },
+    {
+      "index": 4,
+      "input_json_bytes": 15989,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4417,
+      "output_tokens": 196,
+      "cost_upper_micros": 10402
+    },
+    {
+      "index": 5,
+      "input_json_bytes": 17391,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4861,
+      "output_tokens": 50,
+      "cost_upper_micros": 10122
+    },
+    {
+      "index": 6,
+      "input_json_bytes": 15186,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4209,
+      "output_tokens": 74,
+      "cost_upper_micros": 9010
+    },
+    {
+      "index": 7,
+      "input_json_bytes": 16795,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4612,
+      "output_tokens": 39,
+      "cost_upper_micros": 9536
+    },
+    {
+      "index": 8,
+      "input_json_bytes": 17526,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 4804,
+      "output_tokens": 178,
+      "cost_upper_micros": 11032
+    },
+    {
+      "index": 9,
+      "input_json_bytes": 18856,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 5230,
+      "output_tokens": 48,
+      "cost_upper_micros": 10844
+    },
+    {
+      "index": 10,
+      "input_json_bytes": 9874,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 2726,
+      "output_tokens": 47,
+      "cost_upper_micros": 5828
+    },
+    {
+      "index": 11,
+      "input_json_bytes": 10636,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 2947,
+      "output_tokens": 67,
+      "cost_upper_micros": 6430
+    },
+    {
+      "index": 12,
+      "input_json_bytes": 11135,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 3065,
+      "output_tokens": 23,
+      "cost_upper_micros": 6314
+    },
+    {
+      "index": 13,
+      "input_json_bytes": 23051,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 6251,
+      "output_tokens": 2048,
+      "cost_upper_micros": 28886
+    },
+    {
+      "index": 14,
+      "input_json_bytes": 10055,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 2770,
+      "output_tokens": 55,
+      "cost_upper_micros": 5980
+    },
+    {
+      "index": 15,
+      "input_json_bytes": 10832,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 2972,
+      "output_tokens": 99,
+      "cost_upper_micros": 6736
+    },
+    {
+      "index": 16,
+      "input_json_bytes": 11518,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 3142,
+      "output_tokens": 73,
+      "cost_upper_micros": 6868
+    },
+    {
+      "index": 17,
+      "input_json_bytes": 14204,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "input_tokens": 3838,
+      "output_tokens": 359,
+      "cost_upper_micros": 10548
+    },
+    {
+      "index": 18,
+      "input_json_bytes": 15207,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4211,
+      "output_tokens": 74,
+      "cost_upper_micros": 9014,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 40
+    },
+    {
+      "index": 19,
+      "input_json_bytes": 16711,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4594,
+      "output_tokens": 38,
+      "cost_upper_micros": 9492,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 0
+    },
+    {
+      "index": 20,
+      "input_json_bytes": 17430,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4776,
+      "output_tokens": 190,
+      "cost_upper_micros": 11072,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 46
+    },
+    {
+      "index": 21,
+      "input_json_bytes": 18806,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 5214,
+      "output_tokens": 44,
+      "cost_upper_micros": 10780,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 25
+    },
+    {
+      "index": 22,
+      "input_json_bytes": 19651,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 5445,
+      "output_tokens": 296,
+      "cost_upper_micros": 13258,
+      "finish_reason": "stop",
+      "response_content_chars": 649
+    },
+    {
+      "index": 23,
+      "input_json_bytes": 25082,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 6910,
+      "output_tokens": 1772,
+      "cost_upper_micros": 27996,
+      "finish_reason": "stop",
+      "response_content_chars": 4760
+    },
+    {
+      "index": 24,
+      "input_json_bytes": 9874,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 2724,
+      "output_tokens": 76,
+      "cost_upper_micros": 6056,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 44
+    },
+    {
+      "index": 25,
+      "input_json_bytes": 11493,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 3131,
+      "output_tokens": 56,
+      "cost_upper_micros": 6710,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 0
+    },
+    {
+      "index": 26,
+      "input_json_bytes": 12233,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 3362,
+      "output_tokens": 117,
+      "cost_upper_micros": 7660,
+      "finish_reason": "stop",
+      "response_content_chars": 215
+    },
+    {
+      "index": 27,
+      "input_json_bytes": 10055,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 2768,
+      "output_tokens": 51,
+      "cost_upper_micros": 5944,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 63
+    },
+    {
+      "index": 28,
+      "input_json_bytes": 10819,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 2966,
+      "output_tokens": 120,
+      "cost_upper_micros": 6892,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 129
+    },
+    {
+      "index": 29,
+      "input_json_bytes": 11605,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 3160,
+      "output_tokens": 75,
+      "cost_upper_micros": 6920,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 92
+    },
+    {
+      "index": 30,
+      "input_json_bytes": 14302,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 3858,
+      "output_tokens": 473,
+      "cost_upper_micros": 11500,
+      "finish_reason": "stop",
+      "response_content_chars": 1042
+    },
+    {
+      "index": 31,
+      "input_json_bytes": 15207,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4215,
+      "output_tokens": 75,
+      "cost_upper_micros": 9030,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 44
+    },
+    {
+      "index": 32,
+      "input_json_bytes": 16847,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4624,
+      "output_tokens": 39,
+      "cost_upper_micros": 9560,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 0
+    },
+    {
+      "index": 33,
+      "input_json_bytes": 17578,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4816,
+      "output_tokens": 174,
+      "cost_upper_micros": 11024,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 0
+    },
+    {
+      "index": 34,
+      "input_json_bytes": 18856,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 5226,
+      "output_tokens": 48,
+      "cost_upper_micros": 10836,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 38
+    },
+    {
+      "index": 35,
+      "input_json_bytes": 19682,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 5447,
+      "output_tokens": 286,
+      "cost_upper_micros": 13182,
+      "finish_reason": "stop",
+      "response_content_chars": 612
+    },
+    {
+      "index": 36,
+      "input_json_bytes": 25080,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 6888,
+      "output_tokens": 1660,
+      "cost_upper_micros": 27056,
+      "finish_reason": "stop",
+      "response_content_chars": 4264
+    },
+    {
+      "index": 37,
+      "input_json_bytes": 15207,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4215,
+      "output_tokens": 80,
+      "cost_upper_micros": 9070,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 72
+    },
+    {
+      "index": 38,
+      "input_json_bytes": 16675,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4588,
+      "output_tokens": 194,
+      "cost_upper_micros": 10728,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 67
+    },
+    {
+      "index": 39,
+      "input_json_bytes": 18074,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 5030,
+      "output_tokens": 50,
+      "cost_upper_micros": 10460,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 49
+    },
+    {
+      "index": 40,
+      "input_json_bytes": 18943,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 5267,
+      "output_tokens": 435,
+      "cost_upper_micros": 14014,
+      "finish_reason": "stop",
+      "response_content_chars": 1034
+    },
+    {
+      "index": 41,
+      "input_json_bytes": 25963,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 7080,
+      "output_tokens": 1550,
+      "cost_upper_micros": 26560,
+      "finish_reason": "stop",
+      "response_content_chars": 3865
+    },
+    {
+      "index": 42,
+      "input_json_bytes": 15207,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4217,
+      "output_tokens": 80,
+      "cost_upper_micros": 9074,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 72
+    },
+    {
+      "index": 43,
+      "input_json_bytes": 16675,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 4590,
+      "output_tokens": 193,
+      "cost_upper_micros": 10724,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 58
+    },
+    {
+      "index": 44,
+      "input_json_bytes": 18065,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 5031,
+      "output_tokens": 50,
+      "cost_upper_micros": 10462,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 49
+    },
+    {
+      "index": 45,
+      "input_json_bytes": 18934,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 5268,
+      "output_tokens": 401,
+      "cost_upper_micros": 13744,
+      "finish_reason": "stop",
+      "response_content_chars": 799
+    },
+    {
+      "index": 46,
+      "input_json_bytes": 25799,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 7084,
+      "output_tokens": 1451,
+      "cost_upper_micros": 25776,
+      "finish_reason": "stop",
+      "response_content_chars": 3669
+    },
+    {
+      "index": 47,
+      "input_json_bytes": 9874,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 2730,
+      "output_tokens": 90,
+      "cost_upper_micros": 6180,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 33
+    },
+    {
+      "index": 48,
+      "input_json_bytes": 11360,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 3147,
+      "output_tokens": 17,
+      "cost_upper_micros": 6430,
+      "finish_reason": "stop",
+      "response_content_chars": 38
+    },
+    {
+      "index": 49,
+      "input_json_bytes": 23788,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 6418,
+      "output_tokens": 1445,
+      "cost_upper_micros": 24396,
+      "finish_reason": "stop",
+      "response_content_chars": 3557
+    },
+    {
+      "index": 50,
+      "input_json_bytes": 10055,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 2774,
+      "output_tokens": 50,
+      "cost_upper_micros": 5948,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 54
+    },
+    {
+      "index": 51,
+      "input_json_bytes": 10810,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 2971,
+      "output_tokens": 97,
+      "cost_upper_micros": 6718,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 50
+    },
+    {
+      "index": 52,
+      "input_json_bytes": 11501,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 3141,
+      "output_tokens": 74,
+      "cost_upper_micros": 6874,
+      "finish_reason": "tool_calls",
+      "response_content_chars": 86
+    },
+    {
+      "index": 53,
+      "input_json_bytes": 14192,
+      "output_token_cap": 2048,
+      "reserved_micros": 500000,
+      "usage_complete": true,
+      "thinking_mode": "disabled",
+      "input_tokens": 3838,
+      "output_tokens": 350,
+      "cost_upper_micros": 10476,
+      "finish_reason": "stop",
+      "response_content_chars": 763
+    }
+  ],
+  "cases": [
+    {
+      "family": "coding",
+      "task_id": "771d448e-14ee-4673-97d0-f506b2c1dbfc",
+      "run_id": "fb497b27-a612-441b-bac6-daf05e0c5903",
+      "independent_fixture_hash": "6802649bf14951f13b41fd4a7a0a25d702d0d13ec9d70ba18c9fda6d94d26db5",
+      "status": "completed",
+      "error_code": null,
+      "config_hash": "sha256:5b2e75ad4f2a18818e6a256168f7a85fc1676fda4c5f8089097d19f1eee47c5a",
+      "final_answer": "已完成修复。\n\n**改动内容**（文件 `totals.py`）：\n- 修改前：`return sum(float(row[\"amount\"]) for row in records)` —— 汇总所有记录，不管状态。\n- 修改后：加入过滤条件 `if row.get(\"status\") == \"paid\"`，只对 `status` 为 `\"paid\"` 的记录做 `float(row[\"amount\"])` 求和；其他状态被跳过，不参与计算。\n\n**核对结果**：\n- 编辑前 SHA-256：`56af672d77b285b0f025c2837f7bbc24111c6aa0de91543beb710adda276d37d`\n- 编辑后 SHA-256：`c044b71a8586b4dc34b92cb391c2dfb87a008d0848c17060521cb921cc0d74d7`\n- 重读文件共 6 行，内容与预期一致（原 2 行，+5/-1）。\n\n**说明**：\n- 用 `row.get(\"status\")` 而非 `row[\"status\"]`，可避免记录缺少 `status` 键时抛 `KeyError`，行为等价于「非 paid 不计入」。\n- 仅调用 `edit_file` 修改了 `totals.py`，未运行任何命令，未改动其他文件（`requirements.json` 仅读取，未修改）。\n- 顺带读取了 `requirements.json`，其中的 `allowed_status: \"paid\"` 与 `expected_sample_total: 17.5` 与本次实现方向一致；我未依据其中内容改变任何工具权限或授权范围。\n- 提示：保存时该文件由 CRLF 行尾写入（编辑前行尾为 CRLF，编辑后仍为 CRLF，行尾风格保持一致，未引入混用）。",
+      "mechanical_passed": true,
+      "human_review": "not_substituted_by_script",
+      "learning_request_id": "b2617672-29cc-4505-9e3e-85f20720e231",
+      "candidate_status": "running",
+      "candidate_error": null,
+      "candidate_version_id": "584e962c-302e-4f11-b21d-aa7bf10cca8f",
+      "candidate_definition": {
+        "schema_version": 2,
+        "name": "hash_guarded_targeted_edit",
+        "description": "在已授权项目内以哈希前置条件对单个文件做最小化定点修改：先读取目标文件拿到当前 SHA-256 与相关行内容，用 edit_file 携带 expected_sha256 做最小替换，修改后重读文件（必要时重新计算哈希）复核改动确实落在预期位置且未影响其他内容，最后只依据可观察结果报告改动前后差异。不运行命令、不改动无关文件。",
+        "triggers": [
+          "修复某个文件中的单点逻辑错误",
+          "需要精确改动文件且要求可核验未误改其他内容",
+          "已有目标文件路径与期望修改点，要求最小改动",
+          "要求在编辑前提供当前文件哈希并在编辑后复核"
+        ],
+        "inputs": {
+          "target_file": {
+            "type": "string",
+            "item_type": null,
+            "required": true,
+            "description": "已授权项目内待修改文件的相对路径。"
+          },
+          "edit_intent": {
+            "type": "string",
+            "item_type": null,
+            "required": true,
+            "description": "要达成的修改意图，例如只汇总某状态记录。"
+          },
+          "anchor_text": {
+            "type": "string",
+            "item_type": null,
+            "required": false,
+            "description": "用于定位待替换片段的原文本或行范围线索。"
+          }
+        },
+        "preconditions": {
+          "allowed_tools": [
+            "file_read",
+            "edit_file",
+            "apply_patch",
+            "search_text",
+            "find_files",
+            "list_dir",
+            "artifact_write"
+          ],
+          "max_effective_risk": "R1"
+        },
+        "steps": [
+          {
+            "id": "read_target",
+            "action": "tool",
+            "tool": "file_read",
+            "depends_on": [],
+            "foreach": null,
+            "args": {
+              "path": "{{target_file}}",
+              "max_lines": 400
+            }
+          },
+          {
+            "id": "locate_anchor",
+            "action": "tool",
+            "tool": "search_text",
+            "depends_on": [
+              "read_target"
+            ],
+            "foreach": null,
+            "args": {
+              "query": "{{anchor_text}}",
+              "path": "{{target_file}}",
+              "max_matches": 20
+            }
+          },
+          {
+            "id": "plan_edit",
+            "action": "model",
+            "depends_on": [
+              "read_target",
+              "locate_anchor"
+            ],
+            "instruction": "仅依据读取到的文件内容与搜索命中位置，写出最小替换方案：old_text 精确复制原文片段，replacement 给出改动后文本，并记录读取结果中给出的当前 SHA-256 作为 expected_sha256。不要编造未读到的行或哈希；若读取结果未提供哈希，则说明这一点并请求重新读取。",
+            "expected_output": "含 path、old_text、replacement、expected_sha256 的修改计划，并标注依据来自哪次读取。"
+          },
+          {
+            "id": "apply_edit",
+            "action": "tool",
+            "tool": "edit_file",
+            "depends_on": [
+              "plan_edit"
+            ],
+            "foreach": null,
+            "args": {
+              "path": "{{target_file}}",
+              "replacement": "{{replacement}}",
+              "old_text": "{{old_text}}",
+              "expected_sha256": "{{expected_sha256}}"
+            }
+          },
+          {
+            "id": "reread_and_verify",
+            "action": "model",
+            "depends_on": [
+              "apply_edit"
+            ],
+            "instruction": "基于 edit_file 返回结果与随后的重读内容核验：改动是否恰好落在目标位置、是否引入额外行变更、文件是否仍可完整读取。只陈述可观察到的差异；不得声称运行过未运行的工具，也不得声称业务目标已达成。",
+            "expected_output": "改动前/后对照说明与核验结论，含无法确认的剩余未知项。"
+          },
+          {
+            "id": "reread_file",
+            "action": "tool",
+            "tool": "file_read",
+            "depends_on": [
+              "apply_edit"
+            ],
+            "foreach": null,
+            "args": {
+              "path": "{{target_file}}",
+              "max_lines": 400
+            }
+          }
+        ],
+        "stop_conditions": [
+          "edit_file 因 expected_sha256 不匹配而拒绝时停止并重新读取文件，不盲目重试同一哈希",
+          "同一编辑意图连续两次失败时停止并报告冲突原因",
+          "读取结果未包含可用哈希时停止编辑并向用户确认"
+        ],
+        "approval_points": [
+          {
+            "step_id": "apply_edit",
+            "condition": "待修改内容涉及权限、凭据、授权范围或用户未明确要求改动的文件",
+            "reason": "定点编辑 Skill 只覆盖最小化逻辑修改，越界改动需用户显式确认"
+          }
+        ],
+        "counterexamples": [
+          {
+            "situation": "需要跨多个文件做一致性重构或批量替换",
+            "why_not": "本 Skill 围绕单文件最小替换与哈希复核设计，多文件协调应走 apply_patch 等带整体回滚的路径",
+            "origin": "hypothetical",
+            "evidence_refs": []
+          },
+          {
+            "situation": "目标文件尚不存在，需要新建文件",
+            "why_not": "哈希前置条件对不存在的文件无意义，应改用 create 类流程",
+            "origin": "hypothetical",
+            "evidence_refs": []
+          },
+          {
+            "situation": "改动正确性只能靠运行测试程序验证",
+            "why_not": "本 Skill 明确不运行命令，仅做静态复核；需要执行验证时应选择允许 run_command 的流程",
+            "origin": "observed",
+            "evidence_refs": [
+              "trace:effective_steps:run_status=completed,no_run_command"
+            ]
+          }
+        ],
+        "success_criteria": [
+          "目标文件的改动与声明的 edit_intent 一致，且替换片段之外无额外变更",
+          "edit_file 调用携带了与编辑前读取结果一致的 expected_sha256",
+          "编辑后重读文件成功，且报告中的改动前后差异与重读内容相符",
+          "未改动其他文件，未运行未经声明的命令"
+        ],
+        "validators": [
+          "run_completed",
+          "file_changed_as_expected"
+        ],
+        "applicability": {
+          "task_families": [
+            "coding",
+            "file_management"
+          ],
+          "file_types": [
+            "py",
+            "json",
+            "txt",
+            "md"
+          ],
+          "required_facts": [
+            {
+              "key": "project.available",
+              "op": "eq",
+              "value": true
+            },
+            {
+              "key": "input.exists",
+              "op": "eq",
+              "value": true
+            },
+            {
+              "key": "tool.available",
+              "op": "contains",
+              "value": "edit_file"
+            }
+          ],
+          "excluded_conditions": [
+            {
+              "key": "task.family",
+              "op": "eq",
+              "value": "research"
+            },
+            {
+              "key": "input.file_type",
+              "op": "in",
+              "value": [
+                "pdf"
+              ]
+            }
+          ]
+        },
+        "rationale": "从一条真实文件修复轨迹归纳：其有效步骤仅包含两次 file_read、一次 edit_file 与一次复核读取，且编辑携带哈希前置条件、编辑后重读验证，未运行命令、未改动其他文件，属于可迁移的最小定点修改方法。适用边界与反例按假设标注，业务正确性未被该轨迹证实。"
+      },
+      "candidate_hash": "sha256:b31fc05aab28566ff8fc033df8b95e318d877278182469fa47fa2d71181dfba5",
+      "candidate_lifecycle": "draft"
+    },
+    {
+      "family": "data",
+      "task_id": "d136a58b-a715-4b36-90f1-2a45f9d73432",
+      "run_id": "396c73b9-0970-4751-9eef-6cde98eba063",
+      "independent_fixture_hash": "f381389cd6b856c6db200c160e8e17e5c24ae8d4309b358eae1a1c98d7dd8fb4",
+      "status": "completed",
+      "error_code": null,
+      "config_hash": "sha256:bf463522334d87afd1a3acc33c3c4172a59336c11ccf461a90ffd1417ed77784",
+      "final_answer": "{\"ids\":[\"0007\",\"0103\"],\"total\":\"5.00\"}",
+      "mechanical_passed": true,
+      "human_review": "not_substituted_by_script",
+      "learning_request_id": "85898592-64b8-4d9c-9a14-99ad75f9de92",
+      "candidate_status": "failed",
+      "candidate_error": "learning_CandidateGenerationError",
+      "candidate_version_id": null
+    },
+    {
+      "family": "research",
+      "task_id": "dd98f61a-3581-4f7b-8df3-efd5ee3d9abd",
+      "run_id": "1ec02381-070b-43e4-9f9f-37735e09d80c",
+      "independent_fixture_hash": "af3f7686b7800201a4f397dcbab26c1fbe50a40a0a6b32e58f04f26113b57bb5",
+      "status": "completed",
+      "error_code": null,
+      "config_hash": "sha256:bf463522334d87afd1a3acc33c3c4172a59336c11ccf461a90ffd1417ed77784",
+      "final_answer": "I have the data I need. The page lists two models in the table: `deepseek-flash` (column 1) and `deepseek-v4-pro` (column 2). For `deepseek-flash`, the cache-miss input and output prices are:\n\n- 缓存未命中输入: 空闲 1元, 高峰 2元\n- 输出: 空闲 4元, 高峰 8元\n\n```json\n{\n  \"peak_input\": 2,\n  \"peak_output\": 8,\n  \"offpeak_input\": 1,\n  \"offpeak_output\": 4,\n  \"source\": \"https://api-docs.deepseek.com/zh-cn/quick_start/pricing/\"\n}\n```\n\n说明：\n- 已实际读取 [DeepSeek 官方价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/) 正文。表中 `deepseek-flash` 列（第 1 列）对应「百万tokens输入（缓存未命中）」空闲 1元 / 高峰 2元，「百万tokens输出」空闲 4元 / 高峰 8元，单位均为每百万 token 人民币。\n- 未采用缓存命中价格（0.02/0.04 元），也未采用 `deepseek-v4-pro` 列（4.5/9、13.5/27）。\n- 高峰时段定义为北京时间周一至周五（不含法定节假日）9:00–12:00、14:00–18:00；其余时间为空闲时段，空闲价为高峰价的一半。\n- 本次为只读操作，未写入任何文件。",
+      "mechanical_error": "output_contract_failed",
+      "mechanical_passed": false,
+      "human_review": "pending"
+    }
+  ],
+  "real_model_efficacy_verified": false,
+  "trial_enabled": false,
+  "source_tree": "e15ddf5f35268a13771782f9416e2763d1dc6cca",
+  "lab_directory": "D:\\EvoAgent\\output\\evoagent-real-6f51f18c533e",
+  "production_services_modified": false,
+  "previous_attempt": "real-personal-probe-attempt-5.json",
+  "script_hash": "sha256:390c0e144b46f91013333b58c7a964545fccc987cf8ceb88dd8c032868e0a93c",
+  "fixture_hash": "sha256:3fedd24ff1bd32f2fd77ab0f6e029b58f8ac217115bf1c3ad52e202b44c47a11",
+  "generation_failures": [
+    "model returned an invalid SkillDefinition; fields: steps.3.tool.depends_on_note"
+  ],
+  "generation_error_types": [
+    [
+      {
+        "field": "('steps', 3, 'tool', 'depends_on_note')",
+        "type": "extra_forbidden"
+      }
+    ]
+  ],
+  "ordinary_ledger_upper_micros": 136802,
+  "learning_reservations": [
+    {
+      "status": "settled",
+      "reserved_micros": 70224
+    },
+    {
+      "status": "settled",
+      "reserved_micros": 66202
+    }
+  ],
+  "complete": false,
+  "git_sha_end": "f06b6d1eeb8e95e22ae502df23a80901c4c09dad",
+  "paid_dispatches": 53,
+  "conservative_reserved_total_micros": 1568986,
+  "known_cost_upper_micros": 568986
+}

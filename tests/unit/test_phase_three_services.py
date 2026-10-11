@@ -22,6 +22,7 @@ from evoagent.skills.provenance import FrozenSkillSource
 from evoagent.skills.retrieval import BM25Retriever, SkillDocument, tokenize
 from evoagent.skills.sanitizer import TraceSanitizationError, TraceSanitizer
 from evoagent.skills.schema import (
+    ModelStep,
     SkillDefinition,
     SkillPreconditions,
     ToolStep,
@@ -224,3 +225,37 @@ async def test_model_candidate_generator_rejects_invalid_json() -> None:
     prompt = json.loads(provider.requests[0].messages[1].content or "{}")
     assert "skill_definition_json_schema" in prompt
     assert prompt["minimal_example"]["steps"][0]["action"] == "model"
+    tool_example, model_example = prompt["step_shape_examples"]
+    ToolStep.model_validate(tool_example)
+    ModelStep.model_validate(model_example)
+    assert model_example["depends_on"] == [tool_example["id"]]
+    with pytest.raises(ValueError):
+        ToolStep.model_validate(
+            {**tool_example, "expected_output": model_example["expected_output"]}
+        )
+
+
+async def test_personal_generator_exposes_valid_applicability_example() -> None:
+    provider = MockProvider(
+        (
+            ModelResponse(
+                message=Message(role=MessageRole.ASSISTANT, content="not json"),
+                finish_reason=FinishReason.STOP,
+            ),
+        )
+    )
+    generator = ModelCandidateGenerator(provider, model="mock-model")
+    source = FrozenSkillSource(
+        eval_run_id=UUID(int=1),
+        run_id=UUID(int=2),
+        artifact_id=UUID(int=3),
+        source_trace_hash="sha256:" + "1" * 64,
+        payload={"goal": "safe"},
+    )
+    with pytest.raises(CandidateGenerationError):
+        await generator.generate((source,), context={"required_name": "verified_calculation"})
+    request = provider.requests[0]
+    prompt = json.loads(request.messages[1].content or "{}")
+    SkillDefinition.model_validate(prompt["minimal_example"])
+    assert ".py" in request.messages[0].content
+    assert prompt["minimal_example"]["applicability"]["file_types"] == []

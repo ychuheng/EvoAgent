@@ -6,6 +6,11 @@ from evoagent.skills.canonical import content_hash
 def candidate_configuration(settings):
     return {
         "provider": settings.provider.value,
+        **(
+            {"provider_thinking_mode": settings.provider_thinking_mode}
+            if settings.provider_thinking_mode is not None
+            else {}
+        ),
         "model": settings.skill_extractor_model
         or ("mock" if settings.provider.value == "mock" else None),
         "max_output_tokens": min(settings.model_request_max_output_tokens or 4096, 4096),
@@ -16,7 +21,7 @@ def candidate_configuration(settings):
         "endpoint_identity_hash": content_hash(str(settings.base_url))
         if settings.base_url
         else None,
-        "generator_version": "personal:v2",
+        "generator_version": "personal:v3",
         "budget_scope": settings.budget_scope,
         "input_price_micros_per_million": settings.budget_input_price_micros_per_million,
         "output_price_micros_per_million": settings.budget_output_price_micros_per_million,

@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from evoagent.learning.schema import LearningError
 from evoagent.privacy.redaction import detect_sensitive
@@ -16,6 +16,7 @@ class ValidationExecutionProfile(BaseModel):
     schema_version: Literal[1] = 1
     provider: Literal["openai_compatible"]
     model: str = Field(min_length=1, max_length=256)
+    provider_thinking_mode: Literal["disabled"] | None = None
     endpoint_identity_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     max_output_tokens: int = Field(ge=1, le=32768, strict=True)
     max_iterations: int = Field(ge=1, le=100, strict=True)
@@ -28,6 +29,13 @@ class ValidationExecutionProfile(BaseModel):
     input_price_micros_per_million: int = Field(ge=0, strict=True)
     output_price_micros_per_million: int = Field(ge=0, strict=True)
     budget_stop_ratio: float = Field(gt=0, le=1)
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_identity(self, handler):
+        body = handler(self)
+        if self.provider_thinking_mode is None:
+            body.pop("provider_thinking_mode", None)
+        return body
 
     def identity(self):
         body = self.model_dump(mode="json")
@@ -54,6 +62,7 @@ def real_profile(settings):
     values = {
         "provider": settings.provider.value,
         "model": settings.model,
+        "provider_thinking_mode": settings.provider_thinking_mode,
         "endpoint_identity_hash": content_hash(str(settings.base_url)),
         "max_output_tokens": min(settings.model_request_max_output_tokens or 4096, 32768),
         "max_iterations": settings.max_iterations,

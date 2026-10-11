@@ -25,6 +25,7 @@ def assemble_learning(factory, store, settings, service_gate):
             api_key=settings.api_key,
             base_url=str(settings.base_url),
             timeout_seconds=settings.model_timeout_seconds,
+            thinking_mode=settings.provider_thinking_mode,
         )
     budget = LearningBudgetService(factory, settings)
     validator = SkillDefinitionValidator(
