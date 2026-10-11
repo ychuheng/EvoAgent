@@ -361,9 +361,13 @@ async def test_selection_evidence_migration_keeps_legacy_and_refuses_loss(tmp_pa
         # Isolated synthetic fixture: prove downgrade protection, not a production retrofit.
         await connection.execute(
             text(
-                "UPDATE run_skill_selections SET origin='formal',scope_key='fixture', "
-                "content_hash=:hash,rendered_hash=:hash,applicability='{}', "
-                "selection_policy_version='skill-selector-v1' WHERE rank=1"
+                "INSERT INTO run_skill_selections "
+                "(id,run_id,skill_version_id,mode,rank,score,query_terms,origin,scope_key, "
+                "content_hash,rendered_hash,applicability,selection_policy_version,created_at) "
+                "SELECT 'cccccccccccccccccccccccccccccccc',run_id,skill_version_id,mode,3,score, "
+                "query_terms, "
+                "'formal','fixture',:hash,:hash,'{}','skill-selector-v1',created_at "
+                "FROM run_skill_selections WHERE rank=1"
             ),
             {"hash": digest},
         )
@@ -372,17 +376,12 @@ async def test_selection_evidence_migration_keeps_legacy_and_refuses_loss(tmp_pa
     async with db.engine.begin() as connection:
         assert (
             await connection.scalar(
-                text("SELECT content_hash FROM run_skill_selections WHERE rank=1")
+                text("SELECT content_hash FROM run_skill_selections WHERE rank=3")
             )
             == digest
         )
         # Explicitly remove only the isolated synthetic evidence to exercise safe rollback.
-        await connection.execute(
-            text(
-                "UPDATE run_skill_selections SET content_hash=NULL,applicability=NULL, "
-                "selection_policy_version=NULL WHERE rank=1"
-            )
-        )
+        await connection.execute(text("DELETE FROM run_skill_selections WHERE rank=3"))
     await asyncio.to_thread(command.downgrade, config, "20261010_0031")
     await asyncio.to_thread(command.upgrade, config, "head")
     await asyncio.to_thread(command.check, config)

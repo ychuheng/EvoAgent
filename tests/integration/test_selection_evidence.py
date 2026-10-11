@@ -2,7 +2,7 @@
 
 import pytest
 import test_lease_fencing as fencing
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from evoagent.db.models import RunSkillSelectionRecord
 from tests.integration.test_skill_applicability_runtime import setup
@@ -114,3 +114,26 @@ async def test_legacy_binding_cannot_be_relabelled_as_new_proof(fencing_db):
         with pytest.raises(ValueError, match="immutable"):
             await session.commit()
         await session.rollback()
+
+
+@pytest.mark.parametrize(
+    "field,value", [("rank", 2), ("rendered_hash", "changed"), ("content_hash", None)]
+)
+async def test_raw_database_update_cannot_rewrite_v3_proof(fencing_db, field, value):
+    aggregate, identity = await setup(fencing_db, "data")
+    async with fencing_db.session_factory() as session:
+        row = binding(aggregate.run.id, identity)
+        session.add(row)
+        await session.commit()
+        identifier = row.id
+    async with fencing_db.session_factory() as session:
+        with pytest.raises(DBAPIError, match="immutable"):
+            await session.execute(
+                RunSkillSelectionRecord.__table__.update()
+                .where(RunSkillSelectionRecord.id == identifier)
+                .values(**{field: value})
+            )
+            await session.commit()
+        await session.rollback()
+        unchanged = await session.get(RunSkillSelectionRecord, identifier)
+        assert unchanged.rank == 1 and unchanged.content_hash == HASH

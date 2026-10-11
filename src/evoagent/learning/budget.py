@@ -4,20 +4,25 @@ import re
 from datetime import UTC
 from uuid import uuid4
 
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 
+from evoagent.core.models import TokenUsage
 from evoagent.db.learning_accounting import unresolved_usage, usage_upper_bound
 from evoagent.db.models import (
     LearningPolicyRecord,
     LearningRequestRecord,
     LearningSpendReservationRecord,
     MaintenanceJobRecord,
+    RunEventRecord,
     RunRecord,
     SpendRecord,
     TaskRecord,
 )
+from evoagent.db.repositories.events import RunEventRepository
 from evoagent.learning.schema import LearningError
 from evoagent.learning.sources import PersonalSourceService
+from evoagent.privacy.redaction import detect_sensitive
 from evoagent.runtime.budget import (
     BudgetScope,
     cost_micros,
@@ -25,7 +30,19 @@ from evoagent.runtime.budget import (
     spend_totals,
     threshold_micros,
 )
+from evoagent.skills.canonical import content_hash
 from evoagent.tasks.lease_guard import database_now
+
+
+class ManualUsageReview(BaseModel):
+    """Trusted local operator evidence, never model output or automatic expiry."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    expected_reserved_micros: int = Field(ge=0, le=2147483647)
+    input_tokens: int = Field(ge=0, le=100000000)
+    output_tokens: int = Field(ge=0, le=100000000)
+    receipt_hash: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 class LearningBudgetService:
@@ -336,7 +353,23 @@ class LearningBudgetService:
                 row.status = "released"
             await session.commit()
 
-    async def settle(self, reservation_id, usage, *, provider, model):
+    async def review_unknown(self, reservation_id, review: ManualUsageReview):
+        review = ManualUsageReview.model_validate(review)
+        if not review.reason.strip() or detect_sensitive(review.reason):
+            raise LearningError("learning_usage_review_reason_unsafe")
+        return await self.settle(
+            reservation_id,
+            TokenUsage(
+                input_tokens=review.input_tokens,
+                output_tokens=review.output_tokens,
+                total_tokens=review.input_tokens + review.output_tokens,
+            ),
+            provider=None,
+            model=None,
+            _manual_review=review,
+        )
+
+    async def settle(self, reservation_id, usage, *, provider, model, _manual_review=None):
         if usage is None:
             return await self.mark_unknown(reservation_id)
         async with self.factory() as session:
@@ -347,6 +380,32 @@ class LearningBudgetService:
             )
             if row is None or row.dispatched_at is None or row.status == "released":
                 raise LearningError("learning_settlement_without_dispatch")
+            request = await session.get(LearningRequestRecord, row.request_id)
+            if _manual_review is not None:
+                if row.reserved_micros != _manual_review.expected_reserved_micros:
+                    raise LearningError("learning_usage_review_reservation_changed")
+                if content_hash(request.policy_snapshot) != request.policy_hash:
+                    raise LearningError("learning_usage_review_policy_invalid")
+                profile = request.policy_snapshot.get(
+                    "execution_profile"
+                ) or request.policy_snapshot.get("generator_configuration", {})
+                provider, model = profile.get("provider"), profile.get("model")
+                if not provider or not model:
+                    raise LearningError("learning_usage_review_profile_missing")
+                prior_review = await session.scalar(
+                    select(RunEventRecord).where(
+                        RunEventRecord.run_id == (row.run_id or request.origin_run_id),
+                        RunEventRecord.event_type == "learning.usage_manually_settled",
+                        RunEventRecord.payload["reservation_id"].as_string() == str(row.id),
+                    )
+                )
+                if prior_review is not None:
+                    if prior_review.payload.get("review_hash") != content_hash(
+                        _manual_review.model_dump(mode="json")
+                    ):
+                        raise LearningError("learning_usage_review_conflict")
+                elif row.status != "unknown":
+                    raise LearningError("learning_usage_review_requires_unknown")
             limits = limits_from_settings(self.settings, BudgetScope(row.scope))
             from dataclasses import replace
 
@@ -371,7 +430,6 @@ class LearningBudgetService:
                 ) != (usage.input_tokens, usage.output_tokens, actual, model, provider):
                     raise LearningError("learning_usage_conflict")
                 return actual
-            request = await session.get(LearningRequestRecord, row.request_id)
             run = await session.get(RunRecord, row.run_id or request.origin_run_id)
             session.add(
                 SpendRecord(
@@ -393,6 +451,20 @@ class LearningBudgetService:
                 )
             )
             row.status, row.actual_micros = "settled", actual
+            if _manual_review is not None:
+                await RunEventRepository(session).append(
+                    run_id=run.id,
+                    event_type="learning.usage_manually_settled",
+                    payload={
+                        "reservation_id": str(row.id),
+                        "actor": "local-user",
+                        "receipt_hash": _manual_review.receipt_hash,
+                        "reason": _manual_review.reason,
+                        "review_hash": content_hash(_manual_review.model_dump(mode="json")),
+                        "actual_micros": actual,
+                    },
+                    created_at=await database_now(session),
+                )
             await session.commit()
             return actual
 

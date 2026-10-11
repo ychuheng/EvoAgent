@@ -97,6 +97,10 @@ def upgrade():
 
 
 def downgrade():
+    if op.get_bind().scalar(sa.text("SELECT count(*) FROM skill_trials")) or op.get_bind().scalar(
+        sa.text("SELECT count(*) FROM skill_observations")
+    ):
+        raise RuntimeError("personal trial evidence prevents destructive downgrade")
     op.drop_table("skill_observations")
     with op.batch_alter_table("run_skill_selections") as batch:
         batch.drop_constraint("fk_run_skill_selections_trial_id_skill_trials", type_="foreignkey")

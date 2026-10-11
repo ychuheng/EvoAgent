@@ -54,6 +54,15 @@ def upgrade():
 
 
 def downgrade():
+    if op.get_bind().scalar(
+        sa.text(
+            "SELECT count(*) FROM eval_experiments WHERE purpose != 'formal' "
+            "OR comparison_version_id IS NOT NULL OR learning_request_id IS NOT NULL"
+        )
+    ) or op.get_bind().scalar(
+        sa.text("SELECT count(*) FROM eval_datasets WHERE purpose != 'formal'")
+    ):
+        raise RuntimeError("personal validation evidence prevents destructive downgrade")
     # A two-pinned-arm experiment cannot fit the old mode identity. Refuse a
     # destructive downgrade rather than discarding one arm or relabeling it.
     collision = op.get_bind().scalar(

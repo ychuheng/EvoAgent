@@ -11,6 +11,7 @@
 | [personal_project_trial.py](personal_project_trial.py) | Run one development-only real-model project task and save a compact audit record. |
 | [personal_research_eval.py](personal_research_eval.py) | Freeze and evaluate public research tasks without treating URL matching as fact checking. |
 | [personal_skill_evolution_dev.py](personal_skill_evolution_dev.py) | Explicit offline dev scenarios through real services; never model efficacy. |
+| [reconcile_learning_usage.py](reconcile_learning_usage.py) | 受信本机用户核对单条 unknown 费用；需使用量凭据、预留金额 CAS 和审计理由，不调用模型。 |
 ## 性能与隐私测量
 
 | 脚本 | 用途 |

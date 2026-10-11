@@ -27,6 +27,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from evoagent.db.base import Base
+from evoagent.db.selection_immutability import (
+    FUNCTION_SQL as SELECTION_FUNCTION_SQL,
+)
+from evoagent.db.selection_immutability import (
+    SQLITE_TRIGGER_SQL as SELECTION_SQLITE_TRIGGER_SQL,
+)
+from evoagent.db.selection_immutability import (
+    TRIGGER_SQL as SELECTION_TRIGGER_SQL,
+)
 from evoagent.evals.lifecycle import (
     DatasetStatus,
     EvalExperimentKind,
@@ -1714,3 +1723,25 @@ def protect_v3_skill_selection(_mapper, _connection, record):
                 "created_at",
             ),
         )
+
+
+event.listen(
+    RunSkillSelectionRecord.__table__,
+    "after_create",
+    DDL(SELECTION_FUNCTION_SQL).execute_if(dialect="postgresql"),
+)
+event.listen(
+    RunSkillSelectionRecord.__table__,
+    "after_create",
+    DDL(SELECTION_TRIGGER_SQL).execute_if(dialect="postgresql"),
+)
+event.listen(
+    RunSkillSelectionRecord.__table__,
+    "after_create",
+    DDL(SELECTION_SQLITE_TRIGGER_SQL).execute_if(dialect="sqlite"),
+)
+event.listen(
+    RunSkillSelectionRecord.__table__,
+    "after_drop",
+    DDL("DROP FUNCTION IF EXISTS protect_v3_skill_selection()").execute_if(dialect="postgresql"),
+)

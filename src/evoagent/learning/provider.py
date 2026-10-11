@@ -1,8 +1,10 @@
 """Learning calls obey both global and reserved personal sub-budgets."""
 
+import asyncio
+
 from evoagent.core.models import ProviderEventType
 from evoagent.learning.schema import LearningError
-from evoagent.providers.base import ProviderError
+from evoagent.providers.base import ProviderError, ProviderTimeoutError
 from evoagent.runtime.budget import BudgetScope, cost_micros, limits_from_settings
 from evoagent.sandbox.cancellation import finish_on_cancel
 from evoagent.skills.canonical import canonical_json, content_hash
@@ -51,16 +53,19 @@ class LearningBudgetedProvider:
             await self.budget.mark_dispatched(identity, guard=self.guard)
             sent = True
             await self.check()  # cancellation after send intent is conservative unknown
-            async for event in self.provider.stream(request):
-                observed = event.usage if event.type is ProviderEventType.USAGE else None
-                if event.type is ProviderEventType.COMPLETED and event.response:
-                    observed = event.response.usage or observed
-                if observed is not None:
-                    if usage is not None and usage != observed:
-                        usage = None
-                        raise LearningError("learning_usage_conflict")
-                    usage = observed
-                yield event
+            async with asyncio.timeout(self.budget.settings.model_timeout_seconds):
+                async for event in self.provider.stream(request):
+                    observed = event.usage if event.type is ProviderEventType.USAGE else None
+                    if event.type is ProviderEventType.COMPLETED and event.response:
+                        observed = event.response.usage or observed
+                    if observed is not None:
+                        if usage is not None and usage != observed:
+                            usage = None
+                            raise LearningError("learning_usage_conflict")
+                        usage = observed
+                    yield event
+        except TimeoutError:
+            raise ProviderTimeoutError() from None
         finally:
             if sent:
                 await finish_on_cancel(

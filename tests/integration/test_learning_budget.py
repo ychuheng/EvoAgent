@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from evoagent.core.models import TokenUsage
 from evoagent.db.models import LearningSpendReservationRecord, MaintenanceJobRecord, SpendRecord
-from evoagent.learning.budget import LearningBudgetService
+from evoagent.learning.budget import LearningBudgetService, ManualUsageReview
 from evoagent.learning.jobs import LearningJobGuard
 from evoagent.learning.schema import LearningError
 from tests.integration.test_learning_worker import worker
@@ -80,6 +80,44 @@ async def test_unknown_usage_keeps_upper_bound_and_cannot_release(reserved_conte
     async with db.session_factory() as session:
         assert (await session.get(LearningSpendReservationRecord, identity)).status == "unknown"
         assert not list(await session.scalars(select(SpendRecord)))
+
+
+async def test_manual_unknown_settlement_is_audited_idempotent_and_conflict_safe(reserved_context):
+    from evoagent.db.models import RunEventRecord
+
+    _, db, request_id, guard, budget = reserved_context
+    identity = await budget.reserve(request_id, "manual-settlement", 10000, guard=guard)
+    review = ManualUsageReview(
+        expected_reserved_micros=10000,
+        input_tokens=10,
+        output_tokens=20,
+        receipt_hash="sha256:" + "a" * 64,
+        reason="local operator checked usage receipt",
+    )
+    with pytest.raises(LearningError, match="without_dispatch"):
+        await budget.review_unknown(identity, review)
+    await budget.mark_dispatched(identity, guard=guard)
+    with pytest.raises(LearningError, match="requires_unknown"):
+        await budget.review_unknown(identity, review)
+    await budget.mark_unknown(identity)
+    with pytest.raises(LearningError, match="reservation_changed"):
+        await budget.review_unknown(
+            identity, review.model_copy(update={"expected_reserved_micros": 99})
+        )
+    assert await budget.review_unknown(identity, review) == 30
+    assert await budget.review_unknown(identity, review) == 30
+    with pytest.raises(LearningError, match="review_conflict"):
+        await budget.review_unknown(identity, review.model_copy(update={"input_tokens": 11}))
+    async with db.session_factory() as session:
+        events = list(
+            await session.scalars(
+                select(RunEventRecord).where(
+                    RunEventRecord.event_type == "learning.usage_manually_settled"
+                )
+            )
+        )
+        assert len(events) == 1 and events[0].payload["actor"] == "local-user"
+        assert len(list(await session.scalars(select(SpendRecord)))) == 1
 
 
 @pytest.mark.parametrize("sent,expected", [(False, "released"), (True, "unknown")])
@@ -171,6 +209,48 @@ async def test_provider_wrapper_settles_reported_usage_once(reserved_context):
         rows = list(await session.scalars(select(SpendRecord)))
         assert len(rows) == 1 and rows[0].cost_micros == 30
         assert rows[0].purpose == "skill_learning"
+
+
+async def test_stalled_learning_call_cannot_hold_workspace_reserved_forever(reserved_context):
+    import asyncio
+
+    from evoagent.core.models import Message, MessageRole, ModelRequest
+    from evoagent.learning.provider import LearningBudgetedProvider
+    from evoagent.providers.base import ProviderTimeoutError
+
+    _, db, request_id, guard, budget = reserved_context
+    budget.settings = budget.settings.model_copy(update={"model_timeout_seconds": 0.03})
+
+    class StalledProvider:
+        async def stream(self, request):
+            await asyncio.Event().wait()
+            yield None
+
+    async def check():
+        async with db.session_factory() as session:
+            await guard.check(session)
+
+    provider = LearningBudgetedProvider(
+        StalledProvider(), budget, request_id, guard, check=check, provider_name="offline-test"
+    )
+    request = ModelRequest(
+        model="test",
+        max_output_tokens=1,
+        messages=(Message(role=MessageRole.USER, content="public fixture"),),
+    )
+    with pytest.raises(ProviderTimeoutError):
+        async with asyncio.timeout(2):
+            _ = [event async for event in provider.stream(request)]
+    async with db.session_factory() as session:
+        rows = list(
+            await session.scalars(
+                select(LearningSpendReservationRecord).where(
+                    LearningSpendReservationRecord.request_id == request_id
+                )
+            )
+        )
+        assert len(rows) == 1 and rows[0].status == "unknown"
+        assert rows[0].reserved_micros > 0  # Unknown cost remains charged conservatively.
 
 
 async def test_unsent_reservation_can_transfer_after_stale_lease_reconciliation(reserved_context):
