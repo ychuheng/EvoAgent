@@ -19,7 +19,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select
 from sqlalchemy import inspect as inspect_database
 from sqlalchemy.engine import make_url
 
@@ -28,6 +28,7 @@ from evoagent.core.context import ContextBuilder
 from evoagent.core.models import FinishReason, Message, MessageRole, ModelResponse, ToolCall
 from evoagent.db.base import Base
 from evoagent.db.models import (
+    ArtifactRecord,
     EvalCaseRecord,
     EvalDatasetRecord,
     EvalExperimentRecord,
@@ -36,6 +37,7 @@ from evoagent.db.models import (
     RunEventRecord,
     RunRecord,
     RunSkillSelectionRecord,
+    RunSnapshotRecord,
     SessionRecord,
     SkillRecord,
     SkillSourceRecord,
@@ -64,8 +66,10 @@ from evoagent.workers.main import JobWorker
 
 if __package__:
     from scripts.runtime_performance_baseline import percentile
+    from scripts.runtime_resource_probe import RuntimeResourceProbe, json_bytes
 else:
     from runtime_performance_baseline import percentile
+    from runtime_resource_probe import RuntimeResourceProbe, json_bytes
 
 FIXTURE = "Original benchmark text.\n"
 EDITED = "Verified benchmark text.\n"
@@ -352,6 +356,11 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
 
     def after(_conn, _cursor, _statement, _params, context, _many):
         sql["sql_wait_ns"] += time.perf_counter_ns() - context._benchmark_started_ns
+        if _statement.lstrip().upper().startswith("SELECT"):
+            if _cursor.rowcount >= 0:
+                sql["select_rows_reported"] += _cursor.rowcount
+            else:
+                sql["select_rowcount_unavailable"] += 1
 
     event.listen(db.engine.sync_engine, "before_cursor_execute", before)
     event.listen(db.engine.sync_engine, "after_cursor_execute", after)
@@ -480,7 +489,8 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                     family="general",
                 )
                 ack_ms = (time.perf_counter_ns() - started) / 1e6
-                assert await worker.run_once(), "benchmark task was not claimed"
+                async with RuntimeResourceProbe() as resources:
+                    assert await worker.run_once(), "benchmark task was not claimed"
                 elapsed = (time.perf_counter_ns() - started) / 1e6
                 measured = dict(sql)
                 async with db.session_factory() as session:
@@ -518,6 +528,16 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                             .order_by(RunEventRecord.sequence)
                         )
                     )
+                    snapshots = list(
+                        await session.scalars(
+                            select(RunSnapshotRecord).where(RunSnapshotRecord.run_id == run.id)
+                        )
+                    )
+                    artifact_bytes = await session.scalar(
+                        select(func.coalesce(func.sum(ArtifactRecord.size_bytes), 0)).where(
+                            ArtifactRecord.run_id == run.id
+                        )
+                    )
                     tool_calls = list(
                         await session.scalars(
                             select(ToolCallRecord)
@@ -544,6 +564,13 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                     "queued_event_ack_ms": ack_ms,
                     "provider_wait_ms": provider.wait_ns / 1e6,
                     "tool_wait_ms": tool_wait[0] / 1e6,
+                    **resources.report(),
+                    "event_payload_utf8_bytes": sum(json_bytes(e.payload) for e in events),
+                    "snapshot_state_utf8_bytes": sum(json_bytes(s.state) for s in snapshots),
+                    "artifact_content_bytes": artifact_bytes,
+                    "server_lock_wait_ms": None,
+                    "query_result_wire_bytes": None,
+                    "event_buffer_peak_bytes": None,
                     "sql_wait_ms": measured.pop("sql_wait_ns", 0) / 1e6,
                     **measured,
                     "selected_versions": len(selected),
@@ -686,6 +713,10 @@ async def measure(url, *, repeats=30, families=FAMILIES, idle_seconds=60):
                 "SQL timings exclude commit time; not total DB attribution.",
                 "Fault/learning-contention tests are separate from this latency matrix.",
                 "Acknowledgement is a DB commit acknowledgement, not browser SSE visibility.",
+                "RSS is 10ms sampled parent-process memory, not an exact peak or child total.",
+                "JSON bytes are canonical content; artifact bytes use persisted size metadata.",
+                "SELECT rows use driver rowcount; unavailable counts are explicitly recorded.",
+                "Server lock wait, result wire bytes and event buffer peak are unmeasured nulls.",
             ],
         }
     finally:

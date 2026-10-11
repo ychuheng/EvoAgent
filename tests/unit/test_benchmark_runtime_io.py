@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.benchmark_runtime_io import FAMILIES, measure, validate_database_url
+from scripts.runtime_resource_probe import json_bytes
 
 
 def test_runtime_matrix_cli_can_be_invoked_as_a_file():
@@ -43,7 +44,18 @@ async def test_runtime_matrix_measures_real_task_effects_and_skill_selection(tmp
         assert row["terminal"] == "completed"
         assert row["sql_total"] > 0 and row["transactions_commit"] > 0
         assert row["committed_cursor_contiguous"]
+        assert row["event_payload_utf8_bytes"] > 0
+        assert row["snapshot_state_utf8_bytes"] >= 0
+        assert row["artifact_content_bytes"] >= 0
+        assert row["event_loop_lag_samples"] > 0
+        assert row["event_loop_lag_max_ms"] >= 0
+        assert row["server_lock_wait_ms"] is None
+        assert row["query_result_wire_bytes"] is None
         assert row["selected_versions"] == (1 if row["family"] == "enabled_skill" else 0)
         if row["family"] == "read_edit_recheck":
             assert row["tool_names"] == ["edit_file", "file_read", "file_read"]
             assert row["effect_status_counts"] == {"committed": 1}
+
+
+def test_payload_byte_probe_counts_utf8_content_without_retaining_payload():
+    assert json_bytes({"中文": "值"}) == len('{"中文":"值"}'.encode())
