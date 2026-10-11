@@ -13,6 +13,7 @@ from evoagent.db.models import (
     LearningSpendReservationRecord,
     MaintenanceJobRecord,
     ProjectRecord,
+    RunFeedbackRecord,
     RunRecord,
     SkillRecord,
     SkillVersionRecord,
@@ -21,6 +22,11 @@ from evoagent.db.models import (
 from evoagent.db.repositories.events import RunEventRepository
 from evoagent.learning.jobs import LearningJobGuard
 from evoagent.learning.planner import SkillEvolutionPlanner
+from evoagent.learning.revision_aggregation import (
+    aggregation_refs,
+    lock_aggregation_runs,
+    verify_aggregation,
+)
 from evoagent.learning.schema import LearningError
 from evoagent.learning.sources import PersonalSourceService
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
@@ -134,6 +140,7 @@ class LearningJobHandler:
         found = await session.get(MaintenanceJobRecord, guard.job_id)
         initial = await session.get(LearningRequestRecord, found.learning_request_id)
         sources = self.source_service(initial)
+        await lock_aggregation_runs(session, initial)
         await sources._lock_run_scope(session, initial.origin_run_id)
         source = await session.scalar(
             select(LearningSourceRecord)
@@ -151,6 +158,7 @@ class LearningJobHandler:
         if request.trigger == "discover" and policy.mode != "suggest":
             raise LearningError("learning_discovery_not_authorized")
         sources.max_source_risk = min(sources.max_source_risk, policy.max_source_risk)
+        await verify_aggregation(session, request, sources)
         await sources.check_in_session(
             session,
             request.origin_run_id,
@@ -291,7 +299,7 @@ class LearningJobHandler:
                             LearningPolicyRecord.workspace_id == LearningRequestRecord.workspace_id,
                         )
                         .join(ArtifactRecord, ArtifactRecord.id == LearningSourceRecord.artifact_id)
-                        .join(RunRecord, RunRecord.id == LearningRequestRecord.origin_run_id)
+                        .join(RunRecord, RunRecord.id == LearningSourceRecord.run_id)
                         .join(TaskRecord, TaskRecord.id == RunRecord.task_id)
                         .outerjoin(ProjectRecord, ProjectRecord.id == TaskRecord.project_id)
                         .where(MaintenanceJobRecord.id == guard.job_id)
@@ -335,21 +343,96 @@ class LearningJobHandler:
                     )
                 ):
                     raise LearningError("learning_dispatch_cancelled")
+                refs = aggregation_refs(request)
+                if refs:
+                    # One bounded metadata query for the whole aggregation;
+                    # never replay bodies or rebuild every manifest on each tick.
+                    latest = (
+                        select(RunFeedbackRecord.id)
+                        .where(RunFeedbackRecord.run_id == LearningSourceRecord.run_id)
+                        .order_by(RunFeedbackRecord.revision.desc())
+                        .limit(1)
+                        .correlate(LearningSourceRecord)
+                        .scalar_subquery()
+                    )
+                    rows = (
+                        await session.execute(
+                            select(
+                                LearningSourceRecord,
+                                ArtifactRecord,
+                                TaskRecord,
+                                ProjectRecord,
+                                RunFeedbackRecord,
+                                SkillRecord.lock_version,
+                            )
+                            .join(
+                                ArtifactRecord,
+                                ArtifactRecord.id == LearningSourceRecord.artifact_id,
+                            )
+                            .join(RunRecord, RunRecord.id == LearningSourceRecord.run_id)
+                            .join(TaskRecord, TaskRecord.id == RunRecord.task_id)
+                            .outerjoin(ProjectRecord, ProjectRecord.id == TaskRecord.project_id)
+                            .join(RunFeedbackRecord, RunFeedbackRecord.id == latest)
+                            .join(SkillRecord, SkillRecord.id == request.target_skill_id)
+                            .where(LearningSourceRecord.id.in_([r.source_id for r in refs]))
+                        )
+                    ).all()
+                    expected = {r.source_id: r for r in refs}
+                    if len(rows) != len(refs) or policy.mode != "suggest":
+                        raise LearningError("learning_dispatch_cancelled")
+                    for src, art, task, project, feedback, target_lock in rows:
+                        ref = expected[src.id]
+                        if (
+                            src.status != "valid"
+                            or src.revocation_epoch != ref.revocation_epoch
+                            or src.content_hash != ref.content_hash
+                            or art.content_hash != ref.content_hash
+                            or art.attributes.get("erased")
+                            or art.redaction_status == "quarantined"
+                            or feedback.id != ref.feedback_id
+                            or not feedback.learn_from_feedback
+                            or target_lock
+                            != request.policy_snapshot["revision_aggregation"][
+                                "target_lock_version"
+                            ]
+                            or (
+                                task.project_id is not None
+                                and (
+                                    project is None
+                                    or str(project.status) != "available"
+                                    or project.authorization_version
+                                    != task.project_authorization_version
+                                )
+                            )
+                        ):
+                            raise LearningError("learning_dispatch_cancelled")
 
     async def _generate(self, generator, source, context, guard):
-        work = asyncio.create_task(generator.generate((source,), context=context))
-        watch = asyncio.create_task(
-            self._watch(guard, source.learning_source_id, context["source_revocation_epoch"])
-        )
+        sources = source if isinstance(source, tuple) else (source,)
+        work = asyncio.create_task(generator.generate(sources, context=context))
+        watches = [
+            asyncio.create_task(
+                self._watch(
+                    guard,
+                    item.learning_source_id,
+                    context.get("source_epochs", {}).get(
+                        str(item.learning_source_id), context["source_revocation_epoch"]
+                    ),
+                )
+            )
+            # The primary watch also inspects all aggregation metadata in one query.
+            for item in sources[:1]
+        ]
         try:
-            done, _ = await asyncio.wait((work, watch), return_when=asyncio.FIRST_COMPLETED)
-            if watch in done:
-                await watch
+            done, _ = await asyncio.wait((work, *watches), return_when=asyncio.FIRST_COMPLETED)
+            for watch in watches:
+                if watch in done:
+                    await watch
             return await work
         finally:
-            for task in (work, watch):
+            for task in (work, *watches):
                 task.cancel()
-            await asyncio.gather(work, watch, return_exceptions=True)
+            await asyncio.gather(work, *watches, return_exceptions=True)
 
     async def propose(self, request_id, guard):
         async with self.factory() as session:
@@ -391,22 +474,41 @@ class LearningJobHandler:
                     "必须提供停止条件、成功标准及标明假设的反例。"
                 ),
             }
-        evidence = await self.source_service(request).read_frozen(
-            source.id, expected_revocation_epoch=source.revocation_epoch
-        )
-        frozen = FrozenSkillSource(
-            eval_run_id=None,
-            run_id=request.origin_run_id,
-            artifact_id=source.artifact_id,
-            source_trace_hash=source.content_hash,
-            payload=evidence.model_dump(mode="json"),
-            source_kind="personal",
-            learning_source_id=source.id,
-        )
+            records = await verify_aggregation(session, request, self.source_service(request))
+            records = records or (source,)
+            if aggregation_refs(request):
+                context["source_epochs"] = {str(item.id): item.revocation_epoch for item in records}
+        frozen = []
+        async with asyncio.timeout(10):
+            if aggregation_refs(request):
+                await self._verify_aggregation_base(request)
+            for item in records:
+                evidence = await self.source_service(request).read_frozen(
+                    item.id, expected_revocation_epoch=item.revocation_epoch
+                )
+                frozen.append(
+                    FrozenSkillSource(
+                        eval_run_id=None,
+                        run_id=item.run_id,
+                        artifact_id=item.artifact_id,
+                        source_trace_hash=item.content_hash,
+                        payload=evidence.model_dump(mode="json"),
+                        source_kind="personal",
+                        learning_source_id=item.id,
+                    )
+                )
+        frozen = tuple(frozen)
         generator = self.generator_factory(request, guard)
         async with self.factory() as session:
             await self._check(session, guard, source_required=True)
         definition = await self._generate(generator, frozen, context, guard)
+        if aggregation_refs(request):
+            async with asyncio.timeout(10):
+                await self._verify_aggregation_base(request)
+                for item in records:
+                    await self.source_service(request).read_frozen(
+                        item.id, expected_revocation_epoch=item.revocation_epoch
+                    )
         if definition.schema_version != 2:
             raise LearningError("personal_candidate_v2_required")
         # Scan and DSL validation run outside database transactions and off-loop.
@@ -494,7 +596,7 @@ class LearningJobHandler:
                 generator,
                 self.validator,
             ).extract_sources(
-                (frozen,),
+                frozen,
                 request_id=request.id,
                 target_skill_id=request.target_skill_id,
                 base_version_id=request.base_version_id,
@@ -508,6 +610,18 @@ class LearningJobHandler:
             )
             await session.commit()
 
+    async def _verify_aggregation_base(self, request):
+        from evoagent.config import Settings
+        from evoagent.skills.source_verification import SkillSourceVerifier
+        from evoagent.skills.trials import TrialScope
+
+        await SkillSourceVerifier(
+            self.factory,
+            self.budget.settings if self.budget else Settings(_env_file=None),
+            TrialScope(request.workspace_id, request.project_id),
+            store=self.store,
+        ).verify(request.base_version_id)
+
     async def validate(self, request_id, guard):
         async with self.factory() as session:
             _, request, source = await self._check(session, guard, source_required=True)
@@ -515,9 +629,13 @@ class LearningJobHandler:
             if version is None or content_hash(version.definition) != version.content_hash:
                 raise LearningError("candidate_identity_invalid")
             definition = SkillDefinition.model_validate(version.definition)
-        await self.source_service(request).read_frozen(
-            source.id, expected_revocation_epoch=source.revocation_epoch
-        )
+            records = await verify_aggregation(session, request, self.source_service(request))
+            records = records or (source,)
+        async with asyncio.timeout(10):
+            for item in records:
+                await self.source_service(request).read_frozen(
+                    item.id, expected_revocation_epoch=item.revocation_epoch
+                )
         result = await asyncio.to_thread(self.validator.validate, definition)
         require_s6_annotations(definition)
         report = {
@@ -534,6 +652,10 @@ class LearningJobHandler:
             "task_validation": {"status": "not_run"},
             "trial_eligible": False,
         }
+        if aggregation_refs(request):
+            report["aggregation_sources"] = [
+                ref.model_dump(mode="json") for ref in aggregation_refs(request)
+            ]
         async with self.factory() as session:
             _, request, _ = await self._check(session, guard, source_required=True)
             if request.candidate_version_id != version.id:

@@ -351,14 +351,29 @@ class SkillExtractionService:
                 else None,
                 "feedback" if request.frozen_inputs.get("feedback_id") else "manual",
             )
+            from evoagent.learning.revision_aggregation import verify_aggregation
+
+            records = await verify_aggregation(
+                session, request, PersonalSourceService(self._session_factory)
+            )
+            expected = {item.id: item for item in records}
+            if expected and (
+                len(sources) != len(expected)
+                or {item.learning_source_id for item in sources} != set(expected)
+            ):
+                raise LearningError("revision_aggregation_identity_invalid")
             for item in sources:
                 source = await session.get(LearningSourceRecord, item.learning_source_id)
                 artifact = await session.get(ArtifactRecord, item.artifact_id)
                 if (
                     source is None
                     or source.status != "valid"
-                    or source.run_id != request.origin_run_id
-                    or source.source_revision != request.frozen_inputs["source_revision"]
+                    or source.run_id != item.run_id
+                    or (not expected and source.run_id != request.origin_run_id)
+                    or (
+                        not expected
+                        and source.source_revision != request.frozen_inputs["source_revision"]
+                    )
                     or source.artifact_id != item.artifact_id
                     or source.content_hash != item.source_trace_hash
                     or artifact is None
@@ -377,7 +392,7 @@ class SkillExtractionService:
             identity.update(
                 {
                     "request_id": str(request_id),
-                    "source_revision": source.source_revision,
+                    "source_revision": request.frozen_inputs["source_revision"],
                     "base_version_id": str(base_version_id),
                     "generator_context_hash": content_hash(context or {}),
                 }

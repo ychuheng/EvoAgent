@@ -16,7 +16,14 @@ from tests.integration.test_skill_usage_collection import setup_use
 pytest_plugins = ("tests.integration.test_personal_trials",)
 
 
-async def failures(context, *, attribution="skill_related", same_input=False):
+async def failures(
+    context,
+    *,
+    attribution="skill_related",
+    same_input=False,
+    consent=False,
+    independent_files=False,
+):
     db, first, version, artifact = await setup_use(context)
     uses = [first]
     async with db.session_factory() as session:
@@ -30,7 +37,11 @@ async def failures(context, *, attribution="skill_related", same_input=False):
                 goal=task.goal if same_input else f"independent {index}",
                 family=task.family,
                 status="completed",
-                frozen_inputs=deepcopy(task.frozen_inputs),
+                frozen_inputs=(
+                    {"files": [{**task.frozen_inputs["files"][0], "sha256": str(index + 1) * 64}]}
+                    if independent_files
+                    else deepcopy(task.frozen_inputs)
+                ),
             )
             session.add(next_task)
             await session.flush()
@@ -97,7 +108,12 @@ async def failures(context, *, attribution="skill_related", same_input=False):
             feedback = await LearningRepository(session).append_feedback(
                 run.id,
                 "failure-proof",
-                FeedbackPayload(intent="method", verdict="incorrect", evidence_refs=[claim]),
+                FeedbackPayload(
+                    intent="method",
+                    verdict="incorrect",
+                    evidence_refs=[claim],
+                    learn_from_feedback=consent,
+                ),
                 "local-user",
             )
             await session.commit()

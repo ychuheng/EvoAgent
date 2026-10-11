@@ -10,6 +10,7 @@ from evoagent.db.models import (
     LearningRequestRecord,
     SkillObservationRecord,
     SkillVersionRecord,
+    TaskRecord,
 )
 from evoagent.learning.schema import LearningError
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
@@ -21,7 +22,7 @@ class SkillRevisionSignals:
     def __init__(self, factory):
         self.factory = factory
 
-    async def suggest_revision(self, version_id, scope):
+    async def suggest_revision(self, version_id, scope, *, exact_project=False):
         async with self.factory() as session:
             version = await session.get(SkillVersionRecord, version_id)
             if version is None:
@@ -38,6 +39,8 @@ class SkillRevisionSignals:
                 return None  # unavailable sources cannot support new learning
             now = await database_now(session)
             selected = SkillUsageReports._selected(skill.id, scope, now - timedelta(days=30))
+            if exact_project and scope.project_id is None:
+                selected = selected.where(TaskRecord.project_id.is_(None))
             records = list(
                 await session.scalars(
                     select(SkillObservationRecord)
@@ -118,6 +121,8 @@ class SkillRevisionSignals:
                 "version_id": version_id,
                 "target_skill_id": skill.id,
                 "reason": "repeated_attributed_failure",
+                "criterion_id": rows[0].evidence["criterion_id"],
+                "associated_steps": sorted(rows[0].evidence["associated_steps"]),
                 "independent_input_count": len(rows),
                 "observation_ids": [row.id for row in rows],
                 "origin_run_id": max(

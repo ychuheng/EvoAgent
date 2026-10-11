@@ -9,10 +9,15 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from evoagent.db.models import (
     LearningPolicyRecord,
+    LearningRequestAliasRecord,
     LearningRequestRecord,
+    LearningSourceRecord,
     RunFeedbackRecord,
     RunRecord,
     SessionRecord,
+    SkillObservationRecord,
+    SkillRecord,
+    SkillVersionRecord,
     TaskRecord,
 )
 from evoagent.learning.schema import LearningError, LearningSubmission
@@ -89,9 +94,208 @@ async def check_discovery_limits(
 
 
 class CandidateDiscoveryService:
-    def __init__(self, learning):
+    def __init__(self, learning, *, store=None, settings=None):
         self.learning = learning
+        self.store, self.settings = store, settings
         self.cursor = None  # cyclic query cursor, not a finished_at watermark
+        self.revision_cursor = None
+
+    async def discover_revisions(self, *, limit=50):
+        """Only aggregate already-frozen, individually consented experiences."""
+        if not self.learning.enabled or self.store is None or self.settings is None:
+            return 0
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise LearningError("invalid_discovery_limit")
+        from evoagent.skills.revision_signals import SkillRevisionSignals
+        from evoagent.skills.trials import TrialScope
+
+        query = (
+            select(SkillObservationRecord.id)
+            .join(RunRecord, RunRecord.id == SkillObservationRecord.run_id)
+            .join(TaskRecord, TaskRecord.id == RunRecord.task_id)
+            .join(SessionRecord, SessionRecord.id == TaskRecord.session_id)
+            .join(
+                LearningPolicyRecord,
+                LearningPolicyRecord.workspace_id == SessionRecord.workspace_id,
+            )
+            .where(
+                LearningPolicyRecord.mode == "suggest",
+                SkillObservationRecord.outcome == "verified_failure",
+                RunRecord.data_role == "personal",
+            )
+            .order_by(SkillObservationRecord.id)
+        )
+        async with self.learning.factory() as session:
+            ids = list(
+                await session.scalars(
+                    (
+                        query.where(SkillObservationRecord.id > self.revision_cursor)
+                        if self.revision_cursor
+                        else query
+                    ).limit(limit)
+                )
+            )
+        self.revision_cursor = ids[-1] if ids else None
+        created, visited = 0, set()
+        for observation_id in ids:
+            try:
+                async with self.learning.factory() as session:
+                    obs = await session.get(SkillObservationRecord, observation_id)
+                    _, task, chat = await self.learning._scope(session, obs.run_id)
+                    key = (obs.version_id, chat.workspace_id, task.project_id)
+                if key in visited:
+                    continue
+                visited.add(key)
+                scope = TrialScope(key[1], key[2])
+                signal = await SkillRevisionSignals(self.learning.factory).suggest_revision(
+                    key[0], scope, exact_project=True
+                )
+                if signal and await self._append_revision(signal, scope):
+                    created += 1
+            except (LearningError, IntegrityError):
+                continue
+        return created
+
+    async def _append_revision(self, signal, scope):
+        from sqlalchemy import update
+
+        from evoagent.learning.revision_aggregation import AggregationSourceRef
+        from evoagent.memory.schema import MemoryError
+        from evoagent.skills.provenance import formal_input_fingerprint
+        from evoagent.skills.source_verification import SkillSourceVerifier
+        from evoagent.tools.base import ToolError
+
+        refs = []
+        async with self.learning.factory() as session:
+            skill = await session.get(SkillRecord, signal["target_skill_id"])
+            base = await session.get(SkillVersionRecord, signal["version_id"])
+            policy = await self.learning._policy(session, scope.workspace_id)
+            configuration = self.learning.generator_configuration or {}
+            if policy["mode"] != "suggest" or (
+                configuration.get("provider") not in (None, "mock")
+                and any(
+                    policy[k] is None or policy[k] <= 0
+                    for k in ("daily_limit_micros", "request_limit_micros")
+                )
+            ):
+                return False
+            # Cap to ten independent inputs, always include the newest origin.
+            observations = list(
+                await session.scalars(
+                    select(SkillObservationRecord)
+                    .where(SkillObservationRecord.id.in_(signal["observation_ids"]))
+                    .order_by(
+                        SkillObservationRecord.first_finished_at.desc(),
+                        SkillObservationRecord.run_id.desc(),
+                    )
+                    .limit(10)
+                )
+            )
+            for obs in observations:
+                _, task, chat = await self.learning._scope(session, obs.run_id)
+                if chat.workspace_id != scope.workspace_id or task.project_id != scope.project_id:
+                    continue
+                feedback = await session.scalar(
+                    select(RunFeedbackRecord)
+                    .where(RunFeedbackRecord.run_id == obs.run_id)
+                    .order_by(RunFeedbackRecord.revision.desc())
+                    .limit(1)
+                )
+                if (
+                    feedback is None
+                    or not feedback.learn_from_feedback
+                    or feedback.intent != "method"
+                    or feedback.verdict not in {"needs_fix", "incorrect"}
+                    or feedback.revision != obs.feedback_revision
+                ):
+                    continue
+                source = await session.scalar(
+                    select(LearningSourceRecord)
+                    .where(
+                        LearningSourceRecord.run_id == obs.run_id,
+                        LearningSourceRecord.feedback_id == feedback.id,
+                        LearningSourceRecord.status == "valid",
+                    )
+                    .order_by(LearningSourceRecord.created_at.desc())
+                    .limit(1)
+                )
+                if source is None:
+                    continue  # never retroactively register unconsented history
+                evidence = await PersonalSourceService(
+                    self.learning.factory
+                ).build_evidence_in_session(session, obs.run_id, feedback.id)
+                independent = formal_input_fingerprint(evidence)
+                if independent is None or any(
+                    r.independent_input_hash == independent for r in refs
+                ):
+                    continue
+                refs.append(
+                    AggregationSourceRef(
+                        source_id=source.id,
+                        run_id=obs.run_id,
+                        artifact_id=source.artifact_id,
+                        content_hash=source.content_hash,
+                        source_revision=source.source_revision,
+                        revocation_epoch=source.revocation_epoch,
+                        feedback_id=feedback.id,
+                        observation_id=obs.id,
+                        input_fingerprint=obs.input_fingerprint,
+                        independent_input_hash=independent,
+                    )
+                )
+            contract = {
+                "contract": "revision-aggregation:v1",
+                "target_lock_version": skill.lock_version,
+                "base_content_hash": base.content_hash,
+                "criterion_id": signal["criterion_id"],
+                "associated_steps": signal["associated_steps"],
+                "sources": [ref.model_dump(mode="json") for ref in refs],
+            }
+        if len(refs) < 3 or not any(r.run_id == signal["origin_run_id"] for r in refs):
+            return False
+        try:
+            async with asyncio.timeout(10):
+                await SkillSourceVerifier(
+                    self.learning.factory, self.settings, scope, store=self.store
+                ).verify(base.id)
+                sources = PersonalSourceService(self.learning.factory, artifact_store=self.store)
+                for ref in refs:
+                    await sources.read_frozen(
+                        ref.source_id, expected_revocation_epoch=ref.revocation_epoch
+                    )
+        except (MemoryError, ValueError, OSError, TimeoutError, ToolError):
+            return False
+        async with self.learning.factory() as session:
+            for run_id in sorted({ref.run_id for ref in refs}, key=str):
+                await session.execute(
+                    update(RunRecord)
+                    .where(RunRecord.id == run_id)
+                    .values(next_feedback_revision=RunRecord.next_feedback_revision)
+                )
+            # _append_proposal acquires Workspace next and rechecks policy,
+            # quotas and every frozen source in this same admission transaction.
+            fingerprint = content_hash(
+                {"revision_aggregation": contract, "version_id": str(base.id)}
+            )
+            primary = next(ref for ref in refs if ref.run_id == signal["origin_run_id"])
+            client_key = "aggregate:v1:" + fingerprint[7:]
+            if await session.get(LearningRequestAliasRecord, (scope.workspace_id, client_key)):
+                return False  # replay is not a newly admitted candidate
+            await self.learning._append_proposal(
+                session,
+                primary.run_id,
+                LearningSubmission(
+                    client_request_id=client_key,
+                    feedback_id=primary.feedback_id,
+                    target_skill_id=skill.id,
+                    expected_base_version_id=base.id,
+                ),
+                trigger="discover",
+                discovery_fingerprint=fingerprint,
+                revision_aggregation=contract,
+            )
+            await session.commit()
+        return True
 
     async def discover_candidates(self, *, limit=50):
         if not self.learning.enabled:
@@ -202,4 +406,5 @@ class CandidateDiscoveryService:
             # Next cyclic pass retries DB errors; terminal tasks are unchanged.
             with suppress(SQLAlchemyError):
                 await self.discover_candidates()
+                await self.discover_revisions()
             await asyncio.sleep(60)

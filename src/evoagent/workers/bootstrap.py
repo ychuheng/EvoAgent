@@ -613,7 +613,9 @@ async def run_maintenance_worker():
                             learning_enabled=True,
                             generator_configuration=candidate_configuration(settings),
                             discovery_history_join_enabled=settings.runtime_discovery_history_join_enabled,
-                        )
+                        ),
+                        store=worker.store,
+                        settings=settings,
                     )
                     lanes.append(asyncio.create_task(discovery.periodic_discovery()))
                     lanes.append(asyncio.create_task(learning_handler.periodic_reconciliation()))

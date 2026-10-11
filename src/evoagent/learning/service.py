@@ -41,6 +41,7 @@ from evoagent.privacy.redaction import detect_sensitive, redact_text
 from evoagent.skills.access import SkillAccessError, SkillAccessPolicy
 from evoagent.skills.canonical import canonical_json, content_hash
 from evoagent.skills.schema import SkillDefinition
+from evoagent.tasks.lease_guard import database_now
 
 _POLICY_FIELDS = (
     "mode",
@@ -214,7 +215,14 @@ class LearningService:
             return result
 
     async def _append_proposal(
-        self, session, run_id, payload, *, trigger="manual", discovery_fingerprint=None
+        self,
+        session,
+        run_id,
+        payload,
+        *,
+        trigger="manual",
+        discovery_fingerprint=None,
+        revision_aggregation=None,
     ):
         run, task, chat = await self._scope(session, run_id)
         body = {
@@ -252,6 +260,41 @@ class LearningService:
                 discovery_fingerprint,
                 join_history=self.discovery_history_join_enabled,
             )
+            if revision_aggregation is not None and await session.scalar(
+                select(LearningRequestRecord.id)
+                .where(
+                    LearningRequestRecord.workspace_id == chat.workspace_id,
+                    LearningRequestRecord.project_id == task.project_id,
+                    LearningRequestRecord.target_skill_id == payload.target_skill_id,
+                    LearningRequestRecord.base_version_id == payload.expected_base_version_id,
+                    LearningRequestRecord.request_kind == "propose",
+                    LearningRequestRecord.status.not_in(("failed", "rejected", "cancelled")),
+                )
+                .limit(1)
+            ):
+                raise LearningError("revision_aggregation_already_pending")
+            if revision_aggregation is not None:
+                from datetime import UTC, timedelta
+
+                previous = await session.scalar(
+                    select(LearningRequestRecord)
+                    .where(
+                        LearningRequestRecord.workspace_id == chat.workspace_id,
+                        LearningRequestRecord.project_id == task.project_id,
+                        LearningRequestRecord.target_skill_id == payload.target_skill_id,
+                        LearningRequestRecord.base_version_id == payload.expected_base_version_id,
+                        LearningRequestRecord.request_kind == "propose",
+                    )
+                    .order_by(LearningRequestRecord.created_at.desc())
+                    .limit(1)
+                )
+                now = await database_now(session)
+                if previous is not None:
+                    timestamp = previous.created_at
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=UTC)
+                    if timestamp >= now - timedelta(seconds=policy["cooldown_seconds"]):
+                        raise LearningError("learning_discovery_cooldown")
         source_service = PersonalSourceService(
             self.factory, max_source_risk=policy["max_source_risk"]
         )
@@ -302,6 +345,8 @@ class LearningService:
         }
         if trigger == "discover":
             snapshot["discovery_fingerprint"] = discovery_fingerprint
+        if revision_aggregation is not None:
+            snapshot["revision_aggregation"] = revision_aggregation
         source_revision = content_hash(
             {
                 "run_id": str(run_id),
@@ -338,6 +383,10 @@ class LearningService:
             target_skill_id=target_skill_id,
             base_version_id=base_version_id,
         )
+        if revision_aggregation is not None:
+            from evoagent.learning.revision_aggregation import verify_aggregation
+
+            await verify_aggregation(session, row, source_service)
         dedupe = f"learning:{row.id}:prepare:0"
         if not await session.scalar(
             select(MaintenanceJobRecord.id).where(MaintenanceJobRecord.dedupe_key == dedupe)
