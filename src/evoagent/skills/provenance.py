@@ -214,3 +214,155 @@ class ProvenanceService:
             sanitized.source_trace_hash,
             sanitized.payload,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class SourceCheck:
+    source_id: str
+    source_kind: str
+    eligible: bool
+    counts_as_success: bool
+    reason: str
+    input_fingerprint: str | None = None
+
+
+def formal_input_fingerprint(evidence):
+    from evoagent.skills.canonical import content_hash
+
+    if not evidence.input_refs:
+        # For prompt-only tasks, the declared prompt itself is the input.
+        return content_hash({"goal": evidence.goal})
+    data_refs = [r for r in evidence.input_refs if r.get("origin") != "task_goal"]
+    if not data_refs:
+        # The real source DTO records the sanitized task prompt by hash.
+        data_refs = list(evidence.input_refs)
+    hashes = []
+    for reference in data_refs:
+        digest = reference.get("hash") or reference.get("content_hash")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 71
+            or not digest.startswith("sha256:")
+            or any(char not in "0123456789abcdef" for char in digest[7:])
+        ):
+            return None  # Unknown input identity cannot count as independent.
+        hashes.append(digest)
+    # Names and directories are not independent data: copies of the same
+    # declared content must collapse even when moved or renamed.
+    return content_hash({"input_content_hashes": sorted(set(hashes))})
+
+
+class FormalSourcePolicy:
+    """Versioned formal admission; frozen personal sources are not presumed passed."""
+
+    VERSION = "formal-source:v1"
+
+    def __init__(self, factory, artifacts, *, max_risk=ToolRisk.R1):
+        self.factory, self.artifacts, self.max_risk = factory, artifacts, max_risk
+
+    async def validate(self, source):
+        from evoagent.db.models import (
+            LearningSourceRecord,
+            RunFeedbackRecord,
+            SkillObservationRecord,
+        )
+        from evoagent.db.repositories.base import RecordNotFoundError
+        from evoagent.learning.sources import PersonalSourceService
+        from evoagent.skills.canonical import content_hash
+        from evoagent.tools.base import ToolError
+
+        identity = {"source_id": str(source.id), "source_kind": source.source_kind}
+        try:
+            if source.source_kind == "train_eval":
+                row = await TraceEligibilityChecker(self.factory, max_risk=self.max_risk).check(
+                    source.source_eval_run_id
+                )
+                if row.run_id != source.source_run_id:
+                    raise IneligibleSkillSourceError("source run mismatch")
+                async with self.factory() as session:
+                    case = await session.get(EvalCaseRecord, row.eval_case_id)
+                    fingerprint = content_hash(case.public_input)
+                return SourceCheck(
+                    **identity,
+                    eligible=True,
+                    counts_as_success=True,
+                    reason="passed_train",
+                    input_fingerprint=fingerprint,
+                )
+            if source.source_kind != "personal":
+                return SourceCheck(
+                    **identity,
+                    eligible=False,
+                    counts_as_success=False,
+                    reason="unsupported_source_role",
+                )
+            service = PersonalSourceService(
+                self.factory, artifact_store=self.artifacts, max_source_risk=self.max_risk
+            )
+            async with self.factory() as session:
+                frozen = await session.get(LearningSourceRecord, source.learning_source_id)
+                if (
+                    frozen is None
+                    or frozen.status != "valid"
+                    or frozen.run_id != source.source_run_id
+                    or frozen.artifact_id != source.trace_artifact_id
+                    or frozen.content_hash != source.source_trace_hash
+                ):
+                    raise IneligibleSkillSourceError("personal source identity mismatch")
+                epoch, feedback_id = frozen.revocation_epoch, frozen.feedback_id
+            evidence = await service.read_frozen(frozen.id, expected_revocation_epoch=epoch)
+            mechanical_success = bool(evidence.verified_facts) and all(
+                item.get("origin") == "machine"
+                and isinstance(item.get("result"), dict)
+                and item["result"].get("passed") is True
+                for item in evidence.verified_facts
+            )
+            known_failure = any(
+                isinstance(item.get("result"), dict) and item["result"].get("passed") is False
+                for item in evidence.verified_facts
+            )
+            human_success = False
+            if feedback_id is not None:
+                async with self.factory() as session:
+                    feedback = await session.get(RunFeedbackRecord, feedback_id)
+                    if feedback is not None:
+                        observations = list(
+                            await session.scalars(
+                                select(SkillObservationRecord).where(
+                                    SkillObservationRecord.run_id == source.source_run_id,
+                                    SkillObservationRecord.feedback_revision == feedback.revision,
+                                    SkillObservationRecord.attribution == "skill_related",
+                                    SkillObservationRecord.version_id.in_(
+                                        [UUID(item) for item in evidence.selected_versions]
+                                    ),
+                                )
+                            )
+                        )
+                        known_failure |= any(o.outcome == "verified_failure" for o in observations)
+                        human_success = feedback.verdict == "helpful" and any(
+                            o.outcome == "verified_success"
+                            and o.evidence.get("verification_origin") in {"user", "machine"}
+                            for o in observations
+                        )
+            successful = (
+                evidence.outcome.get("run_status") == "completed"
+                and not known_failure
+                and evidence.outcome.get("user_verdict") not in {"incorrect", "needs_fix"}
+                and (mechanical_success or human_success)
+            )
+            fingerprint = formal_input_fingerprint(evidence)
+            successful = successful and fingerprint is not None
+            return SourceCheck(
+                **identity,
+                eligible=True,
+                counts_as_success=successful,
+                reason="verified_personal_success" if successful else "auxiliary_only",
+                input_fingerprint=fingerprint if successful else None,
+            )
+        except (OSError, ValueError, ToolError, RecordNotFoundError):
+            return SourceCheck(
+                **identity,
+                eligible=False,
+                counts_as_success=False,
+                reason="source_ineligible_or_unverifiable",
+            )

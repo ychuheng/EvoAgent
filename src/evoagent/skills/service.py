@@ -18,7 +18,11 @@ from evoagent.db.models import (
 )
 from evoagent.db.repositories.base import RecordNotFoundError
 from evoagent.db.unit_of_work import UnitOfWork
-from evoagent.evals.gates import GateReport
+from evoagent.evals.gates import (
+    PERSONAL_FORMAL_HARD_CHECKS,
+    GateReport,
+    requires_personal_source_policy,
+)
 from evoagent.evals.lifecycle import PromotionAction
 from evoagent.skills.canonical import content_hash
 from evoagent.skills.lifecycle import (
@@ -432,7 +436,16 @@ class SkillService:
         )
         if experiment is None or experiment.purpose != "formal" or experiment.gate_report is None:
             raise GateNotPassedError("accepted gate report does not exist")
-        report = GateReport.model_validate(experiment.gate_report)
+        try:
+            report = GateReport.model_validate(experiment.gate_report)
+        except ValueError:
+            raise GateNotPassedError("stored formal gate is malformed or unsupported") from None
+        try:
+            needs_personal_policy = await requires_personal_source_policy(session, version)
+        except ValueError:
+            raise GateNotPassedError("formal source lineage cannot be verified") from None
+        if needs_personal_policy and report.schema_version != 2:
+            raise GateNotPassedError("personal lineage requires a formal v2 source gate")
         if (
             not report.passed
             or report.skill_version_id != version.id
@@ -440,6 +453,44 @@ class SkillService:
             or report.report_hash() != version.gate_report_hash
         ):
             raise GateNotPassedError("quality gate did not pass or its hash changed")
+        if report.schema_version == 2:
+            required = PERSONAL_FORMAL_HARD_CHECKS
+            names = [c.name for c in report.checks]
+            if (
+                not required <= set(names)
+                or len(names) != len(set(names))
+                or any(
+                    not c.passed
+                    for c in report.checks
+                    if c.name in required or c.layer != "efficiency"
+                )
+            ):
+                raise GateNotPassedError("formal v2 gate is incomplete or contains a hard failure")
+            from evoagent.skills.access import (
+                SkillAccessError,
+                SkillAccessPolicy,
+                source_graph_identity,
+            )
+
+            skill = await session.get(SkillRecord, version.skill_id)
+            proofs = {}
+            try:
+                await SkillAccessPolicy().check(
+                    session,
+                    version.id,
+                    workspace_id=skill.workspace_id,
+                    project_id=skill.project_id,
+                    source_proofs=proofs,
+                )
+            except (SkillAccessError, AttributeError):
+                raise GateNotPassedError("formal source graph is no longer eligible") from None
+            checks = [c for c in report.checks if c.name == "sources_eligible_under_policy"]
+            if (
+                len(checks) != 1
+                or not checks[0].passed
+                or checks[0].evidence.get("source_graph_identity") != source_graph_identity(proofs)
+            ):
+                raise GateNotPassedError("formal source provenance changed after evaluation")
 
     @staticmethod
     def _decision(

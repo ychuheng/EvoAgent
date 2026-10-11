@@ -14,8 +14,9 @@ from evoagent.db.models import (
     SkillTrialRecord,
     SkillVersionRecord,
 )
-from evoagent.evals.gates import GateReport
+from evoagent.evals.gates import PERSONAL_FORMAL_HARD_CHECKS, GateCheck, GateReport
 from evoagent.memory.schema import MemoryError
+from evoagent.skills.access import SkillAccessPolicy, source_graph_identity
 from evoagent.skills.applicability import VerifiedSkillFacts
 from evoagent.skills.lifecycle import SkillVersionStatus
 from evoagent.skills.selection import RankedSkill, SkillSelectionPlan, SkillSelector
@@ -44,11 +45,33 @@ async def formal_fixture(context):
         )
         session.add(experiment)
         await session.flush()
+        proofs = {}
+        await SkillAccessPolicy().check(
+            session,
+            version.id,
+            workspace_id=skill.workspace_id,
+            project_id=skill.project_id,
+            source_proofs=proofs,
+        )
+        # Synthetic admission metadata isolates selection contracts. It does
+        # not claim this offline candidate passed any real-model experiment.
         report = GateReport(
+            schema_version=2,
+            source_policy_version="formal-source:v1",
             skill_version_id=version.id,
             experiment_id=experiment.id,
             passed=True,
-            checks=(),
+            checks=tuple(
+                GateCheck(
+                    name=name,
+                    layer="source" if name == "sources_eligible_under_policy" else "correctness",
+                    passed=True,
+                    evidence={"source_graph_identity": source_graph_identity(proofs)}
+                    if name == "sources_eligible_under_policy"
+                    else {},
+                )
+                for name in sorted(PERSONAL_FORMAL_HARD_CHECKS)
+            ),
         )
         experiment.gate_report = report.model_dump(mode="json")
         experiment.gate_report_hash = report.report_hash()
